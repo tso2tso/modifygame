@@ -1,0 +1,32 @@
+# 构建产物
+.build/
+dist/
+
+# 引擎内部资源（只读，非用户代码）
+engine-docs/
+examples/
+templates/
+urhox-libs/
+schemas/
+lua-tools/
+.emmylua/
+
+# AI/编辑器配置
+.claude/
+.agent/
+.cli/
+prompts/
+
+# 项目运行时配置（引擎自动生成）
+.project/
+.tmp/
+
+# 元数据文件
+*.meta
+
+# 日志
+logs/
+
+# 系统文件
+.DS_Store
+Thumbs.db
