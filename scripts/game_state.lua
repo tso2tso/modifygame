@@ -40,6 +40,7 @@ function GameState.CreateNew()
         cash = BS.cash,
         gold = BS.gold,
         silver = 0,     -- 白银库存（副产品，每季可售卖）
+        gold_auto_sell = false,  -- 黄金自动出售开关（默认关闭，玩家手动在产业页出售）
 
         -- ============================
         -- 行动点
@@ -187,6 +188,12 @@ function GameState.CreateNew()
         -- ============================
         modifiers = {},
         -- 格式: { id, target, value, remaining_turns }
+
+        -- ============================
+        -- 被动效果（科技/事件累积）
+        -- ============================
+        passive_influence = 0,       -- 被动地区影响力增益/季（科技"印刷宣传"等）
+        regulation_pressure = 0,     -- 监管压力（事件/外交行为累积）
 
         -- ============================
         -- 全局状态标记

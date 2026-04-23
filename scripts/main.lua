@@ -67,6 +67,8 @@ function Start()
         onNewGame = HandleNewGame,
         onProcessEvent = HandleProcessEvent,
     })
+    -- EventModal 也需要 UI 根节点来显示弹窗
+    EventModal.SetRoot(UIManager.GetRoot())
 
     -- 5. 订阅事件
     SubscribeToEvent("Update", "HandleUpdate")
@@ -110,6 +112,7 @@ function HandleNewGame(newState)
         onNewGame = HandleNewGame,
         onProcessEvent = HandleProcessEvent,
     })
+    EventModal.SetRoot(UIManager.GetRoot())
     UIManager.BackToDashboard()
 
     -- 新游戏检查开局事件
@@ -152,7 +155,9 @@ end
 --- 结束回合（调用回合引擎）
 function HandleEndTurn()
     -- 防止事件弹窗期间重复点击
-    if EventModal.IsShowing() then return end
+    if EventModal.IsShowing() then
+        return
+    end
 
     -- 检查游戏结束
     if GameState.IsGameOver(state_) then

@@ -78,22 +78,24 @@ function Economy.Settle(state)
     end
 
     -- ============================
-    -- 2. 黄金出售（保留策略：保留 10 单位）
+    -- 2. 黄金出售（仅在玩家开启自动出售时执行；默认关闭，由玩家在产业页手动操作）
     -- ============================
-    local reserveGold = 10
-    local sellable = math.max(0, state.gold - reserveGold)
-    if sellable > 0 then
-        local price = BM.gold_price * inflation
-        -- 战时军需利润修正
-        local priceModifier = GameState.GetModifierValue(state, "military_industry_profit")
-        if priceModifier > 0 then
-            price = price * (1 + priceModifier * 0.5)
+    if state.gold_auto_sell then
+        local reserveGold = 10
+        local sellable = math.max(0, state.gold - reserveGold)
+        if sellable > 0 then
+            local price = BM.gold_price * inflation
+            -- 战时军需利润修正
+            local priceModifier = GameState.GetModifierValue(state, "military_industry_profit")
+            if priceModifier > 0 then
+                price = price * (1 + priceModifier * 0.5)
+            end
+            price = math.floor(price)
+            report.gold_sold = sellable
+            report.gold_income = sellable * price
+            state.gold = state.gold - sellable
+            state.cash = state.cash + report.gold_income
         end
-        price = math.floor(price)
-        report.gold_sold = sellable
-        report.gold_income = sellable * price
-        state.gold = state.gold - sellable
-        state.cash = state.cash + report.gold_income
     end
 
     -- ============================

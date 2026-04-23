@@ -22,6 +22,15 @@ local stateRef_ = nil
 local onStateChanged_ = nil
 ---@type table|nil 当前打开的交易弹窗
 local tradeModal_ = nil
+---@type string 当前激活的标签页
+local activeTab_ = "stocks"
+---@type table|nil UI 根节点引用
+local uiRoot_ = nil
+
+--- 设置 UI 根节点（Modal 必须 AddChild 到 UI 树才能渲染）
+function MarketPage.SetRoot(root)
+    uiRoot_ = root
+end
 
 -- ============================================================================
 -- 板块标签（中文）
@@ -48,19 +57,29 @@ function MarketPage._BuildContent(state)
     local era = Config.GetEraByYear(state.year)
     local accent = era.accent
 
-    local inflation = state.inflation_factor or 1.0
-    local goldPriceNow = math.floor(Balance.MINE.gold_price * inflation)
-    local silverPriceNow = math.floor(Balance.MINE.silver_price * inflation)
+    -- 标签页定义
+    local tabs = {
+        { id = "stocks", label = "股票" },
+        { id = "loans",  label = "贷款" },
+        { id = "goods",  label = "商品" },
+    }
 
-    -- 持仓信息
-    local portfolioVal, portfolioCost = StockEngine.PortfolioValue(state)
-    local pnl = portfolioVal - portfolioCost
-    local pnlColor = pnl >= 0 and C.accent_green or C.accent_red
+    -- 标签行
+    local tabWidgets = {}
+    for _, tab in ipairs(tabs) do
+        local isActive = (activeTab_ == tab.id)
+        table.insert(tabWidgets, MarketPage._TabUnderline(
+            tab.label, isActive, accent, tab.id))
+    end
 
-    -- 构建股票行
-    local stockRows = {}
-    for i, stock in ipairs(state.stocks or {}) do
-        table.insert(stockRows, MarketPage._StockRow(state, stock, i, accent))
+    -- 根据当前标签构建内容
+    local tabContent
+    if activeTab_ == "stocks" then
+        tabContent = MarketPage._StocksTabContent(state, accent)
+    elseif activeTab_ == "loans" then
+        tabContent = MarketPage._LoansTabContent(state, accent)
+    else
+        tabContent = MarketPage._GoodsTabContent(state, accent)
     end
 
     return UI.Panel {
@@ -69,21 +88,44 @@ function MarketPage._BuildContent(state)
         flexDirection = "column",
         gap = S.section_gap,
         children = {
-            -- 标签页
+            -- 标签栏
             UI.Panel {
                 width = "100%",
                 flexDirection = "row",
                 gap = 0,
                 borderBottomWidth = 1,
                 borderBottomColor = C.paper_mid,
-                children = {
-                    MarketPage._TabUnderline("股票", true, accent),
-                    MarketPage._TabUnderline("贷款", false, accent),
-                    MarketPage._TabUnderline("商品", false, accent),
-                },
+                children = tabWidgets,
             },
+            -- 当前标签内容
+            tabContent,
+        },
+    }
+end
 
-            -- 商品价格行：金价 + 银价 + 通胀
+-- ============================================================================
+-- 股票标签页内容
+-- ============================================================================
+function MarketPage._StocksTabContent(state, accent)
+    local inflation = state.inflation_factor or 1.0
+    local goldPriceNow = math.floor(Balance.MINE.gold_price * inflation)
+    local silverPriceNow = math.floor(Balance.MINE.silver_price * inflation)
+
+    local portfolioVal, portfolioCost = StockEngine.PortfolioValue(state)
+    local pnl = portfolioVal - portfolioCost
+    local pnlColor = pnl >= 0 and C.accent_green or C.accent_red
+
+    local stockRows = {}
+    for i, stock in ipairs(state.stocks or {}) do
+        table.insert(stockRows, MarketPage._StockRow(state, stock, i, accent))
+    end
+
+    return UI.Panel {
+        width = "100%",
+        flexDirection = "column",
+        gap = S.section_gap,
+        children = {
+            -- 商品价格行
             UI.Panel {
                 width = "100%",
                 paddingVertical = 10,
@@ -100,10 +142,8 @@ function MarketPage._BuildContent(state)
                         inflation > 1.3 and C.accent_red or C.text_primary),
                 },
             },
-
-            -- 持仓汇总卡
+            -- 持仓汇总
             MarketPage._PortfolioCard(state, portfolioVal, pnl, pnlColor, accent),
-
             -- 股票列表
             UI.Panel {
                 width = "100%",
@@ -114,9 +154,476 @@ function MarketPage._BuildContent(state)
                 borderColor = C.border_card,
                 children = stockRows,
             },
+        },
+    }
+end
 
-            -- 贷款入口 + 新建贷款按钮
-            MarketPage._LoanCard(state, accent),
+-- ============================================================================
+-- 贷款标签页内容
+-- ============================================================================
+function MarketPage._LoansTabContent(state, accent)
+    local children = {}
+
+    -- 贷款概览
+    state.loans = state.loans or {}
+    local totalDebt = 0
+    for _, loan in ipairs(state.loans) do
+        totalDebt = totalDebt + loan.principal
+    end
+
+    table.insert(children, UI.Panel {
+        width = "100%",
+        padding = S.card_padding,
+        backgroundColor = C.bg_surface,
+        borderRadius = S.radius_card,
+        flexDirection = "row",
+        justifyContent = "space-between",
+        alignItems = "center",
+        children = {
+            UI.Panel {
+                flexDirection = "column",
+                gap = 2,
+                children = {
+                    UI.Label {
+                        text = "贷款总览",
+                        fontSize = F.subtitle,
+                        fontWeight = "bold",
+                        fontColor = C.text_primary,
+                    },
+                    UI.Label {
+                        text = string.format("活跃贷款：%d / %d 笔",
+                            #state.loans, Balance.LOAN.max_active),
+                        fontSize = F.body_minor,
+                        fontColor = C.text_secondary,
+                    },
+                },
+            },
+            UI.Panel {
+                flexDirection = "column",
+                alignItems = "flex-end",
+                gap = 2,
+                children = {
+                    UI.Label {
+                        text = "总负债",
+                        fontSize = F.body_minor,
+                        fontColor = C.text_secondary,
+                    },
+                    UI.Label {
+                        text = Config.FormatNumber(totalDebt),
+                        fontSize = F.card_title,
+                        fontWeight = "bold",
+                        fontColor = totalDebt > 0 and C.accent_red or C.text_primary,
+                    },
+                },
+            },
+        },
+    })
+
+    -- 现有贷款列表
+    if #state.loans > 0 then
+        for i, loan in ipairs(state.loans) do
+            local remainingInterest = math.ceil(loan.principal * loan.interest * loan.remaining_turns)
+            table.insert(children, UI.Panel {
+                width = "100%",
+                padding = S.card_padding,
+                backgroundColor = C.paper_dark,
+                borderRadius = S.radius_card,
+                borderLeftWidth = 2,
+                borderLeftColor = C.accent_amber,
+                flexDirection = "column",
+                gap = 6,
+                children = {
+                    UI.Panel {
+                        width = "100%",
+                        flexDirection = "row",
+                        justifyContent = "space-between",
+                        alignItems = "center",
+                        children = {
+                            UI.Label {
+                                text = string.format("贷款 #%d", i),
+                                fontSize = F.subtitle,
+                                fontWeight = "bold",
+                                fontColor = C.text_primary,
+                            },
+                            UI.Panel {
+                                backgroundColor = C.accent_amber,
+                                borderRadius = S.radius_badge,
+                                paddingHorizontal = 6, paddingVertical = 2,
+                                children = {
+                                    UI.Label {
+                                        text = string.format("剩 %d 季", loan.remaining_turns),
+                                        fontSize = F.label,
+                                        fontColor = { 255, 255, 255, 255 },
+                                        pointerEvents = "none",
+                                    },
+                                },
+                            },
+                        },
+                    },
+                    UI.Panel {
+                        width = "100%",
+                        flexDirection = "row",
+                        justifyContent = "space-between",
+                        children = {
+                            MarketPage._LoanDetailCol("本金",
+                                Config.FormatNumber(loan.principal), C.text_primary),
+                            MarketPage._LoanDetailCol("季利率",
+                                string.format("%.1f%%", loan.interest * 100), C.accent_amber),
+                            MarketPage._LoanDetailCol("每季利息",
+                                Config.FormatNumber(math.ceil(loan.principal * loan.interest)),
+                                C.accent_red),
+                            MarketPage._LoanDetailCol("已付",
+                                Config.FormatNumber(loan.total_paid or 0), C.accent_green),
+                        },
+                    },
+                },
+            })
+        end
+    else
+        table.insert(children, UI.Panel {
+            width = "100%",
+            paddingVertical = 24,
+            justifyContent = "center", alignItems = "center",
+            children = {
+                UI.Label {
+                    text = "暂无活跃贷款",
+                    fontSize = F.body,
+                    fontColor = C.text_muted,
+                },
+            },
+        })
+    end
+
+    -- 申请新贷款
+    table.insert(children, UI.Panel {
+        width = "100%",
+        padding = S.card_padding,
+        backgroundColor = C.bg_surface,
+        borderRadius = S.radius_card,
+        flexDirection = "column",
+        gap = 8,
+        children = {
+            UI.Label {
+                text = "申请贷款",
+                fontSize = F.subtitle,
+                fontWeight = "bold",
+                fontColor = C.text_primary,
+            },
+            MarketPage._LoanOptionsGrid(state, accent),
+        },
+    })
+
+    return UI.Panel {
+        width = "100%",
+        flexDirection = "column",
+        gap = S.section_gap,
+        children = children,
+    }
+end
+
+--- 贷款详情列
+function MarketPage._LoanDetailCol(label, value, color)
+    return UI.Panel {
+        flexGrow = 1, flexBasis = 0,
+        alignItems = "center",
+        gap = 2,
+        children = {
+            UI.Label {
+                text = label,
+                fontSize = F.label,
+                fontColor = C.text_secondary,
+            },
+            UI.Label {
+                text = value,
+                fontSize = F.body,
+                fontWeight = "bold",
+                fontColor = color or C.text_primary,
+            },
+        },
+    }
+end
+
+--- 贷款选项网格
+function MarketPage._LoanOptionsGrid(state, accent)
+    local optionCards = {}
+    for _, opt in ipairs(Balance.LOAN.options) do
+        local canTake = (#(state.loans or {}) < Balance.LOAN.max_active)
+        table.insert(optionCards, UI.Panel {
+            flexGrow = 1, flexBasis = 0,
+            padding = 10,
+            backgroundColor = C.bg_elevated,
+            borderRadius = S.radius_card,
+            borderWidth = 1,
+            borderColor = canTake and accent or C.paper_mid,
+            flexDirection = "column",
+            alignItems = "center",
+            gap = 4,
+            pointerEvents = "auto",
+            opacity = canTake and 1.0 or 0.45,
+            onPointerUp = (function(option)
+                return function(self)
+                    MarketPage._OnTakeLoan(state, option)
+                end
+            end)(opt),
+            children = {
+                UI.Label {
+                    text = Config.FormatNumber(opt.amount),
+                    fontSize = F.card_title,
+                    fontWeight = "bold",
+                    fontColor = accent,
+                    pointerEvents = "none",
+                },
+                UI.Label {
+                    text = string.format("利率 %.0f%%", opt.interest * 100),
+                    fontSize = F.body_minor,
+                    fontColor = C.text_secondary,
+                    pointerEvents = "none",
+                },
+                UI.Label {
+                    text = string.format("%d 季", opt.duration),
+                    fontSize = F.label,
+                    fontColor = C.text_muted,
+                    pointerEvents = "none",
+                },
+            },
+        })
+    end
+
+    return UI.Panel {
+        width = "100%",
+        flexDirection = "row",
+        gap = 8,
+        children = optionCards,
+    }
+end
+
+-- ============================================================================
+-- 商品标签页内容
+-- ============================================================================
+function MarketPage._GoodsTabContent(state, accent)
+    local inflation = state.inflation_factor or 1.0
+    local goldPriceNow = math.floor(Balance.MINE.gold_price * inflation)
+    local silverPriceNow = math.floor(Balance.MINE.silver_price * inflation)
+
+    -- 库存信息
+    local goldStock = state.gold or 0
+    local silverStock = state.silver or 0
+    local goldValue = goldStock * goldPriceNow
+    local silverValue = silverStock * silverPriceNow
+
+    return UI.Panel {
+        width = "100%",
+        flexDirection = "column",
+        gap = S.section_gap,
+        children = {
+            -- 市场行情
+            UI.Panel {
+                width = "100%",
+                padding = S.card_padding,
+                backgroundColor = C.bg_surface,
+                borderRadius = S.radius_card,
+                flexDirection = "column",
+                gap = 8,
+                children = {
+                    UI.Label {
+                        text = "商品行情",
+                        fontSize = F.subtitle,
+                        fontWeight = "bold",
+                        fontColor = C.text_primary,
+                    },
+                    UI.Panel {
+                        width = "100%",
+                        flexDirection = "row",
+                        gap = 8,
+                        children = {
+                            MarketPage._GoodsPriceCard("🟡", "黄金",
+                                goldPriceNow .. " 克朗/单位",
+                                accent, inflation),
+                            MarketPage._GoodsPriceCard("⚪", "白银",
+                                silverPriceNow .. " 克朗/单位",
+                                C.paper_light, inflation),
+                        },
+                    },
+                    -- 通胀指标
+                    UI.Panel {
+                        width = "100%",
+                        paddingVertical = 8,
+                        paddingHorizontal = S.card_padding,
+                        backgroundColor = C.bg_elevated,
+                        borderRadius = S.radius_btn,
+                        flexDirection = "row",
+                        justifyContent = "space-between",
+                        alignItems = "center",
+                        children = {
+                            UI.Label {
+                                text = "📊 通胀系数",
+                                fontSize = F.body,
+                                fontColor = C.text_secondary,
+                            },
+                            UI.Label {
+                                text = string.format("×%.2f", inflation),
+                                fontSize = F.subtitle,
+                                fontWeight = "bold",
+                                fontColor = inflation > 1.3 and C.accent_red
+                                    or (inflation > 1.1 and C.accent_amber or C.accent_green),
+                            },
+                        },
+                    },
+                },
+            },
+
+            -- 库存
+            UI.Panel {
+                width = "100%",
+                padding = S.card_padding,
+                backgroundColor = C.paper_dark,
+                borderRadius = S.radius_card,
+                borderLeftWidth = 2,
+                borderLeftColor = accent,
+                flexDirection = "column",
+                gap = 8,
+                children = {
+                    UI.Label {
+                        text = "我的库存",
+                        fontSize = F.subtitle,
+                        fontWeight = "bold",
+                        fontColor = C.text_primary,
+                    },
+                    -- 黄金库存
+                    MarketPage._GoodsInventoryRow("🟡", "黄金库存",
+                        goldStock .. " 单位",
+                        "市值 " .. Config.FormatNumber(goldValue),
+                        accent),
+                    -- 白银库存
+                    MarketPage._GoodsInventoryRow("⚪", "白银库存",
+                        silverStock .. " 单位",
+                        "市值 " .. Config.FormatNumber(silverValue),
+                        C.paper_light),
+                    -- 总市值
+                    UI.Panel {
+                        width = "100%", height = 1,
+                        backgroundColor = C.paper_mid,
+                    },
+                    UI.Panel {
+                        width = "100%",
+                        flexDirection = "row",
+                        justifyContent = "space-between",
+                        alignItems = "center",
+                        children = {
+                            UI.Label {
+                                text = "商品总市值",
+                                fontSize = F.body,
+                                fontWeight = "bold",
+                                fontColor = C.text_primary,
+                            },
+                            UI.Label {
+                                text = Config.FormatNumber(goldValue + silverValue) .. " 克朗",
+                                fontSize = F.subtitle,
+                                fontWeight = "bold",
+                                fontColor = accent,
+                            },
+                        },
+                    },
+                },
+            },
+
+            -- 说明
+            UI.Panel {
+                width = "100%",
+                padding = S.card_padding,
+                backgroundColor = C.bg_surface,
+                borderRadius = S.radius_card,
+                flexDirection = "column",
+                gap = 4,
+                children = {
+                    UI.Label {
+                        text = "💡 自动交易说明",
+                        fontSize = F.body,
+                        fontWeight = "bold",
+                        fontColor = C.text_secondary,
+                    },
+                    UI.Label {
+                        text = "每季度结算时，系统自动以当前市价出售黄金（保留10单位战略储备）和全部白银。通胀率越高，售价越高，但同时也意味着工资和补给成本上涨。",
+                        fontSize = F.body_minor,
+                        fontColor = C.text_muted,
+                        whiteSpace = "normal",
+                        lineHeight = 1.5,
+                    },
+                    UI.Label {
+                        text = "战时通胀加速（+2.5%/季），和平时期通胀温和（+0.4%/季）。",
+                        fontSize = F.body_minor,
+                        fontColor = C.text_muted,
+                        whiteSpace = "normal",
+                        lineHeight = 1.5,
+                    },
+                },
+            },
+        },
+    }
+end
+
+--- 商品价格卡片
+function MarketPage._GoodsPriceCard(icon, name, priceText, color, inflation)
+    return UI.Panel {
+        flexGrow = 1, flexBasis = 0,
+        padding = 10,
+        backgroundColor = C.bg_elevated,
+        borderRadius = S.radius_card,
+        borderWidth = 1,
+        borderColor = C.border_card,
+        flexDirection = "column",
+        alignItems = "center",
+        gap = 4,
+        children = {
+            UI.Label { text = icon, fontSize = 24 },
+            UI.Label {
+                text = name,
+                fontSize = F.body,
+                fontWeight = "bold",
+                fontColor = C.text_primary,
+            },
+            UI.Label {
+                text = priceText,
+                fontSize = F.body_minor,
+                fontColor = color,
+            },
+        },
+    }
+end
+
+--- 库存行
+function MarketPage._GoodsInventoryRow(icon, label, qty, valueText, color)
+    return UI.Panel {
+        width = "100%",
+        flexDirection = "row",
+        alignItems = "center",
+        gap = 8,
+        paddingVertical = 4,
+        children = {
+            UI.Label { text = icon, fontSize = 18 },
+            UI.Panel {
+                flexGrow = 1,
+                flexDirection = "column",
+                gap = 1,
+                children = {
+                    UI.Label {
+                        text = label,
+                        fontSize = F.body,
+                        fontColor = C.text_primary,
+                    },
+                    UI.Label {
+                        text = valueText,
+                        fontSize = F.label,
+                        fontColor = C.text_muted,
+                    },
+                },
+            },
+            UI.Label {
+                text = qty,
+                fontSize = F.subtitle,
+                fontWeight = "bold",
+                fontColor = color,
+            },
         },
     }
 end
@@ -330,7 +837,7 @@ end
 -- ============================================================================
 -- 标签页下划线
 -- ============================================================================
-function MarketPage._TabUnderline(label, active, accent)
+function MarketPage._TabUnderline(label, active, accent, tabId)
     return UI.Panel {
         flexGrow = 1, flexBasis = 0,
         paddingVertical = 10,
@@ -338,6 +845,12 @@ function MarketPage._TabUnderline(label, active, accent)
         borderBottomWidth = active and 2 or 0,
         borderBottomColor = accent,
         pointerEvents = "auto",
+        onPointerUp = function(self)
+            if tabId and activeTab_ ~= tabId then
+                activeTab_ = tabId
+                if onStateChanged_ then onStateChanged_() end
+            end
+        end,
         children = {
             UI.Label {
                 text = label,
@@ -355,8 +868,7 @@ end
 -- ============================================================================
 function MarketPage._OpenTradeModal(state, stock, accent)
     if tradeModal_ then
-        tradeModal_:Close()
-        tradeModal_ = nil
+        tradeModal_:Close() -- onClose 回调负责 Destroy 和置 nil
     end
 
     -- 内部数量状态（闭包）
@@ -386,12 +898,15 @@ function MarketPage._OpenTradeModal(state, stock, accent)
     }
 
     tradeModal_ = UI.Modal {
-        isOpen = true,
         title = stock.name,
         size = "sm",
         closeOnOverlay = true,
         closeOnEscape = true,
         showCloseButton = true,
+        onClose = function(self)
+            tradeModal_ = nil
+            self:Destroy()
+        end,
     }
 
     local up = (stock.change_pct or 0) >= 0
@@ -479,6 +994,10 @@ function MarketPage._OpenTradeModal(state, stock, accent)
         },
     }
     tradeModal_:AddContent(content)
+    -- Modal 必须加入 UI 树才能渲染
+    if uiRoot_ then
+        uiRoot_:AddChild(tradeModal_)
+    end
     tradeModal_:Open()
 end
 
@@ -528,7 +1047,7 @@ function MarketPage._OnBuy(state, stockId, qty)
     if ok then
         GameState.AddLog(state, "[股市] " .. msg)
         UI.Toast.Show(msg, { variant = "success", duration = 1.5 })
-        if tradeModal_ then tradeModal_:Close(); tradeModal_ = nil end
+        if tradeModal_ then tradeModal_:Close() end -- onClose 回调负责 Destroy 和置 nil
         if onStateChanged_ then onStateChanged_() end
     else
         UI.Toast.Show(msg or "买入失败", { variant = "error", duration = 1.5 })
@@ -540,85 +1059,11 @@ function MarketPage._OnSell(state, stockId, qty)
     if ok then
         GameState.AddLog(state, "[股市] " .. msg)
         UI.Toast.Show(msg, { variant = "success", duration = 1.5 })
-        if tradeModal_ then tradeModal_:Close(); tradeModal_ = nil end
+        if tradeModal_ then tradeModal_:Close() end -- onClose 回调负责 Destroy 和置 nil
         if onStateChanged_ then onStateChanged_() end
     else
         UI.Toast.Show(msg or "卖出失败", { variant = "error", duration = 1.5 })
     end
-end
-
--- ============================================================================
--- 贷款卡
--- ============================================================================
-function MarketPage._LoanCard(state, accent)
-    state.loans = state.loans or {}
-    local loanRows = {
-        UI.Panel {
-            flexDirection = "row",
-            justifyContent = "space-between",
-            alignItems = "center",
-            children = {
-                UI.Label {
-                    text = "贷款",
-                    fontSize = F.subtitle,
-                    fontWeight = "bold",
-                    fontColor = C.text_primary,
-                },
-                UI.Label {
-                    text = string.format("当前 %d 笔", #state.loans),
-                    fontSize = F.body_minor,
-                    fontColor = C.text_muted,
-                },
-            },
-        },
-    }
-
-    if #state.loans > 0 then
-        for _, loan in ipairs(state.loans) do
-            table.insert(loanRows, UI.Label {
-                text = string.format("· 本金 %d  利率 %.1f%%  剩 %d 季",
-                    loan.principal,
-                    (loan.interest or 0) * 100,
-                    loan.remaining_turns or 0),
-                fontSize = F.body_minor,
-                fontColor = C.text_secondary,
-            })
-        end
-    else
-        table.insert(loanRows, UI.Label {
-            text = "暂无贷款",
-            fontSize = F.body_minor,
-            fontColor = C.text_muted,
-        })
-    end
-
-    -- 申请贷款按钮
-    local optionBtns = {}
-    for _, opt in ipairs(Balance.LOAN.options) do
-        table.insert(optionBtns, MarketPage._QtyBtn(
-            string.format("借 %d", opt.amount),
-            function()
-                MarketPage._OnTakeLoan(state, opt)
-            end))
-    end
-    table.insert(loanRows, UI.Panel {
-        flexDirection = "row",
-        gap = 6,
-        marginTop = 4,
-        children = optionBtns,
-    })
-
-    return UI.Panel {
-        width = "100%",
-        padding = S.card_padding,
-        backgroundColor = C.paper_dark,
-        borderRadius = S.radius_card,
-        borderLeftWidth = 2,
-        borderLeftColor = accent,
-        flexDirection = "column",
-        gap = 4,
-        children = loanRows,
-    }
 end
 
 function MarketPage._OnTakeLoan(state, opt)

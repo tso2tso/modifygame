@@ -121,10 +121,19 @@ function Dashboard._EventSection(state, era)
                         fontWeight = "bold",
                         fontColor = C.text_primary,
                     },
-                    count > 0 and UI.Label {
-                        text = "查看全部 ›",
-                        fontSize = F.body_minor,
-                        fontColor = era.accent,
+                    -- 事件数量指示（纯展示）
+                    count > 0 and UI.Panel {
+                        backgroundColor = era.accent,
+                        borderRadius = S.radius_badge,
+                        paddingHorizontal = 6, paddingVertical = 2,
+                        children = {
+                            UI.Label {
+                                text = "待处理",
+                                fontSize = F.label,
+                                fontColor = { 30, 25, 15, 255 },
+                                pointerEvents = "none",
+                            },
+                        },
                     } or UI.Panel { width = 0, height = 0 },
                 },
             },
@@ -452,7 +461,7 @@ function Dashboard._FocusCard(state, mine, era)
                 children = {
                     Dashboard._FocusActionBtn("调整生产", 1, function()
                         if callbacks_.onQuickAction then
-                            callbacks_.onQuickAction("personnel")
+                            callbacks_.onQuickAction("industry")
                         end
                     end),
                     Dashboard._FocusActionBtn("雇佣工人", 1, function()
@@ -460,7 +469,7 @@ function Dashboard._FocusCard(state, mine, era)
                     end),
                     Dashboard._FocusActionBtn("武装护卫", 1, function()
                         if callbacks_.onQuickAction then
-                            callbacks_.onQuickAction("personnel")
+                            callbacks_.onQuickAction("military")
                         end
                     end),
                     Dashboard._FocusActionBtn("升级设施", 2, function()

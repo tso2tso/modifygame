@@ -445,7 +445,51 @@ function IndustryPage._CreateActionCard(state)
             },
             IndustryPage._InfoRow("黄金库存", state.gold .. " 单位", C.accent_gold),
             IndustryPage._InfoRow("当前金价", goldPrice .. " /单位", C.text_primary),
-            IndustryPage._InfoRow("自动出售", "储量 >10 时自动售出", C.text_muted),
+            -- 自动出售开关
+            UI.Panel {
+                width = "100%",
+                flexDirection = "row",
+                justifyContent = "space-between",
+                alignItems = "center",
+                children = {
+                    UI.Panel {
+                        flexDirection = "column",
+                        gap = 1,
+                        children = {
+                            UI.Label {
+                                text = "自动出售",
+                                fontSize = F.body_minor,
+                                fontColor = C.text_secondary,
+                            },
+                            UI.Label {
+                                text = "每季结算时自动售出超过10单位的黄金",
+                                fontSize = 10,
+                                fontColor = C.text_muted,
+                            },
+                        },
+                    },
+                    UI.Button {
+                        text = state.gold_auto_sell and "已开启" or "已关闭",
+                        fontSize = F.label,
+                        fontWeight = "bold",
+                        fontColor = state.gold_auto_sell and C.accent_green or C.text_muted,
+                        backgroundColor = state.gold_auto_sell
+                            and { C.accent_green[1], C.accent_green[2], C.accent_green[3], 40 }
+                            or C.bg_elevated,
+                        borderRadius = S.radius_btn,
+                        borderWidth = 1,
+                        borderColor = state.gold_auto_sell and C.accent_green or C.border_card,
+                        paddingHorizontal = 10,
+                        paddingVertical = 4,
+                        onClick = function()
+                            if stateRef_ then
+                                stateRef_.gold_auto_sell = not stateRef_.gold_auto_sell
+                                if onStateChanged_ then onStateChanged_() end
+                            end
+                        end,
+                    },
+                },
+            },
             UI.Button {
                 id = "sellAllGold",
                 text = canSell and string.format("立即出售全部 (%d 单位 → 💰%d)",

@@ -94,6 +94,9 @@ function UIManager.Create(state, callbacks)
     }
 
     UI.SetRoot(uiRoot_)
+    -- 将 UI 根节点传递给弹窗模块，Modal 必须 AddChild 到 UI 树才能渲染
+    ActionModals.SetRoot(uiRoot_)
+    MarketPage.SetRoot(uiRoot_)
     UIManager._ShowView("dashboard")
 end
 
@@ -163,6 +166,9 @@ function UIManager._CreatePageContent(tabId, state)
     local callbacks = {
         onStateChanged = function()
             UIManager.RefreshAll(stateRef_)
+        end,
+        onSwitchTab = function(targetTabId)
+            UIManager.SwitchTab(targetTabId)
         end,
     }
 
@@ -302,6 +308,15 @@ end
 -- ============================================================================
 
 function UIManager._OnQuickAction(actionId)
+    -- 直接导航型（焦点卡片按钮等，不在 QUICK_ACTIONS 中）
+    if actionId == "industry" then
+        UIManager.SwitchTab("industry")
+        return
+    elseif actionId == "military" then
+        UIManager.SwitchTab("military")
+        return
+    end
+
     local action = nil
     for _, a in ipairs(Config.QUICK_ACTIONS) do
         if a.id == actionId then
@@ -318,7 +333,7 @@ function UIManager._OnQuickAction(actionId)
         UIManager.RefreshAll(stateRef_)
     end)
 
-    -- 纯导航型（旧的两个，跳转到对应 Tab）
+    -- 纯导航型（快速操作中的两个）
     if actionId == "personnel" then
         UIManager.SwitchTab("family")
         return

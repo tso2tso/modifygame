@@ -16,6 +16,13 @@ local EventModal = {}
 local modal_ = nil
 ---@type function|nil 选择回调 (optionIndex)
 local onChoose_ = nil
+---@type table|nil UI 根节点引用
+local uiRoot_ = nil
+
+--- 设置 UI 根节点（Modal 必须 AddChild 到 UI 树才能渲染）
+function EventModal.SetRoot(root)
+    uiRoot_ = root
+end
 
 --- 显示事件弹窗
 ---@param event table 事件数据
@@ -84,7 +91,6 @@ function EventModal.Show(event, onChoose)
 
     -- 创建弹窗
     modal_ = UI.Modal {
-        isOpen = true,
         title = (event.icon or "") .. " " .. event.title,
         size = "md",
         closeOnOverlay = false,
@@ -127,6 +133,10 @@ function EventModal.Show(event, onChoose)
     }
     modal_:AddContent(contentPanel)
 
+    -- Modal 必须加入 UI 树才能渲染
+    if uiRoot_ then
+        uiRoot_:AddChild(modal_)
+    end
     -- 打开
     modal_:Open()
 end
@@ -198,6 +208,7 @@ end
 function EventModal._OnChoose(optionIndex)
     if modal_ then
         modal_:Close()
+        modal_:Destroy()
         modal_ = nil
     end
     if onChoose_ then
@@ -209,6 +220,7 @@ end
 function EventModal.Close()
     if modal_ then
         modal_:Close()
+        modal_:Destroy()
         modal_ = nil
     end
 end

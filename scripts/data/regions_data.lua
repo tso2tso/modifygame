@@ -28,6 +28,7 @@ function RegionsData.CreateInitialRegions()
             culture     = 0,     -- 文化价值
             -- 控制状态
             control     = 80,    -- 玩家控制度 0-100
+            influence   = 0,     -- 地区影响力（科技/事件累积）
             ai_presence = {      -- AI 势力存在
                 local_clan = 15,
                 foreign_capital = 5,
@@ -51,6 +52,7 @@ function RegionsData.CreateInitialRegions()
             policy      = "neutral",
             culture     = 5,
             control     = 20,
+            influence   = 0,     -- 地区影响力
             ai_presence = {
                 local_clan = 30,
                 foreign_capital = 25,
@@ -74,6 +76,7 @@ function RegionsData.CreateInitialRegions()
             policy      = "regulated",
             culture     = 20,
             control     = 5,
+            influence   = 0,     -- 地区影响力
             ai_presence = {
                 local_clan = 20,
                 foreign_capital = 35,

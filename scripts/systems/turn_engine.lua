@@ -297,8 +297,8 @@ function TurnEngine.FormatReportSummary(report)
         table.insert(lines, string.format("贷款利息 %d", report.loan_interest))
     end
     if report.tech_completed then
-        local Tech = require("data.tech_data")
-        local t = Tech.GetById(report.tech_completed)
+        local TechData = require("data.tech_data")
+        local t = TechData.GetById(report.tech_completed)
         if t then table.insert(lines, "✓ 科技完成：" .. t.name) end
     end
 

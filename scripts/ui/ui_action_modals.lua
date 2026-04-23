@@ -21,6 +21,8 @@ local ActionModals = {}
 local currentModal_ = nil
 local onStateChanged_ = nil
 local stateRef_ = nil
+---@type table|nil UI 根节点引用
+local uiRoot_ = nil
 
 --- 设置回调
 function ActionModals.SetCallbacks(state, onChanged)
@@ -28,10 +30,15 @@ function ActionModals.SetCallbacks(state, onChanged)
     onStateChanged_ = onChanged
 end
 
+--- 设置 UI 根节点（Modal 必须 AddChild 到 UI 树才能渲染）
+function ActionModals.SetRoot(root)
+    uiRoot_ = root
+end
+
 local function closeModal()
     if currentModal_ then
         currentModal_:Close()
-        currentModal_ = nil
+        -- onClose 回调负责 Destroy 和置 nil
     end
 end
 
@@ -584,12 +591,15 @@ end
 -- ============================================================================
 function ActionModals._ShowList(title, rows)
     currentModal_ = UI.Modal {
-        isOpen = true,
         title = title,
         size = "md",
         closeOnOverlay = true,
         closeOnEscape = true,
         showCloseButton = true,
+        onClose = function(self)
+            currentModal_ = nil
+            self:Destroy()
+        end,
     }
     local content = UI.Panel {
         width = "100%",
@@ -598,6 +608,10 @@ function ActionModals._ShowList(title, rows)
         children = rows,
     }
     currentModal_:AddContent(content)
+    -- Modal 必须加入 UI 树才能渲染
+    if uiRoot_ then
+        uiRoot_:AddChild(currentModal_)
+    end
     currentModal_:Open()
 end
 
