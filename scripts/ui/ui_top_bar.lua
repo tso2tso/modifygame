@@ -8,6 +8,8 @@
 local UI = require("urhox-libs/UI")
 local Config = require("config")
 local RegionsData = require("data.regions_data")
+local Balance = require("data.balance")
+local GameState = require("game_state")
 
 local C = Config.COLORS
 local S = Config.SIZE
@@ -17,6 +19,10 @@ local TopBar = {}
 
 ---@type function|nil
 local onSettings_ = nil
+---@type function|nil 状态变化回调（AP 购买后通知 UIManager 重建）
+local onStateChanged_ = nil
+---@type table 游戏状态引用（用于 + 按钮）
+local stateRef_ = nil
 
 -- ============================================================================
 -- 公开接口
@@ -28,6 +34,28 @@ local onSettings_ = nil
 ---@return table widget
 function TopBar.Create(state, callbacks)
     onSettings_ = callbacks and callbacks.onSettings
+    onStateChanged_ = callbacks and callbacks.onStateChanged
+    stateRef_ = state
+
+    local era = Config.GetEraByYear(state.year)
+    -- 顶栏底线颜色 = era_accent 的 30% 透明（对应 HTML 中 --era-border 的视觉层级）
+    local borderBottom = { era.accent[1], era.accent[2], era.accent[3], 80 }
+
+    local children = {
+        TopBar._CreateInfoRow(state, era),
+        TopBar._CreateAPRow(state, era),
+    }
+
+    -- 战争时代（2/4/6章）叠加红色斜纹
+    if era.war_stripe then
+        table.insert(children, 1, UI.Panel {
+            id = "warStripe",
+            position = "absolute",
+            top = 0, left = 0, right = 0, bottom = 0,
+            backgroundColor = { 139, 0, 0, 20 },  -- 8% 暗红
+            pointerEvents = "none",
+        })
+    end
 
     return UI.Panel {
         id = "topBarRoot",
@@ -35,11 +63,8 @@ function TopBar.Create(state, callbacks)
         flexDirection = "column",
         backgroundColor = C.bg_base,
         borderBottomWidth = 1,
-        borderBottomColor = { C.paper_light[1], C.paper_light[2], C.paper_light[3], 128 },
-        children = {
-            TopBar._CreateInfoRow(state),
-            TopBar._CreateAPRow(state),
-        },
+        borderBottomColor = borderBottom,
+        children = children,
     }
 end
 
@@ -49,7 +74,8 @@ end
 -- 中部：4组资源 💰现金 🟡黄金(吨) ⛏产能 ⭐声望
 -- 右侧：⚙ 设置
 -- ============================================================================
-function TopBar._CreateInfoRow(state)
+function TopBar._CreateInfoRow(state, era)
+    era = era or Config.GetEraByYear(state.year)
     -- 设计图格式："1904年 Q{n} {季}季"
     local yearText = string.format("%d年 Q%d %s季",
         state.year, state.quarter, Config.QUARTER_NAMES[state.quarter])
@@ -79,6 +105,7 @@ function TopBar._CreateInfoRow(state)
         paddingHorizontal = S.page_padding,
         children = {
             -- 年份 + 季节（§4.1 左侧：时间信息区，22px 大字 + 12px 副文字）
+            -- 接入时代 accent：年份文字使用 era.accent 传达年代感
             UI.Panel {
                 flexDirection = "column",
                 flexShrink = 0,
@@ -88,13 +115,20 @@ function TopBar._CreateInfoRow(state)
                         text = yearText,
                         fontSize = F.page_title,
                         fontWeight = "bold",
-                        fontColor = C.text_primary,
+                        fontColor = era.accent,
                     },
                     UI.Label {
                         id = "dateLabel",
                         text = dateText,
                         fontSize = F.body_minor,
                         fontColor = C.text_secondary,
+                    },
+                    -- 时代标签（小字，显示当前章节名）
+                    UI.Label {
+                        id = "eraLabel",
+                        text = era.label,
+                        fontSize = 9,
+                        fontColor = { era.accent[1], era.accent[2], era.accent[3], 180 },
                     },
                 },
             },
@@ -105,7 +139,7 @@ function TopBar._CreateInfoRow(state)
             -- §4.1 中部核心资源4格（图标+数字+标签，竖线分隔）
             -- 💰现金 / 🟡黄金(吨) / ⛏产能 / ⭐声望
             TopBar._ResourceCell("cashCell", "💰",
-                Config.FormatNumber(state.cash), C.accent_gold, "现金"),
+                Config.FormatNumber(state.cash), era.accent, "现金"),
             TopBar._VerticalDivider(),
             TopBar._ResourceCell("goldCell", "🟡",
                 tostring(state.gold), C.text_primary, "黄金(吨)"),
@@ -198,21 +232,25 @@ end
 --   左侧 "AP" 标签 + "4 / 6" 大字 + ●●●●○○ 圆点 + [+] 按钮
 --   右侧 "安全等级" + 🛡低/中/高 胶囊
 -- ============================================================================
-function TopBar._CreateAPRow(state)
+function TopBar._CreateAPRow(state, era)
+    era = era or Config.GetEraByYear(state.year)
     local apCurrent = state.ap.current
     local apMax = state.ap.max
 
-    -- AP 圆点（§4.2 已用实心 ● accent_gold，未用空心 ○ paper_light）
+    -- AP 圆点：实心=剩余可用（era_accent），空心=已用
+    -- 对应 HTML 中的 --era-accent 接入点之一
     local dots = {}
     for i = 1, apMax do
         local isFilled = (i <= apCurrent)
+        -- 空心描边：era_accent 35% 透明
+        local emptyBorder = { era.accent[1], era.accent[2], era.accent[3], 89 }
         table.insert(dots, UI.Panel {
             width = S.ap_dot_size,
             height = S.ap_dot_size,
             borderRadius = S.ap_dot_size / 2,
-            backgroundColor = isFilled and C.ap_filled or { 0, 0, 0, 0 },
+            backgroundColor = isFilled and era.accent or { 0, 0, 0, 0 },
             borderWidth = isFilled and 0 or 1,
-            borderColor = C.ap_empty,
+            borderColor = emptyBorder,
         })
     end
 
@@ -246,13 +284,13 @@ function TopBar._CreateAPRow(state)
         paddingHorizontal = S.page_padding,
         backgroundColor = C.bg_surface,
         children = {
-            -- 设计图左侧：AP 圆形标签 + 数字
+            -- 设计图左侧：AP 圆形标签 + 数字（接入 era_accent）
             UI.Panel {
                 width = 32, height = 32,
                 borderRadius = 16,
                 backgroundColor = C.paper_dark,
                 borderWidth = 1,
-                borderColor = C.accent_gold,
+                borderColor = era.accent,
                 justifyContent = "center",
                 alignItems = "center",
                 marginRight = 6,
@@ -261,7 +299,7 @@ function TopBar._CreateAPRow(state)
                         text = "AP",
                         fontSize = F.label,
                         fontWeight = "bold",
-                        fontColor = C.accent_gold,
+                        fontColor = era.accent,
                         textAlign = "center",
                         pointerEvents = "none",
                     },
@@ -299,26 +337,27 @@ function TopBar._CreateAPRow(state)
                 children = dots,
             },
 
-            -- [+] 按钮（§4.2 获取额外AP，32x32，圆角4px，accent_gold边框）
+            -- [+] 按钮（§4.2 获取额外AP，32x32，圆角4px，era_accent 边框）
+            -- 功能：消耗 Balance.AP_PURCHASE.cost_per_ap 现金 +1 temp AP，本季最多 max_per_season 次
             UI.Panel {
                 width = 32, height = 32,
                 borderRadius = S.radius_btn,
                 backgroundColor = C.paper_dark,
                 borderWidth = 1,
-                borderColor = C.accent_gold,
+                borderColor = era.accent,
                 justifyContent = "center",
                 alignItems = "center",
                 marginHorizontal = S.spacing_sm,
                 pointerEvents = "auto",
                 onPointerUp = function(self)
-                    UI.Toast.Show("额外AP功能开发中", { variant = "info", duration = 1.0 })
+                    TopBar._OnBuyAP()
                 end,
                 children = {
                     UI.Label {
                         text = "+",
                         fontSize = F.subtitle,
                         fontWeight = "bold",
-                        fontColor = C.accent_gold,
+                        fontColor = era.accent,
                         textAlign = "center",
                         pointerEvents = "none",
                     },
@@ -364,10 +403,13 @@ end
 -- 刷新
 -- ============================================================================
 function TopBar.Refresh(root, state)
+    local era = Config.GetEraByYear(state.year)
+
     local yearLabel = root:FindById("yearLabel")
     if yearLabel then
         yearLabel:SetText(string.format("%d年 Q%d %s季",
             state.year, state.quarter, Config.QUARTER_NAMES[state.quarter]))
+        if yearLabel.SetFontColor then yearLabel:SetFontColor(era.accent) end
     end
 
     local dateLabel = root:FindById("dateLabel")
@@ -375,8 +417,20 @@ function TopBar.Refresh(root, state)
         dateLabel:SetText(Config.QUARTER_DATES[state.quarter] or "")
     end
 
+    -- 时代标签刷新（跨章切换时自动更新）
+    local eraLabel = root:FindById("eraLabel")
+    if eraLabel then
+        eraLabel:SetText(era.label)
+        if eraLabel.SetFontColor then
+            eraLabel:SetFontColor({ era.accent[1], era.accent[2], era.accent[3], 180 })
+        end
+    end
+
     local cashVal = root:FindById("cashCell_val")
-    if cashVal then cashVal:SetText(Config.FormatNumber(state.cash)) end
+    if cashVal then
+        cashVal:SetText(Config.FormatNumber(state.cash))
+        if cashVal.SetFontColor then cashVal:SetFontColor(era.accent) end
+    end
 
     local goldVal = root:FindById("goldCell_val")
     if goldVal then goldVal:SetText(tostring(state.gold)) end
@@ -399,8 +453,34 @@ function TopBar.Refresh(root, state)
 
     local apLabel = root:FindById("apCountLabel")
     if apLabel then
-        apLabel:SetText(string.format("%d / %d", state.ap.current, state.ap.max))
+        local totalAvail = state.ap.current + (state.ap.temp or 0)
+        apLabel:SetText(string.format("%d / %d", totalAvail, state.ap.max))
     end
+end
+
+-- ============================================================================
+-- AP 购买处理
+-- ============================================================================
+function TopBar._OnBuyAP()
+    if not stateRef_ then return end
+    local cfg = Balance.AP_PURCHASE
+    local used = stateRef_.ap.bonus_used or 0
+    if used >= cfg.max_per_season then
+        UI.Toast.Show("本季已达最大购买次数（" .. cfg.max_per_season .. "）",
+            { variant = "warning", duration = 1.5 })
+        return
+    end
+    if stateRef_.cash < cfg.cost_per_ap then
+        UI.Toast.Show("资金不足（需要 " .. cfg.cost_per_ap .. " 克朗）",
+            { variant = "error", duration = 1.5 })
+        return
+    end
+    stateRef_.cash = stateRef_.cash - cfg.cost_per_ap
+    stateRef_.ap.temp = (stateRef_.ap.temp or 0) + 1
+    stateRef_.ap.bonus_used = used + 1
+    GameState.AddLog(stateRef_, string.format("购买 1 AP（花费 %d）", cfg.cost_per_ap))
+    UI.Toast.Show("+1 AP", { variant = "success", duration = 1.2 })
+    if onStateChanged_ then onStateChanged_() end
 end
 
 return TopBar

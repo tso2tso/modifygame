@@ -6,6 +6,9 @@ local Balance = require("data.balance")
 local GameState = require("game_state")
 local Economy = require("systems.economy")
 local Events = require("systems.events")
+local StockEngine = require("systems.stock_engine")
+local Combat = require("systems.combat")
+local Tech = require("systems.tech")
 
 local BV = Balance.VICTORY
 
@@ -32,10 +35,70 @@ function TurnEngine.EndTurn(state)
     }
 
     -- ========================================
+    -- 阶段 0: 通胀推进（影响本季价格）
+    -- ========================================
+    local infl = Balance.INFLATION
+    local drift = state.flags.at_war and infl.quarter_drift_war or infl.quarter_drift_peace
+    state.inflation_factor = math.min(infl.cap_factor,
+        (state.inflation_factor or 1.0) + drift)
+
+    -- ========================================
     -- 阶段 1: 经济结算
     -- ========================================
     state.phase = "settlement"
     report.economy = Economy.Settle(state)
+
+    -- ========================================
+    -- 阶段 1.5: 股市 GBM 更新（每季一次）
+    -- ========================================
+    StockEngine.UpdateAll(state)
+
+    -- ========================================
+    -- 阶段 1.6: 贷款利息结算 & 到期还本
+    -- ========================================
+    report.loan_interest = 0
+    report.loan_defaulted = false
+    if state.loans and #state.loans > 0 then
+        local kept = {}
+        for _, loan in ipairs(state.loans) do
+            local interest = math.ceil(loan.principal * loan.interest)
+            report.loan_interest = report.loan_interest + interest
+            if state.cash >= interest then
+                state.cash = state.cash - interest
+                loan.total_paid = (loan.total_paid or 0) + interest
+            else
+                -- 违约：本金按违约率膨胀
+                loan.principal = math.floor(loan.principal * (1 + Balance.LOAN.default_penalty))
+                report.loan_defaulted = true
+                GameState.AddLog(state, string.format("贷款违约！利息 %d 付不出，本金膨胀至 %d",
+                    interest, loan.principal))
+            end
+            loan.remaining_turns = loan.remaining_turns - 1
+            if loan.remaining_turns <= 0 then
+                -- 到期还本
+                if state.cash >= loan.principal then
+                    state.cash = state.cash - loan.principal
+                    GameState.AddLog(state, string.format("贷款 %d 到期清偿", loan.principal))
+                else
+                    -- 还不上：本金部分清偿 + 剩余继续展期（延长 4 季，本金 + 违约金）
+                    local pay = state.cash
+                    state.cash = 0
+                    loan.principal = math.floor((loan.principal - pay) * (1 + Balance.LOAN.default_penalty))
+                    loan.remaining_turns = 4
+                    table.insert(kept, loan)
+                    GameState.AddLog(state, string.format("贷款展期：欠款 %d", loan.principal))
+                end
+            else
+                table.insert(kept, loan)
+            end
+        end
+        state.loans = kept
+    end
+
+    -- ========================================
+    -- 阶段 1.7: 科技研发推进
+    -- ========================================
+    Tech.Tick(state, report)
 
     if report.economy.bankrupt then
         table.insert(report.warnings, "家族财政陷入困境！")
@@ -117,13 +180,26 @@ function TurnEngine.EndTurn(state)
     for _, faction in ipairs(state.ai_factions) do
         local aiConfig = Balance.AI[faction.type]
         if aiConfig then
-            -- 资产增长
-            local growth = math.floor(faction.cash * aiConfig.growth_rate)
+            -- 基础资产增长率 + 情报渗透 debuff
+            local rate = aiConfig.growth_rate + (faction.growth_mod or 0)
+            if faction.growth_mod_remaining and faction.growth_mod_remaining > 0 then
+                faction.growth_mod_remaining = faction.growth_mod_remaining - 1
+                if faction.growth_mod_remaining <= 0 then
+                    faction.growth_mod = 0
+                end
+            end
+            local growth = math.floor(faction.cash * math.max(0, rate))
             faction.cash = faction.cash + growth
 
             -- 势力缓慢增长
             if faction.power < 80 then
                 faction.power = math.min(100, faction.power + 1)
+            end
+
+            -- 协议保护期内 AI 不主动敌对
+            if faction.pact_remaining and faction.pact_remaining > 0 then
+                faction.pact_remaining = faction.pact_remaining - 1
+                if faction.attitude < 10 then faction.attitude = 10 end
             end
 
             -- 战时外资撤退
@@ -142,6 +218,14 @@ function TurnEngine.EndTurn(state)
                 faction.attitude = math.max(-100, faction.attitude - 2)
             end
         end
+    end
+
+    -- ========================================
+    -- 阶段 6.5: AI 可能主动进攻（战斗系统）
+    -- ========================================
+    local combatResults = Combat.ResolveAIActions(state)
+    for _, msg in ipairs(combatResults) do
+        table.insert(report.ai_changes, msg)
     end
 
     -- ========================================
@@ -184,9 +268,9 @@ function TurnEngine.EndTurn(state)
 
     -- 日志
     local logText = string.format(
-        "采金:%d 售金:%d 收入:%d 支出:%d 净利:%d 现金:%d",
+        "采金:%d 产银:%d 收入:%d 支出:%d 净利:%d 现金:%d",
         report.economy.gold_mined,
-        report.economy.gold_sold,
+        report.economy.silver_mined,
         report.economy.total_income,
         report.economy.total_expense,
         report.economy.net,
@@ -204,11 +288,19 @@ function TurnEngine.FormatReportSummary(report)
 
     -- 经济
     local eco = report.economy
-    table.insert(lines, string.format("采金 %d | 售出 %d | 收入 %d",
-        eco.gold_mined, eco.gold_sold, eco.gold_income))
+    table.insert(lines, string.format("采金 %d | 产银 %d | 收入 %d",
+        eco.gold_mined, eco.silver_mined, eco.total_income))
     table.insert(lines, string.format("支出 %d (工资%d+军费%d+补给%d+税%d)",
         eco.total_expense, eco.worker_expense, eco.military_expense,
         eco.supply_expense, eco.tax))
+    if report.loan_interest and report.loan_interest > 0 then
+        table.insert(lines, string.format("贷款利息 %d", report.loan_interest))
+    end
+    if report.tech_completed then
+        local Tech = require("data.tech_data")
+        local t = Tech.GetById(report.tech_completed)
+        if t then table.insert(lines, "✓ 科技完成：" .. t.name) end
+    end
 
     -- 胜利
     if report.victory_delta.economic > 0 or report.victory_delta.military > 0 then

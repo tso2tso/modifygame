@@ -5,6 +5,8 @@
 local GameState = require("game_state")
 local EventsData = require("data.events_data")
 local Balance = require("data.balance")
+local StockEngine = require("systems.stock_engine")
+local EventMarketEffects = require("data.event_market_effects")
 
 local Events = {}
 
@@ -192,6 +194,23 @@ function Events.ApplyOption(state, event, optionIndex)
     -- 8. 事件附加 AP 奖励
     if event.bonus_ap then
         state.ap.temp = state.ap.temp + event.bonus_ap
+    end
+
+    -- 8.5 事件 → 股价：注入 delta_mu（GBM 第三层联动）
+    local mktEffects = EventMarketEffects.Get(event.id)
+    if mktEffects then
+        for _, mod in ipairs(mktEffects) do
+            StockEngine.ApplyEventModifier(state,
+                mod.stock_id, mod.delta_mu, mod.duration, event.id)
+        end
+    end
+    -- 选项本身携带 stock_effects 时也注入
+    if option.stock_effects then
+        for _, mod in ipairs(option.stock_effects) do
+            StockEngine.ApplyEventModifier(state,
+                mod.stock_id, mod.delta_mu, mod.duration,
+                event.id .. "_opt" .. optionIndex)
+        end
     end
 
     -- 9. 标记事件已触发

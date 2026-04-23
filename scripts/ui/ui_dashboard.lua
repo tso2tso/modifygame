@@ -36,20 +36,21 @@ end
 
 --- 构建全部内容
 function Dashboard._BuildContent(state)
+    local era = Config.GetEraByYear(state.year)
     local children = {}
 
     -- §4.3 事件流
-    table.insert(children, Dashboard._EventSection(state))
+    table.insert(children, Dashboard._EventSection(state, era))
     -- §4.4 焦点卡片
     if #state.mines > 0 then
-        table.insert(children, Dashboard._FocusCard(state, state.mines[1]))
+        table.insert(children, Dashboard._FocusCard(state, state.mines[1], era))
     end
     -- §4.5 快速操作
-    table.insert(children, Dashboard._QuickActions(state))
+    table.insert(children, Dashboard._QuickActions(state, era))
     -- §4.6 本季概览
     table.insert(children, Dashboard._SeasonOverview(state))
     -- 结束回合
-    table.insert(children, Dashboard._EndTurnButton(state))
+    table.insert(children, Dashboard._EndTurnButton(state, era))
 
     return UI.Panel {
         id = "dashboardContent",
@@ -65,7 +66,8 @@ end
 -- 容器：bg_surface 背景，内边距 16px
 -- 标题行：左"当前事件（N）" + 右"查看全部 ›"
 -- ============================================================================
-function Dashboard._EventSection(state)
+function Dashboard._EventSection(state, era)
+    era = era or Config.GetEraByYear(state.year)
     local pendingEvents = state.event_queue or {}
     local count = #pendingEvents
 
@@ -78,7 +80,7 @@ function Dashboard._EventSection(state)
                 backgroundColor = C.paper_mid,
             })
         end
-        table.insert(eventCards, Dashboard._EventCard(evt, i))
+        table.insert(eventCards, Dashboard._EventCard(evt, i, era))
     end
 
     -- 空状态
@@ -122,7 +124,7 @@ function Dashboard._EventSection(state)
                     count > 0 and UI.Label {
                         text = "查看全部 ›",
                         fontSize = F.body_minor,
-                        fontColor = C.accent_gold,
+                        fontColor = era.accent,
                     } or UI.Panel { width = 0, height = 0 },
                 },
             },
@@ -137,10 +139,11 @@ function Dashboard._EventSection(state)
 end
 
 --- §4.3 单个事件卡片
---- 紧急事件：左侧 3px solid accent_red 竖向边框线
+--- 紧急事件：左侧 3px solid era_accent 竖向边框线（主线事件与时代同色）
 --- 优先级徽章：!主线 红色实底白字 / 支线 paper_mid 底
---- 处理按钮：72x32，paper_dark 背景，paper_light 边框
-function Dashboard._EventCard(evt, index)
+--- 处理按钮：72x32，paper_dark 背景，era_accent 边框
+function Dashboard._EventCard(evt, index, era)
+    local accent = (era and era.accent) or C.accent_gold
     local isMain = (evt.priority == "main")
 
     -- 优先级徽章
@@ -191,9 +194,10 @@ function Dashboard._EventCard(evt, index)
         flexDirection = "row",
         alignItems = "flex-start",
         gap = S.card_gap,
-        -- §4.3 紧急事件：左侧 3px solid accent_red 竖向边框线
+        -- §4.3 紧急事件：左侧 3px 时代 accent 竖向边框线
+        -- （HTML 参考中主线事件使用 --era-accent 而非固定红）
         borderLeftWidth = isMain and 3 or 0,
-        borderLeftColor = isMain and C.accent_red or nil,
+        borderLeftColor = isMain and accent or nil,
         paddingLeft = isMain and 8 or 0,
         children = {
             -- 左侧：图片区 64x64（sepia 图片占位）
@@ -236,9 +240,10 @@ function Dashboard._EventCard(evt, index)
                             },
                         },
                     },
-                    -- 描述（2行 ellipsis）
+                    -- 描述（2行 ellipsis） — 使用渲染层 maxLines 裁剪，
+                    -- 避免 string.sub 按字节切割中文 UTF-8 造成乱码
                     UI.Label {
-                        text = string.sub(evt.desc or "", 1, 60) .. "...",
+                        text = evt.desc or "",
                         fontSize = F.body_minor,
                         fontColor = C.text_secondary,
                         whiteSpace = "normal",
@@ -249,12 +254,12 @@ function Dashboard._EventCard(evt, index)
                     deadlineWidget or UI.Panel { width = 0, height = 0 },
                 },
             },
-            -- 右侧：处理按钮（§4.3 72x32）
+            -- 右侧：处理按钮（§4.3 72x32）— 边框与文字使用 era_accent
             UI.Panel {
                 width = 72, height = S.btn_small_height,
                 backgroundColor = C.paper_dark,
                 borderRadius = S.radius_btn,
-                borderWidth = 1, borderColor = C.paper_light,
+                borderWidth = 1, borderColor = accent,
                 justifyContent = "center", alignItems = "center",
                 flexShrink = 0,
                 pointerEvents = "auto",
@@ -267,7 +272,7 @@ function Dashboard._EventCard(evt, index)
                     UI.Label {
                         text = "处理",
                         fontSize = F.body,
-                        fontColor = C.text_primary,
+                        fontColor = accent,
                         pointerEvents = "none",
                     },
                 },
@@ -284,7 +289,9 @@ end
 -- 次要指标行：4格横排 + 小图标前缀
 -- 操作按钮组：4个等宽，高度40px
 -- ============================================================================
-function Dashboard._FocusCard(state, mine)
+function Dashboard._FocusCard(state, mine, era)
+    era = era or Config.GetEraByYear(state.year)
+    local accent = era.accent
     local region = GameState.GetRegion(state, mine.region_id)
     local goldReserve = region and region.resources.gold_reserve or 0
     local security = region and region.security or 0
@@ -387,7 +394,7 @@ function Dashboard._FocusCard(state, mine)
                                 gap = 8,
                                 children = {
                                     Dashboard._KPICell("产量(本季)",
-                                        output .. " 吨", nil, C.text_primary),
+                                        output .. " 单位", nil, accent),
                                     Dashboard._KPICell("产能利用率",
                                         utilization .. "%", nil, utilColor, utilization),
                                 },
@@ -424,7 +431,7 @@ function Dashboard._FocusCard(state, mine)
                     Dashboard._MiniStat("💎", "品质",
                         mine.level >= 3 and "高" or (mine.level >= 2 and "中" or "低")),
                     Dashboard._MiniStat("💰", "开采成本",
-                        Balance.MINE.gold_price .. "/吨"),
+                        Balance.MINE.gold_price .. "/单位"),
                     Dashboard._MiniStatBadge("安全等级", secText, secColor),
                 },
             },
@@ -641,7 +648,8 @@ end
 -- 图标28px线性 + 功能名12px + AP消耗11px text_secondary
 -- 2AP：右上角红色小圆角标签
 -- ============================================================================
-function Dashboard._QuickActions(state)
+function Dashboard._QuickActions(state, era)
+    era = era or Config.GetEraByYear(state.year)
     local rows = {}
     for rowStart = 1, #Config.QUICK_ACTIONS, 3 do
         local rowItems = {}
@@ -649,7 +657,8 @@ function Dashboard._QuickActions(state)
             local idx = rowStart + col
             local action = Config.QUICK_ACTIONS[idx]
             if action then
-                local canAfford = state.ap.current >= action.ap_cost
+                local totalAP = state.ap.current + (state.ap.temp or 0)
+                local canAfford = totalAP >= action.ap_cost
                 local isExpensive = action.ap_cost >= 2
                 table.insert(rowItems, UI.Panel {
                     flexGrow = 1, flexBasis = 0,
@@ -852,9 +861,11 @@ function Dashboard._OverviewDivider()
 end
 
 -- ============================================================================
--- 结束回合按钮
+-- 结束回合按钮 — 最醒目的时代色填充按钮
 -- ============================================================================
-function Dashboard._EndTurnButton(state)
+function Dashboard._EndTurnButton(state, era)
+    era = era or Config.GetEraByYear(state.year)
+    local accent = era.accent
     return UI.Panel {
         id = "endTurnArea",
         width = "100%",
@@ -864,7 +875,7 @@ function Dashboard._EndTurnButton(state)
                 id = "endTurnBtn",
                 width = "100%",
                 height = 44,
-                backgroundColor = C.accent_gold,
+                backgroundColor = accent,
                 borderRadius = S.radius_card,
                 justifyContent = "center", alignItems = "center",
                 pointerEvents = "auto",

@@ -17,6 +17,9 @@ local Economy = {}
 ---@field gold_mined number 本季采金量
 ---@field gold_sold number 本季售出黄金
 ---@field gold_income number 黄金销售收入
+---@field silver_mined number 本季产银量
+---@field silver_sold number 本季售出白银
+---@field silver_income number 白银销售收入
 ---@field worker_expense number 工人工资
 ---@field military_expense number 军事开支
 ---@field supply_expense number 补给开支
@@ -34,6 +37,9 @@ function Economy.Settle(state)
         gold_mined = 0,
         gold_sold = 0,
         gold_income = 0,
+        silver_mined = 0,
+        silver_sold = 0,
+        silver_income = 0,
         worker_expense = 0,
         military_expense = 0,
         supply_expense = 0,
@@ -44,8 +50,11 @@ function Economy.Settle(state)
         bankrupt = false,
     }
 
+    -- 通胀乘数（影响出售价）
+    local inflation = state.inflation_factor or 1.0
+
     -- ============================
-    -- 1. 矿山产出
+    -- 1. 矿山产出（金 + 银）
     -- ============================
     for _, mine in ipairs(state.mines) do
         if mine.active then
@@ -58,6 +67,13 @@ function Economy.Settle(state)
                 state.gold = state.gold + output
                 report.gold_mined = report.gold_mined + output
             end
+            -- 白银副产物：按矿山等级产出（不占 gold_reserve）
+            local silverOut = math.floor(BM.base_silver_output
+                * (1 + (mine.level - 1) * BM.level_output_bonus))
+            if silverOut > 0 then
+                state.silver = (state.silver or 0) + silverOut
+                report.silver_mined = report.silver_mined + silverOut
+            end
         end
     end
 
@@ -67,12 +83,13 @@ function Economy.Settle(state)
     local reserveGold = 10
     local sellable = math.max(0, state.gold - reserveGold)
     if sellable > 0 then
-        local price = BM.gold_price
-        -- 战时修正
+        local price = BM.gold_price * inflation
+        -- 战时军需利润修正
         local priceModifier = GameState.GetModifierValue(state, "military_industry_profit")
         if priceModifier > 0 then
-            price = math.floor(price * (1 + priceModifier * 0.5))
+            price = price * (1 + priceModifier * 0.5)
         end
+        price = math.floor(price)
         report.gold_sold = sellable
         report.gold_income = sellable * price
         state.gold = state.gold - sellable
@@ -80,11 +97,31 @@ function Economy.Settle(state)
     end
 
     -- ============================
-    -- 3. 工资支出
+    -- 2.5 白银出售（保留 0，全量出售）
     -- ============================
-    report.worker_expense = state.workers.hired * state.workers.wage
-    report.military_expense = state.military.guards * state.military.wage
-    report.supply_expense = state.military.guards * BMI.supply_per_guard * BMI.supply_cost
+    local silverStock = state.silver or 0
+    if silverStock > 0 then
+        local silverPrice = math.floor(BM.silver_price * inflation)
+        report.silver_sold = silverStock
+        report.silver_income = silverStock * silverPrice
+        state.silver = 0
+        state.cash = state.cash + report.silver_income
+    end
+
+    -- ============================
+    -- 3. 工资支出（通胀作用于所有人力成本）
+    -- ============================
+    report.worker_expense = math.floor(state.workers.hired * state.workers.wage * inflation)
+    report.military_expense = math.floor(state.military.guards * state.military.wage * inflation)
+    report.supply_expense = math.floor(state.military.guards * BMI.supply_per_guard
+        * BMI.supply_cost * inflation)
+
+    -- 被动地区影响力增益（科技"印刷宣传"等）
+    if state.passive_influence and state.passive_influence ~= 0 then
+        for _, r in ipairs(state.regions) do
+            r.influence = (r.influence or 0) + state.passive_influence
+        end
+    end
 
     -- ============================
     -- 4. 税收
@@ -101,8 +138,8 @@ function Economy.Settle(state)
     -- ============================
     -- 5. 汇总并扣款
     -- ============================
-    -- 注意：gold_income 已在步骤 2 中加到 state.cash，此处只减支出
-    report.total_income = report.gold_income
+    -- 注意：gold_income / silver_income 已在步骤 2-2.5 加到 state.cash，此处只减支出
+    report.total_income = report.gold_income + report.silver_income
     report.total_expense = report.worker_expense + report.military_expense
         + report.supply_expense + report.tax
     report.net = report.total_income - report.total_expense
@@ -160,16 +197,21 @@ end
 ---@param state table
 ---@return number income, number expense
 function Economy.GetEstimate(state)
+    local inflation = state.inflation_factor or 1.0
     local income = 0
     for _, mine in ipairs(state.mines) do
         if mine.active then
-            income = income + Economy._CalcMineOutput(state, mine) * BM.gold_price
+            local goldOut = Economy._CalcMineOutput(state, mine)
+            income = income + math.floor(goldOut * BM.gold_price * inflation)
+            local silverOut = math.floor(BM.base_silver_output
+                * (1 + (mine.level - 1) * BM.level_output_bonus))
+            income = income + math.floor(silverOut * BM.silver_price * inflation)
         end
     end
 
-    local expense = state.workers.hired * state.workers.wage
-        + state.military.guards * state.military.wage
-        + state.military.guards * BMI.supply_per_guard * BMI.supply_cost
+    local expense = math.floor(state.workers.hired * state.workers.wage * inflation)
+        + math.floor(state.military.guards * state.military.wage * inflation)
+        + math.floor(state.military.guards * BMI.supply_per_guard * BMI.supply_cost * inflation)
 
     return income, expense
 end

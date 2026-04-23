@@ -14,6 +14,7 @@ local MarketPage = require("ui.ui_market")
 local MilitaryPage = require("ui.ui_military")
 local WorldPage = require("ui.ui_world")
 local MenuPage = require("ui.ui_menu")
+local ActionModals = require("ui.ui_action_modals")
 
 local C = Config.COLORS
 local F = Config.FONT
@@ -78,6 +79,9 @@ function UIManager.Create(state, callbacks)
             TopBar.Create(state, {
                 onSettings = function()
                     UIManager._OpenSettings()
+                end,
+                onStateChanged = function()
+                    UIManager.RefreshAll(stateRef_)
                 end,
             }),
 
@@ -186,6 +190,7 @@ end
 
 function UIManager._CreateBottomNav()
     local tabButtons = {}
+    local eraAccent = Config.GetEraAccent(stateRef_)
 
     for _, tab in ipairs(Config.TABS) do
         local isActive = (tab.id == activeView_)
@@ -198,9 +203,9 @@ function UIManager._CreateBottomNav()
             alignItems = "center",
             gap = 3,
             pointerEvents = "auto",
-            -- §4.7：选中 Tab 顶部 2px accent_gold 指示线 + 微妙背景高亮
+            -- §4.7：选中 Tab 顶部 2px era_accent 指示线 + 微妙背景高亮
             borderTopWidth = isActive and 2 or 0,
-            borderTopColor = C.accent_gold,
+            borderTopColor = eraAccent,
             backgroundColor = isActive and C.bg_elevated or nil,
             onPointerUp = (function(tabId)
                 return function(self)
@@ -212,7 +217,7 @@ function UIManager._CreateBottomNav()
                     id = "tabIcon_" .. tab.id,
                     text = tab.icon,
                     fontSize = S.icon_size,
-                    fontColor = isActive and C.tab_active or C.tab_inactive,
+                    fontColor = isActive and eraAccent or C.tab_inactive,
                     textAlign = "center",
                     pointerEvents = "none",
                 },
@@ -220,7 +225,7 @@ function UIManager._CreateBottomNav()
                     id = "tabLabel_" .. tab.id,
                     text = tab.label,
                     fontSize = F.label,
-                    fontColor = isActive and C.tab_active or C.tab_inactive,
+                    fontColor = isActive and eraAccent or C.tab_inactive,
                     textAlign = "center",
                     pointerEvents = "none",
                 },
@@ -266,6 +271,7 @@ function UIManager._ShowView(viewId)
     end
 
     -- 更新 Tab 高亮样式（§4.7 指示线 + 背景 + 图标/文字颜色）
+    local eraAccent = Config.GetEraAccent(stateRef_)
     if uiRoot_ then
         for _, tab in ipairs(Config.TABS) do
             local isActive = (tab.id == viewId)
@@ -273,17 +279,17 @@ function UIManager._ShowView(viewId)
             if tabPanel then
                 tabPanel:SetStyle({
                     borderTopWidth = isActive and 2 or 0,
-                    borderTopColor = C.accent_gold,
+                    borderTopColor = eraAccent,
                     backgroundColor = isActive and C.bg_elevated or C.bg_base,
                 })
             end
             local tabIcon = uiRoot_:FindById("tabIcon_" .. tab.id)
             if tabIcon then
-                tabIcon:SetFontColor(isActive and C.tab_active or C.tab_inactive)
+                tabIcon:SetFontColor(isActive and eraAccent or C.tab_inactive)
             end
             local tabLabel = uiRoot_:FindById("tabLabel_" .. tab.id)
             if tabLabel then
-                tabLabel:SetFontColor(isActive and C.tab_active or C.tab_inactive)
+                tabLabel:SetFontColor(isActive and eraAccent or C.tab_inactive)
             end
         end
     end
@@ -305,29 +311,33 @@ function UIManager._OnQuickAction(actionId)
     end
     if not action then return end
 
-    if stateRef_.ap.current < action.ap_cost then
-        UI.Toast.Show("行动点不足（需要 " .. action.ap_cost .. " AP）",
-            { variant = "error", duration = 1.5 })
+    local accent = Config.GetEraAccent(stateRef_)
+
+    -- 注册回调
+    ActionModals.SetCallbacks(stateRef_, function()
+        UIManager.RefreshAll(stateRef_)
+    end)
+
+    -- 纯导航型（旧的两个，跳转到对应 Tab）
+    if actionId == "personnel" then
+        UIManager.SwitchTab("family")
+        return
+    elseif actionId == "finance" then
+        UIManager.SwitchTab("market")
         return
     end
 
-    local targetTab = {
-        personnel = "family",
-        finance = "market",
-        technology = "industry",
-        intelligence = "world",
-        diplomacy = "world",
-        trade = "market",
-    }
-
-    local tab = targetTab[actionId]
-    if tab then
-        UIManager.SwitchTab(tab)
-        UI.Toast.Show(action.icon .. " " .. action.label,
-            { variant = "info", duration = 1.0 })
+    -- 功能型弹窗（不扣 AP，由具体操作扣）
+    if actionId == "technology" then
+        ActionModals.ShowTechnology(stateRef_, accent)
+    elseif actionId == "intelligence" then
+        ActionModals.ShowIntelligence(stateRef_, accent)
+    elseif actionId == "diplomacy" then
+        ActionModals.ShowDiplomacy(stateRef_, accent)
+    elseif actionId == "trade" then
+        ActionModals.ShowTrade(stateRef_, accent)
     else
-        UI.Toast.Show(action.label .. " 功能开发中...",
-            { variant = "info", duration = 1.5 })
+        UI.Toast.Show(action.label .. " 暂未开放", { variant = "info", duration = 1.2 })
     end
 end
 
@@ -356,7 +366,7 @@ function UIManager._OpenSettings()
         size = S.drawer_width_pct .. "%",
         backgroundColor = C.bg_elevated,
         borderLeftWidth = 1,
-        borderLeftColor = C.accent_gold,
+        borderLeftColor = Config.GetEraAccent(stateRef_),
         borderTopLeftRadius = S.radius_drawer,
         borderBottomLeftRadius = S.radius_drawer,
         title = "⚙️ 设置与存档",

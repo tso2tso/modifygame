@@ -8,7 +8,102 @@ local Config = {}
 
 -- 游戏信息
 Config.TITLE = "百年萨拉热窝：黄金家族"
-Config.VERSION = "0.2.0"
+Config.VERSION = "0.3.0"
+
+-- ============================================================================
+-- 7 章时代主题（对应 docs/sarajevo-hybrid-ui.html 的 era tokens）
+-- 设计原则：只覆盖 era_accent / era_border / era_overlay / era_label
+--           底色系统 bg_* / paper_* / text_* 全程不变
+-- ============================================================================
+Config.ERAS = {
+    {
+        id = 1, start_year = 1904, end_year = 1913,
+        label  = "第一章 铜版帝国",
+        accent = { 200, 169, 110, 255 },  -- #C8A96E 旧金
+        border = { 139,  69,  19, 255 },  -- #8B4513 赭石
+        overlay = { 200, 169, 110, 20 },  -- 8% 金色微光
+        war_stripe = false,
+        glitch = false,
+    },
+    {
+        id = 2, start_year = 1914, end_year = 1918,
+        label  = "第二章 战报红章",
+        accent = { 204,  51,   0, 255 },  -- #CC3300 警报红
+        border = { 139,   0,   0, 255 },  -- #8B0000 暗红
+        overlay = { 139,   0,   0, 46 },  -- 18% 暗红
+        war_stripe = true,
+        glitch = false,
+    },
+    {
+        id = 3, start_year = 1919, end_year = 1940,
+        label  = "第三章 黑金工业",
+        accent = { 212, 175,  55, 255 },  -- #D4AF37 纯金
+        border = {  74, 124,  89, 255 },  -- #4A7C59 钢绿
+        overlay = {  28,  35,  49, 77 },  -- 30% 深蓝钢
+        war_stripe = false,
+        glitch = false,
+    },
+    {
+        id = 4, start_year = 1941, end_year = 1945,
+        label  = "第四章 战时灰幕",
+        accent = { 139,   0,   0, 255 },  -- #8B0000 危机红
+        border = {  74,  74,  74, 255 },  -- #4A4A4A 铅灰
+        overlay = {  45,  45,  45, 102 }, -- 40% 战灰
+        war_stripe = true,
+        glitch = false,
+    },
+    {
+        id = 5, start_year = 1946, end_year = 1991,
+        label  = "第五章 制度蓝红",
+        accent = {  46, 125,  50, 255 },  -- #2E7D32 计划绿
+        border = {  27,  58, 107, 255 },  -- #1B3A6B 政治蓝
+        overlay = {  27,  58, 107, 64 },  -- 25% 政治蓝
+        war_stripe = false,
+        glitch = false,
+    },
+    {
+        id = 6, start_year = 1992, end_year = 1995,
+        label  = "第六章 围城信号",
+        accent = { 255, 102,   0, 255 },  -- #FF6600 火光橙
+        border = {  61,  61,  61, 255 },  -- #3D3D3D 烟灰
+        overlay = { 255, 102,   0, 26 },  -- 10% 橙色微光
+        war_stripe = true,
+        glitch = true,                    -- 信号抖动效果
+    },
+    {
+        id = 7, start_year = 1996, end_year = 2014,
+        label  = "第七章 玻璃金融",
+        accent = {   0, 137, 123, 255 },  -- #00897B 科技青
+        border = {  28,  53,  87, 255 },  -- #1C3557 深海蓝
+        overlay = {  28,  53,  87, 51 },  -- 20% 深海蓝
+        war_stripe = false,
+        glitch = false,
+    },
+}
+
+--- 根据年份获取对应时代定义
+---@param year number
+---@return table era
+function Config.GetEraByYear(year)
+    for _, era in ipairs(Config.ERAS) do
+        if year >= era.start_year and year <= era.end_year then
+            return era
+        end
+    end
+    -- 越界兜底：取最近一章
+    if year < Config.ERAS[1].start_year then return Config.ERAS[1] end
+    return Config.ERAS[#Config.ERAS]
+end
+
+--- 获取当前时代的 accent 色（常用快捷）
+---@param state table
+---@return table rgba
+function Config.GetEraAccent(state)
+    if not state or not state.year then
+        return { 201, 168, 76, 255 }  -- 默认金色
+    end
+    return Config.GetEraByYear(state.year).accent
+end
 
 -- ============================================================================
 -- 色彩系统（sarajevo_dynasty_ui_spec §2）
@@ -189,7 +284,7 @@ Config.QUARTER_DATES = {
 Config.BALANCE = {
     start_year     = 1904,
     start_quarter  = 1,
-    end_year       = 1918,
+    end_year       = 2014,
     end_quarter    = 4,
     base_ap        = 6,
     max_ap_bonus   = 4,
@@ -216,12 +311,13 @@ Config.TABS = {
 -- ============================================================================
 -- 快速操作定义（§4.5 — 6 项，3列×2行）
 -- ============================================================================
+-- ap_cost 为"典型"消耗（仅展示用；不同操作实际消耗见 data/balance.lua）
 Config.QUICK_ACTIONS = {
-    { id = "personnel",   label = "人事管理", icon = "👥", ap_cost = 1 },
-    { id = "finance",     label = "金融操作", icon = "📈", ap_cost = 1 },
-    { id = "technology",  label = "科技研发", icon = "🔬", ap_cost = 1 },
+    { id = "personnel",   label = "人事管理", icon = "👥", ap_cost = 0 },
+    { id = "finance",     label = "金融操作", icon = "📈", ap_cost = 0 },
+    { id = "technology",  label = "科技研发", icon = "🔬", ap_cost = 2 },
     { id = "intelligence",label = "情报行动", icon = "👁️", ap_cost = 1 },
-    { id = "diplomacy",   label = "政治外交", icon = "🤝", ap_cost = 2 },
+    { id = "diplomacy",   label = "政治外交", icon = "🤝", ap_cost = 1 },
     { id = "trade",       label = "资产交易", icon = "🏭", ap_cost = 2 },
 }
 

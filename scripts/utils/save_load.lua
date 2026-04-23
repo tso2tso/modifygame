@@ -22,7 +22,7 @@ function SaveLoad.Save(state, slotName)
 
     -- 构造存档数据（排除不需要持久化的运行时数据）
     local saveData = {
-        version = "0.1.0",
+        version = "0.3.0",
         timestamp = os.time(),
         state = SaveLoad._SerializeState(state),
     }
@@ -74,8 +74,8 @@ function SaveLoad.Load(slotName)
     end
 
     -- 版本检查（未来可做迁移）
-    if saveData.version ~= "0.1.0" then
-        print("[SaveLoad] 存档版本不匹配: " .. tostring(saveData.version))
+    if saveData.version ~= "0.3.0" then
+        print("[SaveLoad] 存档版本：" .. tostring(saveData.version) .. "（已自动兼容 0.3.0）")
     end
 
     local state = SaveLoad._DeserializeState(saveData.state)
@@ -148,7 +148,14 @@ function SaveLoad._SerializeState(state)
     data.quarter = state.quarter
     data.cash = state.cash
     data.gold = state.gold
-    data.ap = { current = state.ap.current, max = state.ap.max }
+    data.silver = state.silver or 0
+    data.inflation_factor = state.inflation_factor or 1.0
+    data.ap = {
+        current = state.ap.current,
+        max = state.ap.max,
+        temp = state.ap.temp or 0,
+        bonus_used = state.ap.bonus_used or 0,
+    }
     data.victory = {
         economic = state.victory.economic,
         military = state.victory.military,
@@ -203,11 +210,41 @@ function SaveLoad._SerializeState(state)
     for _, mine in ipairs(state.mines) do
         table.insert(data.mines, {
             id = mine.id,
+            name = mine.name,
             region_id = mine.region_id,
             level = mine.level,
             output_bonus = mine.output_bonus,
+            active = mine.active,
         })
     end
+
+    -- 股市（含历史与 event_mu_mods）
+    data.stocks = {}
+    for _, s in ipairs(state.stocks or {}) do
+        table.insert(data.stocks, {
+            id = s.id,
+            name = s.name,
+            price = s.price,
+            prev_price = s.prev_price,
+            change_pct = s.change_pct,
+            mu = s.mu,
+            sigma = s.sigma,
+            sector = s.sector,
+            rating = s.rating,
+            history = s.history,
+            event_mu_mods = s.event_mu_mods,
+        })
+    end
+    data.portfolio = state.portfolio or { holdings = {} }
+
+    -- 贷款
+    data.loans = state.loans or {}
+
+    -- 科技
+    data.tech = state.tech or { researched = {}, in_progress = nil, bonus_points = 0 }
+
+    -- 被动加成（印刷宣传等）
+    data.passive_influence = state.passive_influence or 0
 
     -- 工人/军事
     data.workers = {
@@ -255,6 +292,8 @@ end
 function SaveLoad._DeserializeState(data)
     -- 纯数据表，直接返回（加上默认值保护）
     data.ap = data.ap or { current = 6, max = 6 }
+    data.ap.temp = data.ap.temp or 0
+    data.ap.bonus_used = data.ap.bonus_used or 0
     data.victory = data.victory or { economic = 0, military = 0 }
     data.family = data.family or { members = {} }
     data.regions = data.regions or {}
@@ -272,6 +311,37 @@ function SaveLoad._DeserializeState(data)
     data.event_queue = data.event_queue or {}
     data.phase = data.phase or "action"
     data.turn_count = data.turn_count or 0
+
+    -- 新字段兼容旧存档：若不存在则从 Balance 重建
+    data.silver = data.silver or 0
+    data.inflation_factor = data.inflation_factor or 1.0
+    data.loans = data.loans or {}
+    data.tech = data.tech or { researched = {}, in_progress = nil, bonus_points = 0 }
+    data.tech.researched = data.tech.researched or {}
+    data.portfolio = data.portfolio or { holdings = {} }
+    data.portfolio.holdings = data.portfolio.holdings or {}
+    data.passive_influence = data.passive_influence or 0
+
+    if not data.stocks or #data.stocks == 0 then
+        local Balance = require("data.balance")
+        data.stocks = {}
+        for _, s in ipairs(Balance.STOCKS) do
+            local inst = {}
+            for k, v in pairs(s) do inst[k] = v end
+            inst.prev_price = inst.price
+            inst.change_pct = 0
+            inst.history = { inst.price }
+            inst.event_mu_mods = {}
+            table.insert(data.stocks, inst)
+        end
+    else
+        for _, s in ipairs(data.stocks) do
+            s.history = s.history or { s.price }
+            s.event_mu_mods = s.event_mu_mods or {}
+            s.change_pct = s.change_pct or 0
+        end
+    end
+
     return data
 end
 

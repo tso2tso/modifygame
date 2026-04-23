@@ -67,6 +67,9 @@ function IndustryPage._CreateEstimateCard(state)
     local estIncome, estExpense = Economy.GetEstimate(state)
     local estNet = estIncome - estExpense
     local netColor = estNet >= 0 and C.accent_green or C.accent_red
+    local inflation = state.inflation_factor or 1.0
+    local inflColor = inflation > 1.3 and C.accent_red
+        or (inflation > 1.1 and C.accent_amber or C.text_primary)
 
     return UI.Panel {
         id = "estimateCard",
@@ -96,6 +99,21 @@ function IndustryPage._CreateEstimateCard(state)
                     IndustryPage._EstimateItem("预估支出", "-" .. estExpense, C.accent_red),
                     IndustryPage._EstimateItem("净利润",
                         (estNet >= 0 and "+" or "") .. estNet, netColor),
+                },
+            },
+            -- 副指标：白银库存 + 通胀倍率
+            UI.Panel {
+                width = "100%",
+                flexDirection = "row",
+                justifyContent = "space-between",
+                children = {
+                    IndustryPage._EstimateItem("⚪ 白银库存",
+                        tostring(state.silver or 0) .. " 单位", C.paper_light),
+                    IndustryPage._EstimateItem("📊 通胀倍率",
+                        string.format("×%.2f", inflation), inflColor),
+                    IndustryPage._EstimateItem("💸 贷款数",
+                        tostring(#(state.loans or {})),
+                        (#(state.loans or {}) > 0) and C.accent_amber or C.text_primary),
                 },
             },
         },

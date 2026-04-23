@@ -1,0 +1,998 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>萨拉热窝王朝 · 混合UI方案</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=Noto+Serif+SC:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  /* === 版本2 固定底色系统（基础层） === */
+  --bg-base:        #1A1814;
+  --bg-surface:     #242018;
+  --bg-elevated:    #2E2920;
+  --paper-dark:     #3D3426;
+  --paper-mid:      #4A3E2E;
+  --paper-light:    #C8B89A;
+  --paper-cream:    #E8D9C0;
+
+  --text-primary:   #F0E6D0;
+  --text-secondary: #A89880;
+  --text-muted:     #6B5E4E;
+
+  /* === 时代 accent 变量（版本1局部接入，仅此处替换） === */
+  --accent-gold:    #C9A84C;
+  --accent-red:     #C0392B;
+  --accent-amber:   #D4810A;
+  --accent-green:   #4A7C59;
+  --accent-blue:    #3A6B8A;
+
+  /* 时代演变 Tokens —— 只替换这5个变量即可切换时代感 */
+  --era-accent:     #C9A84C;   /* 时代主强调色 */
+  --era-border:     #C9A84C;   /* 顶栏/边框装饰色 */
+  --era-top-overlay: transparent; /* 顶栏叠加色 */
+  --era-texture:    "grain";   /* 纹理类型（CSS class控制） */
+  --era-font-deco:  "serif";   /* 装饰字体风格 */
+
+  --font-display: 'Playfair Display', serif;
+  --font-body: 'Noto Serif SC', serif;
+
+  --space-1: 0.25rem; --space-2: 0.5rem; --space-3: 0.75rem;
+  --space-4: 1rem; --space-6: 1.5rem; --space-8: 2rem;
+  --radius-sm: 4px; --radius-md: 6px; --radius-lg: 8px;
+  --transition: 180ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* ==============================
+   7套时代主题（局部覆盖 era-* 变量）
+   只影响：顶栏 / 卡片边框 / AP圆点 / 底导选中色 / 边框装饰
+   底色系统 --bg-* --paper-* 保持版本2不变
+   ============================== */
+
+[data-era="1"] {
+  --era-accent: #C8A96E;
+  --era-border: #8B4513;
+  --era-top-overlay: rgba(200,169,110,0.08);
+  --era-label: "第一章 铜版帝国 · 1904–1913";
+}
+[data-era="2"] {
+  --era-accent: #CC3300;
+  --era-border: #8B0000;
+  --era-top-overlay: rgba(139,0,0,0.18);
+  --era-label: "第二章 战报红章 · 1914–1918";
+}
+[data-era="3"] {
+  --era-accent: #D4AF37;
+  --era-border: #4A7C59;
+  --era-top-overlay: rgba(28,35,49,0.30);
+  --era-label: "第三章 黑金工业 · 1919–1940";
+}
+[data-era="4"] {
+  --era-accent: #8B0000;
+  --era-border: #4A4A4A;
+  --era-top-overlay: rgba(45,45,45,0.40);
+  --era-label: "第四章 战时灰幕 · 1941–1945";
+}
+[data-era="5"] {
+  --era-accent: #2E7D32;
+  --era-border: #1B3A6B;
+  --era-top-overlay: rgba(27,58,107,0.25);
+  --era-label: "第五章 制度蓝红 · 1946–1991";
+}
+[data-era="6"] {
+  --era-accent: #FF6600;
+  --era-border: #3D3D3D;
+  --era-top-overlay: rgba(255,102,0,0.10);
+  --era-label: "第六章 围城信号 · 1992–1995";
+}
+[data-era="7"] {
+  --era-accent: #00897B;
+  --era-border: #1C3557;
+  --era-top-overlay: rgba(28,53,87,0.20);
+  --era-label: "第七章 玻璃金融 · 1996–2014";
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { -webkit-font-smoothing: antialiased; }
+body {
+  font-family: var(--font-body);
+  background: var(--bg-base);
+  color: var(--text-primary);
+  min-height: 100vh;
+  padding: var(--space-6) var(--space-4);
+  max-width: 520px;
+  margin: 0 auto;
+}
+
+/* ===== 标题区 ===== */
+.doc-title {
+  font-family: var(--font-display);
+  font-size: 1.4rem;
+  color: var(--era-accent);
+  margin-bottom: var(--space-2);
+  letter-spacing: 0.02em;
+  transition: color 0.6s ease;
+}
+.doc-subtitle {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-bottom: var(--space-8);
+  letter-spacing: 0.05em;
+}
+
+/* ===== 时代选择器 ===== */
+.era-selector {
+  background: var(--bg-surface);
+  border: 1px solid rgba(200,184,154,0.2);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+  margin-bottom: var(--space-6);
+}
+.era-selector-label {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-bottom: var(--space-3);
+}
+.era-buttons {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.era-btn {
+  flex: 1;
+  min-width: 36px;
+  height: 36px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(200,184,154,0.2);
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font-family: var(--font-display);
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  display: flex; align-items: center; justify-content: center;
+}
+.era-btn.active, .era-btn:hover {
+  border-color: var(--era-accent);
+  color: var(--era-accent);
+  background: color-mix(in oklch, var(--era-accent) 10%, var(--bg-elevated));
+}
+.era-badge {
+  font-size: 0.7rem;
+  color: var(--era-accent);
+  margin-top: var(--space-2);
+  transition: color 0.6s ease;
+  font-family: var(--font-display);
+}
+
+/* ===== 手机模拟器容器 ===== */
+.phone-wrap {
+  background: #0d0c0a;
+  border-radius: 32px;
+  padding: 12px;
+  border: 1px solid rgba(200,184,154,0.15);
+  box-shadow: 0 24px 64px rgba(0,0,0,0.6);
+  margin-bottom: var(--space-8);
+}
+.phone-screen {
+  border-radius: 22px;
+  overflow: hidden;
+  background: var(--bg-base);
+  position: relative;
+}
+
+/* ===== ① 顶栏（时代accent接入点1） ===== */
+.top-bar {
+  height: 72px;
+  background: var(--bg-base);
+  border-bottom: 1px solid color-mix(in oklch, var(--era-accent) 30%, transparent);
+  padding: 0 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  position: relative;
+  transition: border-color 0.6s ease;
+}
+/* 顶栏时代叠加色 */
+.top-bar::before {
+  content: '';
+  position: absolute; inset: 0;
+  background: var(--era-top-overlay);
+  pointer-events: none;
+  transition: background 0.6s ease;
+}
+/* 顶栏左侧年份 */
+.top-year {
+  font-family: var(--font-display);
+  font-size: 0.85rem;
+  color: var(--era-accent);
+  line-height: 1.2;
+  transition: color 0.6s ease;
+  z-index: 1;
+  min-width: 64px;
+}
+.top-year-sub { font-size: 0.6rem; color: var(--text-muted); }
+
+/* 顶栏资源格 */
+.top-resources {
+  display: flex;
+  gap: 8px;
+  flex: 1;
+  justify-content: center;
+  z-index: 1;
+}
+.resource-item {
+  display: flex; align-items: center; gap: 3px;
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+}
+.resource-value {
+  font-family: var(--font-display);
+  font-size: 0.78rem;
+  color: var(--accent-gold);
+  font-weight: 600;
+}
+.top-settings { font-size: 0.9rem; color: var(--text-muted); z-index: 1; }
+
+/* 战争状态红色条纹（第2/4/6章） */
+.war-stripe {
+  display: none;
+  position: absolute; inset: 0;
+  background: repeating-linear-gradient(
+    -45deg,
+    transparent,
+    transparent 6px,
+    rgba(139,0,0,0.08) 6px,
+    rgba(139,0,0,0.08) 12px
+  );
+  pointer-events: none;
+}
+[data-era="2"] .war-stripe,
+[data-era="4"] .war-stripe,
+[data-era="6"] .war-stripe { display: block; }
+
+/* ===== ② AP条带（时代accent接入点2） ===== */
+.ap-bar {
+  height: 52px;
+  background: var(--bg-surface);
+  border-bottom: 1px solid rgba(200,184,154,0.1);
+  padding: 0 14px;
+  display: flex; align-items: center; gap: 10px;
+}
+.ap-label {
+  font-size: 0.75rem;
+  color: var(--text-primary);
+  font-family: var(--font-display);
+  font-weight: 600;
+  min-width: 32px;
+}
+.ap-sub { font-size: 0.58rem; color: var(--text-muted); display: block; font-weight: 400; }
+.ap-dots {
+  display: flex; gap: 6px; flex: 1;
+}
+.ap-dot {
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  transition: background 0.6s ease, border-color 0.6s ease;
+}
+.ap-dot.used {
+  background: var(--era-accent);  /* 时代accent接入点 */
+}
+.ap-dot.empty {
+  background: transparent;
+  border: 1.5px solid color-mix(in oklch, var(--era-accent) 35%, transparent);
+}
+.ap-security {
+  font-size: 0.6rem;
+  padding: 2px 7px;
+  border-radius: 3px;
+  background: var(--accent-red);
+  color: #fff;
+  font-weight: 500;
+}
+
+/* ===== ③ 滚动内容区 ===== */
+.scroll-area {
+  padding: 10px 14px;
+  display: flex; flex-direction: column; gap: 10px;
+  background: var(--bg-surface);
+  min-height: 280px;
+}
+
+/* 事件卡 */
+.section-title {
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  display: flex; justify-content: space-between;
+  margin-bottom: 4px;
+}
+.section-title-link { color: var(--era-accent); font-size: 0.65rem; transition: color 0.6s ease; }
+
+.event-card {
+  background: var(--paper-dark);
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(200,184,154,0.2);
+  padding: 10px;
+  display: flex; gap: 10px;
+  position: relative;
+  transition: border-color 0.6s ease;
+}
+/* 主线事件：左侧时代accent竖线 */
+.event-card.urgent {
+  border-left: 3px solid var(--era-accent);
+  transition: border-color 0.6s ease;
+}
+.event-thumb {
+  width: 56px; height: 56px;
+  border-radius: 4px;
+  background: var(--paper-mid);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.2rem;
+  flex-shrink: 0;
+  filter: sepia(80%) contrast(0.9);
+}
+.event-body { flex: 1; }
+.event-badge {
+  font-size: 0.58rem;
+  padding: 1px 5px;
+  border-radius: 2px;
+  margin-bottom: 4px;
+  display: inline-block;
+  font-weight: 500;
+}
+.event-badge.main { background: var(--accent-red); color: #fff; }
+.event-badge.sub { background: var(--paper-mid); color: var(--text-secondary); }
+.event-title { font-size: 0.78rem; font-weight: 600; margin-bottom: 2px; line-height: 1.3; }
+.event-desc { font-size: 0.65rem; color: var(--text-secondary); line-height: 1.5; }
+.event-footer {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-top: 6px;
+}
+.event-timer { font-size: 0.6rem; color: var(--accent-red); }
+.event-action {
+  font-size: 0.65rem;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  border: 1px solid var(--era-accent);  /* 时代accent接入点 */
+  color: var(--era-accent);
+  cursor: pointer;
+  transition: all 0.6s ease;
+  font-family: var(--font-body);
+}
+
+/* 焦点卡 */
+.focus-card {
+  background: var(--paper-dark);
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(200,184,154,0.2);
+  padding: 12px;
+}
+.focus-head {
+  display: flex; justify-content: space-between; align-items: flex-start;
+  margin-bottom: 10px;
+}
+.focus-name { font-size: 0.85rem; font-weight: 600; font-family: var(--font-display); }
+.focus-type {
+  font-size: 0.58rem;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+  border: 1px solid rgba(200,184,154,0.2);
+}
+.focus-body { display: flex; gap: 10px; margin-bottom: 10px; }
+.focus-img {
+  width: 100px; height: 72px;
+  border-radius: 4px;
+  background: var(--paper-mid);
+  flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.8rem;
+  filter: sepia(100%) contrast(0.85);
+}
+.focus-kpi { flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.kpi-item { }
+.kpi-label { font-size: 0.58rem; color: var(--text-muted); }
+.kpi-val { font-size: 0.82rem; font-weight: 700; font-family: var(--font-display); }
+.kpi-val.pos { color: var(--accent-green); }
+.kpi-val.neg { color: var(--accent-red); }
+.kpi-val.gold { color: var(--accent-gold); }
+
+/* 产能进度条 */
+.progress-bar {
+  height: 5px; border-radius: 3px;
+  background: var(--paper-mid);
+  margin-top: 2px;
+  overflow: hidden;
+}
+.progress-fill {
+  height: 100%; border-radius: 3px;
+  background: var(--era-accent);  /* 时代accent接入点 */
+  transition: background 0.6s ease;
+}
+
+/* 操作按钮组 */
+.focus-actions {
+  display: grid; grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+.action-btn {
+  background: var(--bg-elevated);
+  border: 1px solid rgba(200,184,154,0.2);
+  border-radius: var(--radius-sm);
+  padding: 6px 4px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.6s ease;
+}
+.action-btn:hover { border-color: var(--era-accent); }
+.action-btn-label { font-size: 0.58rem; color: var(--text-primary); display: block; }
+.action-btn-ap { font-size: 0.52rem; color: var(--text-muted); }
+
+/* ===== ④ 快速行动区 ===== */
+.quick-actions {
+  background: var(--bg-base);
+  padding: 10px 14px;
+  border-top: 1px solid rgba(200,184,154,0.1);
+}
+.quick-title { font-size: 0.65rem; color: var(--text-secondary); margin-bottom: 8px; }
+.quick-grid { display: grid; grid-template-columns: repeat(6,1fr); gap: 6px; }
+.quick-btn {
+  background: var(--bg-elevated);
+  border: 1px solid rgba(200,184,154,0.15);
+  border-radius: var(--radius-sm);
+  padding: 8px 4px 6px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.3s ease;
+  position: relative;
+}
+.quick-btn:hover { border-color: var(--era-accent); }
+.quick-icon { font-size: 1rem; display: block; margin-bottom: 2px; }
+.quick-label { font-size: 0.5rem; color: var(--text-secondary); display: block; }
+.quick-ap { font-size: 0.48rem; color: var(--text-muted); }
+/* 2AP标记 */
+.quick-btn .ap2-tag {
+  position: absolute; top: 2px; right: 2px;
+  background: var(--accent-amber);
+  color: #fff;
+  font-size: 0.42rem;
+  padding: 1px 3px;
+  border-radius: 2px;
+}
+
+/* ===== ⑤ 底部导航（时代accent接入点3） ===== */
+.bottom-nav {
+  height: 58px;
+  background: var(--bg-base);
+  border-top: 1px solid rgba(200,184,154,0.15);
+  display: flex;
+  position: relative;
+}
+.bottom-nav::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0;
+  height: 2px;
+  background: var(--era-accent);  /* 时代accent接入点——仅active项下方 */
+  width: 20%;
+  transition: left 0.3s ease, background 0.6s ease;
+}
+.nav-tab {
+  flex: 1;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 2px;
+  cursor: pointer;
+  transition: color 0.3s ease;
+}
+.nav-tab.active { color: var(--era-accent); }
+.nav-tab:not(.active) { color: var(--text-muted); }
+.nav-tab .tab-icon { font-size: 0.9rem; }
+.nav-tab .tab-label { font-size: 0.52rem; }
+
+/* ===== 本季概览条 ===== */
+.season-bar {
+  display: grid; grid-template-columns: repeat(5,1fr);
+  background: var(--bg-elevated);
+  border-top: 1px solid rgba(200,184,154,0.1);
+  border-bottom: 1px solid rgba(200,184,154,0.1);
+}
+.season-cell {
+  padding: 8px 4px;
+  text-align: center;
+  border-right: 0.5px solid rgba(200,184,154,0.1);
+}
+.season-cell:last-child { border-right: none; }
+.season-cell-label { font-size: 0.52rem; color: var(--text-muted); display: block; margin-bottom: 2px; }
+.season-cell-val { font-size: 0.72rem; font-weight: 700; font-family: var(--font-display); }
+.season-cell-val.pos { color: var(--accent-green); }
+.season-cell-val.neg { color: var(--accent-red); }
+
+/* ===== 说明文档区 ===== */
+.doc-section {
+  background: var(--bg-surface);
+  border: 1px solid rgba(200,184,154,0.15);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+.doc-section h3 {
+  font-family: var(--font-display);
+  font-size: 0.9rem;
+  color: var(--era-accent);
+  margin-bottom: var(--space-3);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid rgba(200,184,154,0.15);
+  transition: color 0.6s ease;
+}
+.doc-section p, .doc-section li {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  line-height: 1.7;
+}
+.doc-section ul { padding-left: var(--space-4); }
+.doc-section li { margin-bottom: var(--space-1); }
+
+.token-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.7rem;
+  margin-top: var(--space-3);
+}
+.token-table th {
+  text-align: left;
+  color: var(--text-muted);
+  font-weight: 500;
+  padding: 4px 6px;
+  border-bottom: 1px solid rgba(200,184,154,0.15);
+  font-size: 0.65rem;
+  letter-spacing: 0.04em;
+}
+.token-table td {
+  padding: 6px 6px;
+  border-bottom: 1px solid rgba(200,184,154,0.08);
+  color: var(--text-secondary);
+  vertical-align: top;
+}
+.token-table td:first-child {
+  font-family: monospace;
+  color: var(--era-accent);
+  font-size: 0.65rem;
+  white-space: nowrap;
+  transition: color 0.6s ease;
+}
+.token-table td code {
+  font-size: 0.62rem;
+  background: var(--bg-elevated);
+  padding: 1px 4px;
+  border-radius: 2px;
+  color: var(--paper-cream);
+  font-family: monospace;
+}
+
+.highlight-box {
+  background: color-mix(in oklch, var(--era-accent) 8%, var(--bg-elevated));
+  border: 1px solid color-mix(in oklch, var(--era-accent) 30%, transparent);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3);
+  margin: var(--space-3) 0;
+  font-size: 0.72rem;
+  color: var(--text-primary);
+  line-height: 1.6;
+  transition: background 0.6s ease, border-color 0.6s ease;
+}
+
+.tag-v1 {
+  display: inline-block;
+  background: rgba(200,169,110,0.15);
+  border: 1px solid rgba(200,169,110,0.3);
+  color: #C8A96E;
+  font-size: 0.6rem;
+  padding: 1px 5px;
+  border-radius: 2px;
+  margin-right: 4px;
+}
+.tag-v2 {
+  display: inline-block;
+  background: rgba(58,107,138,0.15);
+  border: 1px solid rgba(58,107,138,0.3);
+  color: #5A9EC0;
+  font-size: 0.6rem;
+  padding: 1px 5px;
+  border-radius: 2px;
+  margin-right: 4px;
+}
+
+/* 时代过渡动画 */
+.era-transition * { transition: border-color 0.6s ease, color 0.6s ease, background 0.6s ease; }
+
+/* 第六章围城干扰效果 */
+@keyframes signal-glitch {
+  0%,95%,100% { transform: translateX(0); }
+  96% { transform: translateX(-3px); }
+  97% { transform: translateX(3px); }
+  98% { transform: translateX(-1px); }
+}
+[data-era="6"] .phone-screen {
+  animation: signal-glitch 8s infinite;
+}
+
+</style>
+</head>
+<body>
+
+<div class="doc-title">萨拉热窝王朝 · 混合UI方案</div>
+<div class="doc-subtitle">版本2底色系统 + 版本1时代演变局部接入 · 交互预览文档</div>
+
+<!-- 时代选择器 -->
+<div class="era-selector">
+  <div class="era-selector-label">选择时代章节 · 查看UI演变效果</div>
+  <div class="era-buttons">
+    <button class="era-btn active" onclick="setEra(1,this)">一</button>
+    <button class="era-btn" onclick="setEra(2,this)">二</button>
+    <button class="era-btn" onclick="setEra(3,this)">三</button>
+    <button class="era-btn" onclick="setEra(4,this)">四</button>
+    <button class="era-btn" onclick="setEra(5,this)">五</button>
+    <button class="era-btn" onclick="setEra(6,this)">六</button>
+    <button class="era-btn" onclick="setEra(7,this)">七</button>
+  </div>
+  <div class="era-badge" id="era-badge">第一章 铜版帝国 · 1904–1913</div>
+</div>
+
+<!-- 手机 UI 预览 -->
+<div class="phone-wrap">
+  <div class="phone-screen">
+
+    <!-- ① 顶栏 -->
+    <div class="top-bar">
+      <div class="war-stripe"></div>
+      <div class="top-year">
+        1907 Q2
+        <span class="top-year-sub">春季</span>
+      </div>
+      <div class="top-resources">
+        <div class="resource-item">💰<span class="resource-value">82,400</span></div>
+        <div class="resource-item">🟡<span class="resource-value">12t</span></div>
+        <div class="resource-item">⚡<span class="resource-value">74%</span></div>
+        <div class="resource-item">⭐<span class="resource-value">63</span></div>
+      </div>
+      <div class="top-settings">⚙</div>
+    </div>
+
+    <!-- ② AP条带 -->
+    <div class="ap-bar">
+      <div class="ap-label">
+        4/6
+        <span class="ap-sub">本季行动点</span>
+      </div>
+      <div class="ap-dots">
+        <div class="ap-dot used"></div>
+        <div class="ap-dot used"></div>
+        <div class="ap-dot used"></div>
+        <div class="ap-dot used"></div>
+        <div class="ap-dot empty"></div>
+        <div class="ap-dot empty"></div>
+      </div>
+      <div class="ap-security">🛡 低</div>
+    </div>
+
+    <!-- ③ 主内容滚动区 -->
+    <div class="scroll-area">
+
+      <!-- 事件流 -->
+      <div>
+        <div class="section-title">
+          当前事件 (2)
+          <span class="section-title-link">查看全部 ›</span>
+        </div>
+
+        <!-- 主线事件卡 -->
+        <div class="event-card urgent">
+          <div class="event-thumb">📜</div>
+          <div class="event-body">
+            <span class="event-badge main">! 主线</span>
+            <div class="event-title">波斯尼亚危机爆发</div>
+            <div class="event-desc">奥匈帝国宣布兼并，家族矿业利益面临冲击</div>
+            <div class="event-footer">
+              <span class="event-timer">剩余时间：3天</span>
+              <button class="event-action">处理</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 普通事件卡 -->
+        <div class="event-card" style="margin-top:8px;">
+          <div class="event-thumb">👷</div>
+          <div class="event-body">
+            <span class="event-badge sub">支线</span>
+            <div class="event-title">矿工薪资谈判</div>
+            <div class="event-desc">工人代表要求提升安全补贴，否则威胁罢工</div>
+            <div class="event-footer">
+              <span class="event-timer">剩余时间：12天</span>
+              <button class="event-action">处理</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 经营焦点卡 -->
+      <div class="focus-card">
+        <div class="focus-head">
+          <div>
+            <div class="focus-name">泽尼察铁矿</div>
+            <span class="focus-type">铁矿开采</span>
+          </div>
+          <span style="color:var(--text-muted);font-size:0.8rem">···</span>
+        </div>
+
+        <div class="focus-body">
+          <div class="focus-img">⛏️</div>
+          <div class="focus-kpi">
+            <div class="kpi-item">
+              <div class="kpi-label">产量（本季）</div>
+              <div class="kpi-val gold">340t</div>
+            </div>
+            <div class="kpi-item">
+              <div class="kpi-label">产能利用率</div>
+              <div class="kpi-val pos">78%</div>
+              <div class="progress-bar"><div class="progress-fill" style="width:78%"></div></div>
+            </div>
+            <div class="kpi-item">
+              <div class="kpi-label">工人状态</div>
+              <div class="kpi-val" style="font-size:0.7rem">😐 不安</div>
+            </div>
+            <div class="kpi-item">
+              <div class="kpi-label">维护费用</div>
+              <div class="kpi-val neg">-1,200</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="focus-actions">
+          <div class="action-btn">
+            <span class="action-btn-label">调生产</span>
+            <span class="action-btn-ap">1 AP</span>
+          </div>
+          <div class="action-btn">
+            <span class="action-btn-label">雇工人</span>
+            <span class="action-btn-ap">1 AP</span>
+          </div>
+          <div class="action-btn">
+            <span class="action-btn-label">武装护</span>
+            <span class="action-btn-ap">1 AP</span>
+          </div>
+          <div class="action-btn">
+            <span class="action-btn-label">升级</span>
+            <span class="action-btn-ap">2 AP</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 本季概览条 -->
+    <div class="season-bar">
+      <div class="season-cell">
+        <span class="season-cell-label">现金流</span>
+        <span class="season-cell-val pos">+3,520</span>
+      </div>
+      <div class="season-cell">
+        <span class="season-cell-label">负债率</span>
+        <span class="season-cell-val" style="color:var(--text-primary)">18%</span>
+      </div>
+      <div class="season-cell">
+        <span class="season-cell-label">民心</span>
+        <span class="season-cell-val neg">65(-5)</span>
+      </div>
+      <div class="season-cell">
+        <span class="season-cell-label">地区影响</span>
+        <span class="season-cell-val gold">320</span>
+      </div>
+      <div class="season-cell">
+        <span class="season-cell-label">监控压力</span>
+        <span class="season-cell-val" style="color:var(--text-primary)">↑</span>
+      </div>
+    </div>
+
+    <!-- ④ 快速行动区 -->
+    <div class="quick-actions">
+      <div class="quick-title">快速行动（消耗AP）</div>
+      <div class="quick-grid">
+        <div class="quick-btn">
+          <span class="quick-icon">👥</span>
+          <span class="quick-label">人事</span>
+          <span class="quick-ap">1AP</span>
+        </div>
+        <div class="quick-btn">
+          <span class="quick-icon">📈</span>
+          <span class="quick-label">金融</span>
+          <span class="quick-ap">1AP</span>
+        </div>
+        <div class="quick-btn">
+          <span class="quick-icon">🔬</span>
+          <span class="quick-label">科技</span>
+          <span class="quick-ap">1AP</span>
+        </div>
+        <div class="quick-btn">
+          <span class="quick-icon">👁</span>
+          <span class="quick-label">情报</span>
+          <span class="quick-ap">1AP</span>
+        </div>
+        <div class="quick-btn">
+          <div class="ap2-tag">2</div>
+          <span class="quick-icon">🤝</span>
+          <span class="quick-label">外交</span>
+          <span class="quick-ap">2AP</span>
+        </div>
+        <div class="quick-btn">
+          <div class="ap2-tag">2</div>
+          <span class="quick-icon">🏭</span>
+          <span class="quick-label">资产</span>
+          <span class="quick-ap">2AP</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ⑤ 底部导航 -->
+    <div class="bottom-nav" id="bottom-nav">
+      <div class="nav-tab active" onclick="switchTab(this,0)">
+        <span class="tab-icon">👨‍👩‍👧</span>
+        <span class="tab-label">家族</span>
+      </div>
+      <div class="nav-tab" onclick="switchTab(this,1)">
+        <span class="tab-icon">⚙️</span>
+        <span class="tab-label">产业</span>
+      </div>
+      <div class="nav-tab" onclick="switchTab(this,2)">
+        <span class="tab-icon">📊</span>
+        <span class="tab-label">市场</span>
+      </div>
+      <div class="nav-tab" onclick="switchTab(this,3)">
+        <span class="tab-icon">⚔️</span>
+        <span class="tab-label">武装</span>
+      </div>
+      <div class="nav-tab" onclick="switchTab(this,4)">
+        <span class="tab-icon">🌍</span>
+        <span class="tab-label">世界</span>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- 方案说明文档 -->
+<div class="doc-section">
+  <h3>核心设计思路</h3>
+  <div class="highlight-box">
+    <strong>原则：改5个CSS变量，不重写整套UI。</strong><br>
+    版本2的 <code>--bg-*</code> / <code>--paper-*</code> / <code>--text-*</code> 体系全部保留，只在顶层追加5个 <code>--era-*</code> 时代变量，每章切换时覆盖这5个变量即可。底色系统完全不动。
+  </div>
+  <p>上方手机模拟器已实现完整的时代切换效果，点击七个章节按钮即可查看。</p>
+</div>
+
+<div class="doc-section">
+  <h3>5个时代变量（接入点）</h3>
+  <table class="token-table">
+    <thead>
+      <tr>
+        <th>变量名</th>
+        <th>作用范围</th>
+        <th>影响的组件</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>--era-accent</td>
+        <td>时代主强调色</td>
+        <td>AP圆点、年份文字、事件卡竖线、按钮边框、底导选中色、进度条</td>
+      </tr>
+      <tr>
+        <td>--era-border</td>
+        <td>时代边框装饰色</td>
+        <td>顶栏底线、弹出面板左侧高亮线</td>
+      </tr>
+      <tr>
+        <td>--era-top-overlay</td>
+        <td>顶栏半透明叠加</td>
+        <td>顶栏 ::before 伪元素叠加色（传递年代氛围）</td>
+      </tr>
+      <tr>
+        <td>--era-texture</td>
+        <td>纹理CSS类名</td>
+        <td>通过JS切换 <code>.texture-*</code> class 控制背景纹理</td>
+      </tr>
+      <tr>
+        <td>--era-font-deco</td>
+        <td>装饰字体风格</td>
+        <td>用于年份、章节标题等显示字体</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="doc-section">
+  <h3>每章对应配置</h3>
+  <table class="token-table">
+    <thead>
+      <tr><th>章节</th><th>--era-accent</th><th>--era-top-overlay</th><th>特殊效果</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>第一章</td><td><code>#C8A96E</code> 旧金</td><td>金色微光 8%</td><td>—</td></tr>
+      <tr><td>第二章</td><td><code>#CC3300</code> 警报红</td><td>暗红叠加 18%</td><td>顶栏红色斜纹</td></tr>
+      <tr><td>第三章</td><td><code>#D4AF37</code> 纯金</td><td>深蓝钢 30%</td><td>—</td></tr>
+      <tr><td>第四章</td><td><code>#8B0000</code> 危机红</td><td>战灰 40%</td><td>顶栏红色斜纹</td></tr>
+      <tr><td>第五章</td><td><code>#2E7D32</code> 计划绿</td><td>政治蓝 25%</td><td>—</td></tr>
+      <tr><td>第六章</td><td><code>#FF6600</code> 火光橙</td><td>橙色微光 10%</td><td>全屏信号抖动</td></tr>
+      <tr><td>第七章</td><td><code>#00897B</code> 科技青</td><td>深海蓝 20%</td><td>—</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="doc-section">
+  <h3>版本来源对照</h3>
+  <ul>
+    <li><span class="tag-v2">V2保留</span> 全局底色 <code>--bg-base</code>/<code>--bg-surface</code>/<code>--paper-*</code> 体系</li>
+    <li><span class="tag-v2">V2保留</span> 字体系统（Playfair Display + Noto Serif SC）</li>
+    <li><span class="tag-v2">V2保留</span> 严禁事项（禁止 Material Design / 禁止大圆角 / 禁止高饱和 emoji 图标）</li>
+    <li><span class="tag-v2">V2保留</span> 完整组件状态机（Default/Hover/Active/Disabled/Loading）</li>
+    <li><span class="tag-v2">V2保留</span> 动效禁令（禁止 bounce、禁止 spring 弹性）</li>
+    <li><span class="tag-v1">V1接入</span> 7套时代 accent 色，覆盖 <code>--era-*</code> 变量</li>
+    <li><span class="tag-v1">V1接入</span> 战争章节（2/4/6章）顶栏红色斜纹叠加</li>
+    <li><span class="tag-v1">V1接入</span> 第六章 UI 信号抖动干扰特效</li>
+    <li><span class="tag-v1">V1接入</span> 时代切换 0.6s 渐变过渡动画</li>
+    <li><span class="tag-v1">V1接入</span> 各章节对应的特色加载动画（实现时按章节注入）</li>
+  </ul>
+</div>
+
+<div class="doc-section">
+  <h3>工程实现建议</h3>
+  <p style="margin-bottom:8px">时代切换代码极简，只需在回合结算后执行：</p>
+  <div style="background:var(--bg-elevated);border-radius:4px;padding:10px;font-family:monospace;font-size:0.68rem;color:var(--paper-cream);line-height:1.8;margin-bottom:8px;">
+    document.documentElement.setAttribute('data-era', '3')
+  </div>
+  <p>配合1.5秒叙事过渡卡片（全屏渐显），玩家完全感知时代更迭，但UI底层代码几乎不增加维护成本。</p>
+</div>
+
+<script>
+const eraLabels = {
+  1: "第一章 铜版帝国 · 1904–1913",
+  2: "第二章 战报红章 · 1914–1918",
+  3: "第三章 黑金工业 · 1919–1940",
+  4: "第四章 战时灰幕 · 1941–1945",
+  5: "第五章 制度蓝红 · 1946–1991",
+  6: "第六章 围城信号 · 1992–1995",
+  7: "第七章 玻璃金融 · 1996–2014"
+};
+
+function setEra(n, btn) {
+  document.documentElement.setAttribute('data-era', n);
+  document.querySelectorAll('.era-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('era-badge').textContent = eraLabels[n];
+}
+
+function switchTab(el, idx) {
+  document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  const nav = document.getElementById('bottom-nav');
+  nav.style.setProperty('--tab-idx', idx);
+  nav.querySelector('::before');
+  // Move the accent line
+  const before = document.createElement('style');
+  before.id = 'nav-dynamic';
+  const old = document.getElementById('nav-dynamic');
+  if(old) old.remove();
+  before.textContent = `#bottom-nav::before { left: ${idx*20}% !important; }`;
+  document.head.appendChild(before);
+}
+
+// 初始
+document.documentElement.setAttribute('data-era', '1');
+</script>
+</body>
+</html>

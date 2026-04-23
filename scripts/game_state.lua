@@ -7,6 +7,14 @@ local Balance = require("data.balance")
 local FamiliesData = require("data.families_data")
 local RegionsData = require("data.regions_data")
 
+--- 深拷贝（用于把 Balance.STOCKS 模板实例化进 state，避免共享引用）
+local function deepcopy(tbl)
+    if type(tbl) ~= "table" then return tbl end
+    local t = {}
+    for k, v in pairs(tbl) do t[k] = deepcopy(v) end
+    return t
+end
+
 local BT = Balance.TIME
 local BA = Balance.AP
 local BS = Balance.START
@@ -31,6 +39,7 @@ function GameState.CreateNew()
         -- ============================
         cash = BS.cash,
         gold = BS.gold,
+        silver = 0,     -- 白银库存（副产品，每季可售卖）
 
         -- ============================
         -- 行动点
@@ -38,7 +47,46 @@ function GameState.CreateNew()
         ap = {
             current = BA.base,
             max     = BA.base,
-            temp    = 0,  -- 事件奖励的临时 AP
+            temp    = 0,   -- 事件奖励的临时 AP
+            bonus_used = 0, -- 本季通过 [+] 按钮购买的 AP 次数
+        },
+
+        -- ============================
+        -- 通胀（累积乘数，战时显著上升）
+        -- ============================
+        inflation_factor = Balance.INFLATION.base_factor,
+
+        -- ============================
+        -- 股市 + 持仓（GBM 模拟）
+        -- ============================
+        stocks = (function()
+            local list = {}
+            for _, s in ipairs(Balance.STOCKS) do
+                local inst = deepcopy(s)
+                inst.prev_price = inst.price
+                inst.change_pct = 0
+                inst.history    = { inst.price }
+                inst.event_mu_mods = {}
+                table.insert(list, inst)
+            end
+            return list
+        end)(),
+        portfolio = {
+            holdings = {},  -- { [stock_id] = { shares, avg_cost } }
+        },
+
+        -- ============================
+        -- 贷款
+        -- ============================
+        loans = {},  -- { { id, principal, interest, remaining_turns, total_paid } }
+
+        -- ============================
+        -- 科技
+        -- ============================
+        tech = {
+            researched  = {},   -- { [tech_id] = true }
+            in_progress = nil,  -- { id, progress, total }
+            bonus_points = 0,   -- 事件/家族特质贡献的额外点数
         },
 
         -- ============================
@@ -185,9 +233,10 @@ function GameState.AdvanceQuarter(state)
         state.year = state.year + 1
     end
     state.turn_count = state.turn_count + 1
-    -- 重置 AP（基础 + 临时归零）
+    -- 重置 AP（基础 + 临时归零 + AP 购买计数归零）
     state.ap.current = state.ap.max
     state.ap.temp = 0
+    state.ap.bonus_used = 0
 end
 
 --- 检查游戏是否结束
