@@ -70,6 +70,10 @@ function Start()
     -- EventModal 也需要 UI 根节点来显示弹窗
     EventModal.SetRoot(UIManager.GetRoot())
 
+    if GameState.IsGameOver(state_) then
+        UIManager.ShowEnding(state_)
+    end
+
     -- 5. 订阅事件
     SubscribeToEvent("Update", "HandleUpdate")
     SubscribeToEvent("KeyDown", "HandleKeyDown")
@@ -114,6 +118,9 @@ function HandleNewGame(newState)
     })
     EventModal.SetRoot(UIManager.GetRoot())
     UIManager.BackToDashboard()
+    if GameState.IsGameOver(state_) then
+        UIManager.ShowEnding(state_)
+    end
 
     -- 新游戏检查开局事件 —— 入队后刷新仪表盘立即显示
     if state_.turn_count == 0 then
@@ -161,19 +168,17 @@ function HandleEndTurn()
 
     -- 检查游戏结束
     if GameState.IsGameOver(state_) then
-        local vType = GameState.GetVictoryType(state_)
-        local msg = "百年家族史已书写完毕！"
+        local ending = GameState.GetEndingInfo(state_)
+        local msg = ending and ending.title or "百年家族史已书写完毕！"
         local variant = "info"
-        if vType == "economic" then
-            msg = "经济胜利！黄金帝国已建成！"
-        elseif vType == "military" then
-            msg = "军事胜利！钢铁执政者崛起！"
-        elseif vType == "bankrupt" then
-            msg = "💀 家族破产！债台高筑，黄金王朝轰然倒塌…"
+        if ending and ending.variant == "failure" then
             variant = "error"
+        elseif ending and ending.variant == "success" then
+            variant = "success"
         end
         print("[结局] " .. msg)
-        UI.Toast.Show(msg, { variant = variant, duration = 4 })
+        UI.Toast.Show(msg, { variant = variant, duration = 3 })
+        UIManager.ShowEnding(state_)
         return
     end
 
@@ -229,6 +234,17 @@ function FinalizeEndTurn()
 
     -- 刷新 UI
     UIManager.RefreshAll(state_)
+
+    -- 回合推进后立即展示胜利/失败结算，避免只在下一次点击时提示。
+    if GameState.IsGameOver(state_) then
+        local ending = GameState.GetEndingInfo(state_)
+        if ending then
+            local variant = ending.variant == "failure" and "error" or "success"
+            UI.Toast.Show(ending.title, { variant = variant, duration = 3 })
+        end
+        UIManager.ShowEnding(state_)
+        return
+    end
 
     -- 破产检测（EndTurn 中可能触发）
     if state_.bankrupt then

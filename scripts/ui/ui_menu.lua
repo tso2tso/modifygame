@@ -63,9 +63,10 @@ end
 --- 游戏标题卡片
 function MenuPage._CreateTitleCard(state)
     local turnText = GameState.GetTurnText(state)
-    local victoryType = GameState.GetVictoryType(state)
-    local statusText = victoryType and "游戏已结束" or ("当前进度：" .. turnText)
-    local statusColor = victoryType and C.accent_gold or C.text_secondary
+    local ending = GameState.GetEndingInfo(state)
+    local statusText = ending and (ending.resultLabel .. "：" .. ending.title) or ("当前进度：" .. turnText)
+    local statusColor = ending and (ending.variant == "failure" and C.accent_red or C.accent_gold)
+        or C.text_secondary
 
     return UI.Panel {
         width = "100%",

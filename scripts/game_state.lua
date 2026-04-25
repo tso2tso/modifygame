@@ -375,6 +375,89 @@ function GameState.GetVictoryType(state)
     return nil
 end
 
+--- 获取完整结局信息（胜利/失败/时间到）
+---@param state table
+---@return table|nil ending
+function GameState.GetEndingInfo(state)
+    local victoryType = GameState.GetVictoryType(state)
+    if not victoryType then return nil end
+
+    local BVE = Balance.VICTORY.economic
+    local BVM = Balance.VICTORY.military
+    local totalControl = GameState.CalcTotalControl(state)
+    local totalInfluence = GameState.CalcTotalInfluence(state)
+    local totalAssets = GameState.CalcTotalAssets(state)
+    local totalDebt = GameState.CalcTotalDebt(state)
+    local netWorth = totalAssets - totalDebt
+
+    local ending = {
+        type = victoryType,
+        title = "百年家族史已书写完毕",
+        subtitle = GameState.GetTurnText(state),
+        description = "科瓦奇家族的账簿合上了最后一页。",
+        resultLabel = "结局",
+        variant = "info",
+        icon = "⚜️",
+        stats = {
+            { label = "现金", value = Config.FormatNumber(state.cash or 0) },
+            { label = "黄金库存", value = tostring(state.gold or 0) },
+            { label = "净资产", value = Config.FormatNumber(netWorth) },
+            { label = "地区控制", value = tostring(totalControl) },
+            { label = "地区影响力", value = tostring(totalInfluence) },
+            { label = "度过季度", value = tostring(state.turn_count or 0) },
+        },
+        progress = {
+            economic = {
+                label = "经济胜利",
+                value = state.victory.economic or 0,
+                threshold = BVE.threshold,
+            },
+            military = {
+                label = "军事胜利",
+                value = state.victory.military or 0,
+                threshold = BVM.threshold,
+            },
+        },
+    }
+
+    if victoryType == "economic" then
+        ending.title = "经济胜利：黄金帝国"
+        ending.resultLabel = "胜利"
+        ending.variant = "success"
+        ending.icon = "💰"
+        ending.description = "家族以黄金、资本与地区控制建立了跨越时代的财富秩序。"
+    elseif victoryType == "military" then
+        ending.title = "军事胜利：钢铁执政者"
+        ending.resultLabel = "胜利"
+        ending.variant = "success"
+        ending.icon = "🛡️"
+        ending.description = "武装力量、士气与领地控制支撑起家族不可撼动的统治。"
+    elseif victoryType == "bankrupt" then
+        ending.title = "失败：家族破产"
+        ending.resultLabel = "失败"
+        ending.variant = "failure"
+        ending.icon = "💀"
+        if (state.loan_consecutive_defaults or 0) >= (Balance.LOAN.bankruptcy.consecutive_defaults or 3) then
+            ending.description = string.format("连续 %d 季贷款违约，债权人接管了家族资产。",
+                state.loan_consecutive_defaults or 0)
+        elseif (state.negative_net_worth_turns or 0) >= (Balance.LOAN.bankruptcy.negative_net_worth_turns or 4) then
+            ending.description = string.format("净资产连续 %d 季为负，黄金王朝轰然倒塌。",
+                state.negative_net_worth_turns or 0)
+        else
+            ending.description = "债务与现金流危机压垮了家族的最后防线。"
+        end
+    elseif victoryType == "timeout" then
+        ending.title = "失败：百年落幕"
+        ending.resultLabel = "失败"
+        ending.variant = "failure"
+        ending.icon = "⌛"
+        ending.description = string.format("时间推进至 %d 年后，家族未能完成经济或军事胜利目标。",
+            Balance.TIME.end_year)
+    end
+
+    return ending
+end
+
 -- ============================================================================
 -- 行动点
 -- ============================================================================

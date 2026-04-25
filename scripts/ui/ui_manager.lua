@@ -15,6 +15,7 @@ local MilitaryPage = require("ui.ui_military")
 local WorldPage = require("ui.ui_world")
 local MenuPage = require("ui.ui_menu")
 local ActionModals = require("ui.ui_action_modals")
+local EndingModal = require("ui.ui_ending_modal")
 
 local C = Config.COLORS
 local F = Config.FONT
@@ -97,6 +98,10 @@ function UIManager.Create(state, callbacks)
     -- 将 UI 根节点传递给弹窗模块，Modal 必须 AddChild 到 UI 树才能渲染
     ActionModals.SetRoot(uiRoot_)
     MarketPage.SetRoot(uiRoot_)
+    EndingModal.SetRoot(uiRoot_)
+    EndingModal.SetCallbacks({
+        onNewGame = onNewGame_,
+    })
     UIManager._ShowView("dashboard")
 end
 
@@ -450,6 +455,10 @@ end
 
 function UIManager.GetActiveView()
     return activeView_
+end
+
+function UIManager.ShowEnding(state)
+    EndingModal.Show(state or stateRef_)
 end
 
 return UIManager
