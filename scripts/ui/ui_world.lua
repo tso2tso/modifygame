@@ -6,6 +6,7 @@
 local UI = require("urhox-libs/UI")
 local Config = require("config")
 local GameState = require("game_state")
+local Balance = require("data.balance")
 local RegionsData = require("data.regions_data")
 local MapWidget = require("ui.ui_map_widget")
 
@@ -134,9 +135,10 @@ end
 --- 刷新 Tab 栏激活状态
 function WorldPage._RefreshTabBar()
     if not contentRoot_ then return end
-    -- 替换第一个子节点（Tab 栏）
-    local newBar = WorldPage._CreateSubTabBar()
-    contentRoot_:ReplaceChildAtIndex(1, newBar)
+    -- 清除后重新添加子节点（Tab 栏 + 内容区）
+    contentRoot_:ClearChildren()
+    contentRoot_:AddChild(WorldPage._CreateSubTabBar())
+    contentRoot_:AddChild(tabContentPanel_)
 end
 
 -- ============================================================================
@@ -359,9 +361,12 @@ function WorldPage._CreateNodeDrawer(state, region)
             end,
         })
     end
+    local infCost = Balance.INFLUENCE.cost_infiltrate
+    local totalInfluence = GameState.CalcTotalInfluence(state)
     local canInfiltrate = (state.ap.current + (state.ap.temp or 0)) >= 2
+        and totalInfluence >= infCost
     table.insert(actionChildren, UI.Button {
-        text = "政治渗透（2AP）",
+        text = string.format("政治渗透（2AP+%d影响力）", infCost),
         fontSize = F.label,
         fontColor = canInfiltrate and C.text_primary or C.text_muted,
         backgroundColor = canInfiltrate and C.paper_mid or C.bg_elevated,
@@ -1102,11 +1107,21 @@ end
 -- 政治渗透操作
 -- ============================================================================
 
---- 执行政治渗透：花费 2AP，增加玩家对目标地区的控制度 +8，等比减少 AI 势力占比
+--- 执行政治渗透：花费 2AP + 20影响力，增加玩家对目标地区的控制度 +8，等比减少 AI 势力占比
 function WorldPage._DoPoliticalInfiltration(state, region)
+    local infCost = Balance.INFLUENCE.cost_infiltrate
+
     -- 检查 AP
     if (state.ap.current + (state.ap.temp or 0)) < 2 then
         UI.Toast.Show("行动点不足（需要2AP）", { variant = "error", duration = 1.5 })
+        return
+    end
+
+    -- 检查 Influence
+    local totalInf = GameState.CalcTotalInfluence(state)
+    if totalInf < infCost then
+        UI.Toast.Show(string.format("影响力不足（需要%d，当前%d）", infCost, totalInf),
+            { variant = "error", duration = 1.5 })
         return
     end
 
@@ -1114,6 +1129,15 @@ function WorldPage._DoPoliticalInfiltration(state, region)
     if not GameState.SpendAP(state, 2) then
         UI.Toast.Show("行动点不足", { variant = "error", duration = 1.5 })
         return
+    end
+
+    -- 扣除 Influence（按比例从各地区扣减）
+    if totalInf > 0 then
+        for _, r in ipairs(state.regions) do
+            local ratio = (r.influence or 0) / totalInf
+            local loss = math.floor(infCost * ratio + 0.5)
+            r.influence = math.max(0, (r.influence or 0) - loss)
+        end
     end
 
     -- 计算渗透效果

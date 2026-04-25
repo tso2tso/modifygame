@@ -84,13 +84,20 @@ function Tech.Complete(state, techId)
         -- 永久减税修正
         GameState.AddModifier(state, "tech_" .. techId, "tax_rate", eff.value, 0)
     elseif eff.kind == "ap_bonus" then
-        state.ap.max = state.ap.max + eff.value
+        -- ap.max 由 CalcMaxAP 统一计算（含科技加成），此处只需刷新
+        state.ap.max = GameState.CalcMaxAP(state)
+        -- 当季立即获得可用 AP
         state.ap.current = state.ap.current + eff.value
     elseif eff.kind == "equipment_up" then
         state.military.equipment = math.min(5, state.military.equipment + eff.value)
     elseif eff.kind == "supply_reduction" then
         -- 简单做法：降低武装工资以模拟补给节省
         state.military.wage = math.max(6, state.military.wage - 1)
+    elseif eff.kind == "finance_network" then
+        -- 降低补给成本 20%（通过减少 supply_cost 实现）
+        state.finance_supply_discount = 0.20
+        -- 每季被动收入 +80
+        state.finance_passive_income = 80
     elseif eff.kind == "stock_boost" and eff.stock_id then
         for _, s in ipairs(state.stocks or {}) do
             if s.id == eff.stock_id then

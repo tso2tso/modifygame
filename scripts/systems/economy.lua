@@ -115,14 +115,64 @@ function Economy.Settle(state)
     -- ============================
     report.worker_expense = math.floor(state.workers.hired * state.workers.wage * inflation)
     report.military_expense = math.floor(state.military.guards * state.military.wage * inflation)
+    local supplyDiscount = 1.0 - (state.finance_supply_discount or 0)
     report.supply_expense = math.floor(state.military.guards * BMI.supply_per_guard
-        * BMI.supply_cost * inflation)
+        * BMI.supply_cost * inflation * supplyDiscount)
+
+    -- 金融网络被动收入
+    report.finance_income = state.finance_passive_income or 0
+    if report.finance_income > 0 then
+        state.cash = state.cash + report.finance_income
+    end
 
     -- 被动地区影响力增益（科技"印刷宣传"等）
     if state.passive_influence and state.passive_influence ~= 0 then
         for _, r in ipairs(state.regions) do
             r.influence = (r.influence or 0) + state.passive_influence
         end
+    end
+
+    -- ============================
+    -- 3.5 地区控制度被动收入 & AI 存在度负面效果
+    -- ============================
+    report.region_income = 0
+    report.ai_penalty = 0
+    for _, r in ipairs(state.regions) do
+        -- ── 矿区 (mine): 控制度高 → 安全奖励减少事故概率（通过 security +1 间接体现）
+        -- 这里通过直接经济加成体现
+        if r.type == "mine" then
+            -- 控制度 >= 50%: 每 10% 超出部分给 +20 被动收入
+            if r.control >= 50 then
+                local bonus = math.floor((r.control - 50) / 10) * 20
+                report.region_income = report.region_income + bonus
+            end
+        end
+        -- ── 工业城 (industrial): 控制度 >= 40% 时获得贸易收入
+        if r.type == "industrial" then
+            if r.control >= 40 then
+                local tradeIncome = math.floor(r.control * 1.5)
+                report.region_income = report.region_income + tradeIncome
+            end
+        end
+        -- ── 首都 (capital): 控制度 >= 30% 时减税
+        -- 减税效果在下方税率计算中体现
+
+        -- ── AI 存在度负面效果 ──
+        if r.ai_presence then
+            for _, presence in pairs(r.ai_presence) do
+                if presence >= 50 then
+                    -- AI 高存在度：每 10% 超出 50 的部分，额外支出 +15
+                    local penalty = math.floor((presence - 50) / 10) * 15
+                    report.ai_penalty = report.ai_penalty + penalty
+                end
+            end
+        end
+    end
+
+    -- 地区被动收入加到现金
+    if report.region_income > 0 then
+        state.cash = state.cash + report.region_income
+        report.total_income = (report.total_income or 0) + report.region_income
     end
 
     -- ============================
@@ -135,15 +185,24 @@ function Economy.Settle(state)
     -- 事件修正
     local taxMod = GameState.GetModifierValue(state, "tax_rate")
     taxRate = taxRate + taxMod
+    -- 首都控制度 >= 30% 减税：每 10% 超出部分减 1% 税率
+    for _, r in ipairs(state.regions) do
+        if r.type == "capital" and r.control >= 30 then
+            local taxReduction = math.floor((r.control - 30) / 10) * 0.01
+            taxRate = taxRate - taxReduction
+        end
+    end
+    taxRate = math.max(0, taxRate)
     report.tax = math.max(0, math.floor(state.cash * taxRate))
 
     -- ============================
     -- 5. 汇总并扣款
     -- ============================
-    -- 注意：gold_income / silver_income 已在步骤 2-2.5 加到 state.cash，此处只减支出
-    report.total_income = report.gold_income + report.silver_income
+    -- 注意：gold_income / silver_income / region_income 已在步骤 2-3.5 加到 state.cash，此处只减支出
+    report.total_income = report.gold_income + report.silver_income + report.region_income
+        + report.finance_income
     report.total_expense = report.worker_expense + report.military_expense
-        + report.supply_expense + report.tax
+        + report.supply_expense + report.tax + report.ai_penalty
     report.net = report.total_income - report.total_expense
 
     state.cash = state.cash - report.total_expense
@@ -163,6 +222,7 @@ function Economy.Settle(state)
         if sellGold > 0 then
             state.cash = state.cash + sellGold * BM.gold_price
             state.gold = state.gold - sellGold
+            state.emergency_gold_sold = true
             GameState.AddLog(state, string.format(
                 "财政危机！紧急变卖 %d 单位黄金。", sellGold))
         end

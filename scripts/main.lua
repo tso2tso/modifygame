@@ -74,12 +74,11 @@ function Start()
     SubscribeToEvent("Update", "HandleUpdate")
     SubscribeToEvent("KeyDown", "HandleKeyDown")
 
-    -- 6. 检查开局事件（新游戏首回合）
+    -- 6. 检查开局事件（新游戏首回合）—— 入队后交由仪表盘展示
     if not loaded then
         local startEvents = Events.CheckEvents(state_)
         if #startEvents > 0 then
             Events.Enqueue(state_, startEvents)
-            ProcessNextEvent()
         end
     end
 
@@ -115,12 +114,11 @@ function HandleNewGame(newState)
     EventModal.SetRoot(UIManager.GetRoot())
     UIManager.BackToDashboard()
 
-    -- 新游戏检查开局事件
+    -- 新游戏检查开局事件 —— 入队后交由仪表盘展示
     if state_.turn_count == 0 then
         local startEvents = Events.CheckEvents(state_)
         if #startEvents > 0 then
             Events.Enqueue(state_, startEvents)
-            ProcessNextEvent()
         end
     end
 end
@@ -181,12 +179,9 @@ function HandleEndTurn()
     print(string.format("[%s] %s", GameState.GetTurnText(state_),
         TurnEngine.FormatReportSummary(report)))
 
-    -- 检查事件队列，有事件则弹窗
-    if Events.HasPendingEvents(state_) then
-        ProcessNextEvent()
-    else
-        FinalizeEndTurn()
-    end
+    -- 事件留在队列中，交由仪表盘「当前事件」展示
+    -- 玩家在仪表盘点击"处理"按钮来逐个处理
+    FinalizeEndTurn()
 end
 
 --- 处理下一个待处理事件

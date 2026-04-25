@@ -246,15 +246,35 @@ function MarketPage._LoansTabContent(state, accent)
                                 fontColor = C.text_primary,
                             },
                             UI.Panel {
-                                backgroundColor = C.accent_amber,
-                                borderRadius = S.radius_badge,
-                                paddingHorizontal = 6, paddingVertical = 2,
+                                flexDirection = "row",
+                                gap = 4,
                                 children = {
-                                    UI.Label {
-                                        text = string.format("剩 %d 季", loan.remaining_turns),
-                                        fontSize = F.label,
-                                        fontColor = { 255, 255, 255, 255 },
-                                        pointerEvents = "none",
+                                    (loan.rollovers and loan.rollovers > 0) and UI.Panel {
+                                        backgroundColor = C.accent_red,
+                                        borderRadius = S.radius_badge,
+                                        paddingHorizontal = 6, paddingVertical = 2,
+                                        children = {
+                                            UI.Label {
+                                                text = "已展期",
+                                                fontSize = F.label,
+                                                fontColor = { 255, 255, 255, 255 },
+                                                pointerEvents = "none",
+                                            },
+                                        },
+                                    } or nil,
+                                    UI.Panel {
+                                        backgroundColor = (loan.rollovers and loan.rollovers > 0)
+                                            and C.accent_red or C.accent_amber,
+                                        borderRadius = S.radius_badge,
+                                        paddingHorizontal = 6, paddingVertical = 2,
+                                        children = {
+                                            UI.Label {
+                                                text = string.format("剩 %d 季", loan.remaining_turns),
+                                                fontSize = F.label,
+                                                fontColor = { 255, 255, 255, 255 },
+                                                pointerEvents = "none",
+                                            },
+                                        },
                                     },
                                 },
                             },
@@ -873,10 +893,10 @@ function MarketPage._OpenTradeModal(state, stock, accent)
 
     -- 内部数量状态（闭包）
     local qty = 10
-    local qtyLabel
+    local qtyInput
 
     local function refreshQty()
-        if qtyLabel then qtyLabel:SetText(tostring(qty)) end
+        if qtyInput then qtyInput:SetValue(tostring(qty)) end
     end
 
     local function adjustQty(delta)
@@ -888,13 +908,30 @@ function MarketPage._OpenTradeModal(state, stock, accent)
         and state.portfolio.holdings[stock.id]
     local holdingShares = (holding and holding.shares) or 0
 
-    qtyLabel = UI.Label {
-        text = tostring(qty),
+    qtyInput = UI.TextField {
+        value = tostring(qty),
         fontSize = F.card_title,
-        fontWeight = "bold",
-        fontColor = C.text_primary,
-        minWidth = 60,
+        width = 80, height = 36,
         textAlign = "center",
+        maxLength = 6,
+        placeholder = "数量",
+        onChange = function(self, val)
+            local n = tonumber(val)
+            if n and n >= 1 then
+                qty = math.floor(n)
+            elseif val == "" then
+                qty = 1
+            end
+        end,
+        onSubmit = function(self, val)
+            local n = tonumber(val)
+            if n and n >= 1 then
+                qty = math.floor(n)
+            else
+                qty = 1
+            end
+            refreshQty()
+        end,
     }
 
     tradeModal_ = UI.Modal {
@@ -962,9 +999,7 @@ function MarketPage._OpenTradeModal(state, stock, accent)
                 gap = 8,
                 children = {
                     MarketPage._QtyBtn("-10", function() adjustQty(-10) end),
-                    MarketPage._QtyBtn("-1",  function() adjustQty(-1) end),
-                    qtyLabel,
-                    MarketPage._QtyBtn("+1",  function() adjustQty(1) end),
+                    qtyInput,
                     MarketPage._QtyBtn("+10", function() adjustQty(10) end),
                 },
             },

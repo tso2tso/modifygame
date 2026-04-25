@@ -80,13 +80,49 @@ function TurnEngine.EndTurn(state)
                     state.cash = state.cash - loan.principal
                     GameState.AddLog(state, string.format("贷款 %d 到期清偿", loan.principal))
                 else
-                    -- 还不上：本金部分清偿 + 剩余继续展期（延长 4 季，本金 + 违约金）
-                    local pay = state.cash
-                    state.cash = 0
-                    loan.principal = math.floor((loan.principal - pay) * (1 + Balance.LOAN.default_penalty))
-                    loan.remaining_turns = 4
-                    table.insert(kept, loan)
-                    GameState.AddLog(state, string.format("贷款展期：欠款 %d", loan.principal))
+                    -- 还不上：检查是否还能展期
+                    local rollovers = loan.rollovers or 0
+                    if rollovers < (Balance.LOAN.max_rollovers or 1) then
+                        -- 允许展期：部分清偿 + 延长 4 季 + 本金膨胀
+                        local pay = state.cash
+                        state.cash = 0
+                        loan.principal = math.floor((loan.principal - pay) * (1 + Balance.LOAN.default_penalty))
+                        loan.remaining_turns = 4
+                        loan.rollovers = rollovers + 1
+                        table.insert(kept, loan)
+                        GameState.AddLog(state, string.format(
+                            "贷款展期（第%d次）：剩余欠款 %d，延长4季",
+                            loan.rollovers, loan.principal))
+                    else
+                        -- 已达展期上限 → 强制清算
+                        local remaining = loan.principal
+                        -- 1) 先用现金抵扣
+                        local cashPay = math.min(state.cash, remaining)
+                        state.cash = state.cash - cashPay
+                        remaining = remaining - cashPay
+                        -- 2) 再用黄金按市价抵扣
+                        if remaining > 0 and state.gold > 0 then
+                            local goldPrice = Balance.MINE.gold_price
+                            local goldNeeded = math.ceil(remaining / goldPrice)
+                            local goldUsed = math.min(state.gold, goldNeeded)
+                            state.gold = state.gold - goldUsed
+                            remaining = remaining - goldUsed * goldPrice
+                            state.emergency_gold_sold = true
+                            GameState.AddLog(state, string.format(
+                                "强制清算：变卖 %d 单位黄金偿债", goldUsed))
+                        end
+                        -- 3) 仍不够则坏账核销
+                        if remaining > 0 then
+                            state.military.morale = math.max(0,
+                                state.military.morale + (Balance.LOAN.default_morale_penalty or -10))
+                            GameState.AddLog(state, string.format(
+                                "坏账核销：%d 克朗无力偿还，家族声誉受损，士气 %d",
+                                remaining, Balance.LOAN.default_morale_penalty or -10))
+                        else
+                            GameState.AddLog(state, "贷款到期强制清算完毕")
+                        end
+                        -- 贷款不保留（不 insert 到 kept）
+                    end
                 end
             else
                 table.insert(kept, loan)
@@ -124,33 +160,59 @@ function TurnEngine.EndTurn(state)
     end
 
     -- ========================================
-    -- 阶段 3: 胜利点结算
+    -- 阶段 3: 胜利点结算（v2 — 新公式 + 章节门控 + war_mod）
     -- ========================================
     local oldEco = state.victory.economic
     local oldMil = state.victory.military
 
-    -- 经济胜利点
-    local ecoDelta = 0
-    if state.cash > 0 then
-        ecoDelta = ecoDelta + math.floor(state.cash / BV.economic.cash_divisor)
-    end
-    ecoDelta = ecoDelta + state.gold * BV.economic.gold_multiplier
+    local totalControl = GameState.CalcTotalControl(state)
+    local totalInfluence = GameState.CalcTotalInfluence(state)
+    local isWar = state.flags.at_war
 
-    -- 军事胜利点
+    -- ── 经济胜利点 ──
+    local BVE = BV.economic
+    local ecoDelta = 0
+    if state.year >= BVE.gate_year then
+        local cashPart    = state.cash > 0 and math.floor(state.cash / BVE.cash_divisor) or 0
+        local goldPart    = math.floor(state.gold * BVE.gold_multiplier)
+        local controlPart = math.floor(totalControl / BVE.control_divisor)
+        local influPart   = math.floor(totalInfluence / BVE.influence_divisor)
+        ecoDelta = cashPart + goldPart + controlPart + influPart
+        -- war_mod
+        if isWar then
+            ecoDelta = math.floor(ecoDelta * BVE.war_mod)
+        end
+        -- Influence 阈值 5 级加成
+        if totalInfluence >= 300 then
+            ecoDelta = ecoDelta + 5
+        end
+    end
+
+    -- ── 军事胜利点 ──
+    local BVM = BV.military
     local milDelta = 0
-    milDelta = milDelta + math.floor(state.military.guards * BV.military.guard_multiplier)
-    milDelta = milDelta + math.floor(state.military.morale / BV.military.morale_divisor)
-    -- 地区控制加成
-    for _, r in ipairs(state.regions) do
-        milDelta = milDelta + math.floor(r.control / BV.military.control_divisor)
+    if state.year >= BVM.gate_year then
+        local guardPart   = math.floor(state.military.guards * BVM.guard_multiplier)
+        local moralePart  = math.floor(state.military.morale / BVM.morale_divisor)
+        local controlPart = math.floor(totalControl / BVM.control_divisor)
+        local winsPart    = math.min(state.battle_wins_total or 0, BVM.battle_wins_cap)
+        milDelta = guardPart + moralePart + controlPart + winsPart
+        -- war_mod
+        if isWar then
+            milDelta = math.floor(milDelta * BVM.war_mod)
+        end
+        -- Influence 阈值 5 级加成
+        if totalInfluence >= 300 then
+            milDelta = milDelta + 5
+        end
     end
 
     state.victory.economic = state.victory.economic + ecoDelta
     state.victory.military = state.victory.military + milDelta
 
-    -- 限制上限避免过快
-    state.victory.economic = math.min(state.victory.economic, BV.threshold + 20)
-    state.victory.military = math.min(state.victory.military, BV.threshold + 20)
+    -- 上限保护
+    state.victory.economic = math.min(state.victory.economic, BVE.threshold + 50)
+    state.victory.military = math.min(state.victory.military, BVM.threshold + 50)
 
     report.victory_delta.economic = state.victory.economic - oldEco
     report.victory_delta.military = state.victory.military - oldMil
@@ -159,6 +221,21 @@ function TurnEngine.EndTurn(state)
     -- 阶段 4: 修正器推进
     -- ========================================
     GameState.TickModifiers(state)
+
+    -- ========================================
+    -- 阶段 4.5: Influence 自然衰减
+    -- 每季所有地区 influence 衰减，除非本季执行了文化行动
+    -- ========================================
+    if not state.culture_action_this_turn then
+        local decay = Balance.INFLUENCE.decay_per_season
+        for _, r in ipairs(state.regions) do
+            r.influence = math.max(0, (r.influence or 0) + decay)
+        end
+    end
+    -- 重置本季文化行动标记
+    state.culture_action_this_turn = false
+    -- 重置紧急变卖标记
+    state.emergency_gold_sold = false
 
     -- ========================================
     -- 阶段 5: 武装士气衰减
@@ -191,9 +268,12 @@ function TurnEngine.EndTurn(state)
             local growth = math.floor(faction.cash * math.max(0, rate))
             faction.cash = faction.cash + growth
 
-            -- 势力缓慢增长
-            if faction.power < 80 then
-                faction.power = math.min(100, faction.power + 1)
+            -- 势力增长（加速：每季 +2，上限 100）
+            if faction.power < 100 then
+                local powerGain = 2
+                -- 战时 AI 势力增长更快
+                if state.flags.at_war then powerGain = 3 end
+                faction.power = math.min(100, faction.power + powerGain)
             end
 
             -- 协议保护期内 AI 不主动敌对
@@ -213,9 +293,22 @@ function TurnEngine.EndTurn(state)
                 end
             end
 
-            -- 与玩家的态度随竞争变化
+            -- 与玩家的态度随竞争变化（多维触发）
+            -- 1) 经济碾压 → 嫉妒
             if state.cash > faction.cash * 1.5 then
+                faction.attitude = math.max(-100, faction.attitude - 3)
+            end
+            -- 2) 军事威胁 → 恐惧
+            if state.military.guards > 20 and faction.power < 50 then
                 faction.attitude = math.max(-100, faction.attitude - 2)
+            end
+            -- 3) 玩家矿山过多 → 领地竞争
+            if #state.mines >= 5 then
+                faction.attitude = math.max(-100, faction.attitude - 1)
+            end
+            -- 4) AI 势力扩大后自然傲慢
+            if faction.power >= 60 and faction.attitude > -50 then
+                faction.attitude = faction.attitude - 1
             end
         end
     end

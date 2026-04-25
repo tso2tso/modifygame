@@ -76,7 +76,7 @@ function Combat.ApplyResult(state, faction, result)
         faction.attitude = math.max(-100, faction.attitude - 10)
         state.cash = state.cash + loot
         m.morale = math.min(100, m.morale + BC.win_morale)
-        state.victory.military = state.victory.military + Balance.VICTORY.military.victory_bonus
+        state.battle_wins_total = (state.battle_wins_total or 0) + 1
         log = string.format("⚔ 击退 %s，缴获 %d 现金，护卫士气+%d",
             faction.name, loot, BC.win_morale)
     else

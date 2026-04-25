@@ -87,14 +87,91 @@ local function actionBtn(label, bg, onClick, disabled)
 end
 
 -- ============================================================================
--- 科技研发弹窗
+-- 科技研发弹窗（文明6风格科技树）
 -- ============================================================================
+
+--- 构建科技树节点数据
+local function buildTechTreeNodes(state)
+    local allTechs = TechData.GetAll()
+    local researched = (state.tech and state.tech.researched) or {}
+    local inProgress = state.tech and state.tech.in_progress
+
+    -- 计算每个科技的深度（列号）
+    local depthMap = {}
+    local function getDepth(techId)
+        if depthMap[techId] then return depthMap[techId] end
+        local t = TechData.GetById(techId)
+        if not t or not t.requires then
+            depthMap[techId] = 0
+            return 0
+        end
+        depthMap[techId] = getDepth(t.requires) + 1
+        return depthMap[techId]
+    end
+    for _, t in ipairs(allTechs) do
+        getDepth(t.id)
+    end
+
+    -- 布局参数
+    local nodeSize = 80
+    local colGap = 200   -- 列间距（加大避免文字重叠）
+    local rowGap = 110   -- 行间距
+    local paddingX = 50
+    local paddingY = 30
+
+    -- 按深度分组排列
+    local colBuckets = {}  -- depth -> { tech, ... }
+    for _, t in ipairs(allTechs) do
+        local d = depthMap[t.id] or 0
+        colBuckets[d] = colBuckets[d] or {}
+        table.insert(colBuckets[d], t)
+    end
+
+    -- 分配坐标：每列内垂直居中对齐
+    local maxRows = 0
+    for _, bucket in pairs(colBuckets) do
+        maxRows = math.max(maxRows, #bucket)
+    end
+
+    local nodes = {}
+    for d, bucket in pairs(colBuckets) do
+        local colCount = #bucket
+        -- 垂直居中偏移
+        local offsetY = (maxRows - colCount) * rowGap * 0.5
+        for row, t in ipairs(bucket) do
+            local isResearched = researched[t.id] == true
+            local isInProgress = inProgress and inProgress.id == t.id
+
+            -- 节点显示名称：包含状态标记
+            local displayName = t.icon .. " " .. t.name
+            if isInProgress then
+                displayName = "⏳ " .. t.name
+            end
+
+            table.insert(nodes, {
+                id = t.id,
+                name = displayName,
+                icon = t.icon or "🔬",
+                x = paddingX + d * colGap,
+                y = paddingY + offsetY + (row - 1) * rowGap,
+                parentId = t.requires or nil,
+                unlocked = isResearched,
+                -- 扩展信息
+                techData = t,
+                inProgress = isInProgress,
+            })
+        end
+    end
+
+    return nodes, nodeSize
+end
+
 function ActionModals.ShowTechnology(state, accent)
     closeModal()
 
     local rows = {}
 
-    -- 进行中
+    -- 研发中进度条
     if state.tech and state.tech.in_progress then
         local ip = state.tech.in_progress
         local t = TechData.GetById(ip.id)
@@ -130,80 +207,136 @@ function ActionModals.ShowTechnology(state, accent)
         })
     end
 
-    -- 已研发
-    if state.tech and next(state.tech.researched) then
-        local names = {}
-        for id, _ in pairs(state.tech.researched) do
-            local t = TechData.GetById(id)
-            if t then table.insert(names, (t.icon or "") .. t.name) end
-        end
-        table.insert(rows, UI.Label {
-            text = "✓ 已掌握：" .. table.concat(names, "、"),
-            fontSize = F.body_minor,
-            fontColor = C.text_secondary,
-            whiteSpace = "normal",
-        })
-    end
+    -- 科技树
+    local treeNodes, nodeSize = buildTechTreeNodes(state)
+    local hasInProgress = state.tech and state.tech.in_progress
 
-    -- 可研发
-    local available = Tech.GetAvailable(state)
-    if #available == 0 and not (state.tech and state.tech.in_progress) then
-        table.insert(rows, UI.Label {
-            text = "所有科技均已研发完成或前置未满足",
-            fontSize = F.body_minor,
-            fontColor = C.text_muted,
-        })
-    end
-    for _, t in ipairs(available) do
-        local disabled = state.cash < t.cost
-            or state.ap.current + (state.ap.temp or 0) < Balance.TECH.base_research_ap
-            or (state.tech and state.tech.in_progress)
-        local tCopy = t
-        table.insert(rows, listItem({
-            UI.Label {
-                text = t.icon or "🔬",
-                fontSize = 22,
-                pointerEvents = "none",
-            },
+    -- 颜色定义
+    local COL_DONE       = { 75, 175, 95, 255 }
+    local COL_LOCKED     = { 70, 68, 80, 255 }
+    local COL_AVAILABLE  = { 235, 190, 55, 255 }
+    local COL_PROGRESS   = { 90, 155, 225, 255 }
+
+    ---@type SkillTree
+    local skillTree = UI.SkillTree {
+        width = "100%",
+        height = 520,
+        nodes = treeNodes,
+        nodeSize = nodeSize,
+        nodeShape = "rounded",
+        lineWidth = 3,
+        minZoom = 0.5,
+        maxZoom = 2.0,
+        colors = {
+            unlocked    = COL_DONE,
+            locked      = COL_LOCKED,
+            unlockable  = COL_AVAILABLE,
+            line_unlocked = { COL_DONE[1], COL_DONE[2], COL_DONE[3], 200 },
+            line_locked   = { 40, 40, 50, 150 },
+            background  = { 18, 18, 24, 255 },
+            node_border = { 180, 180, 190, 100 },
+            text        = { 240, 240, 240, 255 },
+        },
+        -- 拦截自动解锁：仅用于展示，不允许 SkillTree 自行切换状态
+        onNodeUnlock = function(node)
+            -- 强制撤销 SkillTree 的自动解锁
+            node.unlocked = (state.tech.researched[node.id] == true)
+        end,
+        onNodeClick = function(node)
+            local t = node.techData
+            if not t then return end
+
+            -- 已研发
+            if state.tech.researched[t.id] then
+                UI.Toast.Show("✓ " .. t.name .. " — " .. t.desc,
+                    { duration = 2.0 })
+                return
+            end
+
+            -- 研发中
+            if hasInProgress and hasInProgress.id == t.id then
+                UI.Toast.Show(string.format("⏳ %s 研发中（%d/%d 季）",
+                    t.name, hasInProgress.progress, hasInProgress.total),
+                    { duration = 1.8 })
+                return
+            end
+
+            -- 已有其他科技在研发
+            if hasInProgress then
+                local ipTech = TechData.GetById(hasInProgress.id)
+                UI.Toast.Show("正在研发：" .. (ipTech and ipTech.name or ""),
+                    { variant = "warning", duration = 1.5 })
+                return
+            end
+
+            -- 检查前置
+            if t.requires and not state.tech.researched[t.requires] then
+                local req = TechData.GetById(t.requires)
+                UI.Toast.Show("需要先研发：" .. (req and req.name or t.requires),
+                    { variant = "warning", duration = 1.5 })
+                return
+            end
+
+            -- 尝试研发
+            local ok, msg = Tech.Start(state, t.id)
+            UI.Toast.Show(msg, {
+                variant = ok and "success" or "error", duration = 1.5,
+            })
+            if ok then
+                closeModal()
+                notifyChanged()
+            end
+        end,
+    }
+
+    table.insert(rows, skillTree)
+
+    -- 图例
+    table.insert(rows, UI.Panel {
+        width = "100%",
+        flexDirection = "row",
+        justifyContent = "center",
+        gap = 16,
+        marginTop = 4,
+        children = {
+            ActionModals._TechLegendItem(COL_DONE, "已研发"),
+            ActionModals._TechLegendItem(COL_AVAILABLE, "可研发"),
+            ActionModals._TechLegendItem(COL_LOCKED, "未解锁"),
+            ActionModals._TechLegendItem(COL_PROGRESS, "研发中"),
+        },
+    })
+
+    -- 提示
+    table.insert(rows, UI.Label {
+        text = "点击可研发节点启动研发 · 每次消耗 " .. Balance.TECH.base_research_ap .. " AP · 拖拽平移 · 缩放查看",
+        fontSize = F.label,
+        fontColor = C.text_muted,
+        textAlign = "center",
+        width = "100%",
+    })
+
+    ActionModals._ShowList("🔬 科技树", rows)
+end
+
+--- 科技树图例项
+function ActionModals._TechLegendItem(color, label)
+    return UI.Panel {
+        flexDirection = "row",
+        alignItems = "center",
+        gap = 4,
+        children = {
             UI.Panel {
-                flexGrow = 1, flexShrink = 1,
-                flexDirection = "column",
-                gap = 2,
-                children = {
-                    UI.Label {
-                        text = t.name,
-                        fontSize = F.body,
-                        fontWeight = "bold",
-                        fontColor = C.text_primary,
-                    },
-                    UI.Label {
-                        text = t.desc,
-                        fontSize = F.label,
-                        fontColor = C.text_secondary,
-                        whiteSpace = "normal",
-                    },
-                    UI.Label {
-                        text = string.format("花费 %d 克朗 / %d AP / %d 季",
-                            t.cost, Balance.TECH.base_research_ap, t.turns),
-                        fontSize = F.label,
-                        fontColor = C.text_muted,
-                    },
-                },
+                width = 12, height = 12,
+                borderRadius = 3,
+                backgroundColor = color,
             },
-            actionBtn("研发", accent, function()
-                local ok, msg = Tech.Start(state, tCopy.id)
-                UI.Toast.Show(msg, {
-                    variant = ok and "success" or "error", duration = 1.5,
-                })
-                if ok then
-                    closeModal()
-                    notifyChanged()
-                end
-            end, disabled),
-        }))
-    end
-
-    ActionModals._ShowList("🔬 科技研发", rows)
+            UI.Label {
+                text = label,
+                fontSize = F.label,
+                fontColor = C.text_secondary,
+            },
+        },
+    }
 end
 
 -- ============================================================================
@@ -254,11 +387,11 @@ function ActionModals.ShowIntelligence(state, accent)
                         actionBtn("渗透",
                             C.accent_amber,
                             function() ActionModals._IntelInfiltrate(state, factionLocal) end,
-                            not ActionModals._CanAfford(state, Balance.INTEL.infiltrate)),
+                            not ActionModals._CanAfford(state, Balance.INTEL.infiltrate, Balance.INFLUENCE.cost_infiltrate)),
                         actionBtn("收买",
                             C.accent_green,
                             function() ActionModals._IntelBribe(state, factionLocal) end,
-                            not ActionModals._CanAfford(state, Balance.INTEL.bribe)),
+                            not ActionModals._CanAfford(state, Balance.INTEL.bribe, Balance.INFLUENCE.cost_bribe)),
                     },
                 },
             },
@@ -268,17 +401,40 @@ function ActionModals.ShowIntelligence(state, accent)
     ActionModals._ShowList("👁️ 情报行动", rows)
 end
 
-function ActionModals._CanAfford(state, cfg)
-    return state.cash >= (cfg.cash or 0)
-        and (state.ap.current + (state.ap.temp or 0)) >= (cfg.ap or 0)
+--- 检查是否负担得起（AP + 现金 + 可选 influence）
+---@param state table
+---@param cfg table { ap, cash }
+---@param influenceCost number|nil 额外的影响力消耗（可选）
+function ActionModals._CanAfford(state, cfg, influenceCost)
+    if state.cash < (cfg.cash or 0) then return false end
+    if (state.ap.current + (state.ap.temp or 0)) < (cfg.ap or 0) then return false end
+    if influenceCost and influenceCost > 0 then
+        local totalInfluence = GameState.CalcTotalInfluence(state)
+        if totalInfluence < influenceCost then return false end
+    end
+    return true
 end
 
---- 原子扣费：同时扣 AP 与现金，任一不够都全部回滚
-function ActionModals._Spend(state, cfg)
-    if not ActionModals._CanAfford(state, cfg) then return false end
+--- 原子扣费：同时扣 AP、现金、可选 influence
+---@param state table
+---@param cfg table
+---@param influenceCost number|nil
+function ActionModals._Spend(state, cfg, influenceCost)
+    if not ActionModals._CanAfford(state, cfg, influenceCost) then return false end
     local apOk = GameState.SpendAP(state, cfg.ap or 0)
     if not apOk then return false end
     state.cash = state.cash - (cfg.cash or 0)
+    -- 扣除 influence：按比例从各地区扣减
+    if influenceCost and influenceCost > 0 then
+        local totalInf = GameState.CalcTotalInfluence(state)
+        if totalInf > 0 then
+            for _, r in ipairs(state.regions) do
+                local ratio = (r.influence or 0) / totalInf
+                local loss = math.floor(influenceCost * ratio + 0.5)
+                r.influence = math.max(0, (r.influence or 0) - loss)
+            end
+        end
+    end
     return true
 end
 
@@ -299,11 +455,12 @@ end
 
 function ActionModals._IntelInfiltrate(state, faction)
     local cfg = Balance.INTEL.infiltrate
-    if not ActionModals._CanAfford(state, cfg) then
-        UI.Toast.Show("资源不足", { variant = "error", duration = 1.2 })
+    local infCost = Balance.INFLUENCE.cost_infiltrate
+    if not ActionModals._CanAfford(state, cfg, infCost) then
+        UI.Toast.Show("资源不足（需影响力≥" .. infCost .. "）", { variant = "error", duration = 1.2 })
         return
     end
-    ActionModals._Spend(state, cfg)
+    ActionModals._Spend(state, cfg, infCost)
     faction.growth_mod = cfg.growth_debuff
     faction.growth_mod_remaining = cfg.duration
     GameState.AddLog(state, string.format("[情报] 渗透 %s，%d 季内增长 %.0f%%",
@@ -315,11 +472,12 @@ end
 
 function ActionModals._IntelBribe(state, faction)
     local cfg = Balance.INTEL.bribe
-    if not ActionModals._CanAfford(state, cfg) then
-        UI.Toast.Show("资源不足", { variant = "error", duration = 1.2 })
+    local infCost = Balance.INFLUENCE.cost_bribe
+    if not ActionModals._CanAfford(state, cfg, infCost) then
+        UI.Toast.Show("资源不足（需影响力≥" .. infCost .. "）", { variant = "error", duration = 1.2 })
         return
     end
-    ActionModals._Spend(state, cfg)
+    ActionModals._Spend(state, cfg, infCost)
     faction.attitude = math.min(100, faction.attitude + cfg.attitude_gain)
     GameState.AddLog(state, string.format("[情报] 收买 %s，态度 +%d → %d",
         faction.name, cfg.attitude_gain, faction.attitude))
@@ -367,7 +525,7 @@ function ActionModals.ShowDiplomacy(state, accent)
                         actionBtn("协议",
                             C.accent_blue,
                             function() ActionModals._DiploTreaty(state, factionLocal) end,
-                            not ActionModals._CanAfford(state, Balance.DIPLOMACY.treaty)),
+                            not ActionModals._CanAfford(state, Balance.DIPLOMACY.treaty, Balance.INFLUENCE.cost_treaty)),
                         actionBtn("敌对",
                             C.accent_red,
                             function() ActionModals._DiploHostile(state, factionLocal) end,
@@ -398,16 +556,17 @@ end
 
 function ActionModals._DiploTreaty(state, faction)
     local cfg = Balance.DIPLOMACY.treaty
+    local infCost = Balance.INFLUENCE.cost_treaty
     if faction.attitude < cfg.attitude_req then
         UI.Toast.Show(string.format("需要态度 ≥ %d 才能签订协议", cfg.attitude_req),
             { variant = "warning", duration = 1.5 })
         return
     end
-    if not ActionModals._CanAfford(state, cfg) then
-        UI.Toast.Show("资源不足", { variant = "error", duration = 1.2 })
+    if not ActionModals._CanAfford(state, cfg, infCost) then
+        UI.Toast.Show("资源不足（需影响力≥" .. infCost .. "）", { variant = "error", duration = 1.2 })
         return
     end
-    ActionModals._Spend(state, cfg)
+    ActionModals._Spend(state, cfg, infCost)
     faction.attitude = math.min(100, faction.attitude + cfg.attitude)
     faction.pact_remaining = cfg.pact_turns
     GameState.AddLog(state, string.format("[外交] 与 %s 签订协议，%d 季互不侵犯",
@@ -442,13 +601,16 @@ function ActionModals.ShowTrade(state, accent)
     local rows = {}
 
     -- 开发新矿
+    local maxMines = Balance.TRADE.new_mine.max_mines or 8
+    local minesFull = #state.mines >= maxMines
     table.insert(rows, ActionModals._TradeOption(
         "⛏️ 开发新矿区",
-        string.format("投入 %d 克朗 / %d AP 建立一座新矿",
-            Balance.TRADE.new_mine.cash, Balance.TRADE.new_mine.ap),
+        string.format("投入 %d 克朗 / %d AP 建立一座新矿（%d/%d）",
+            Balance.TRADE.new_mine.cash, Balance.TRADE.new_mine.ap,
+            #state.mines, maxMines),
         accent,
         function() ActionModals._TradeNewMine(state) end,
-        not ActionModals._CanAfford(state, Balance.TRADE.new_mine)
+        minesFull or not ActionModals._CanAfford(state, Balance.TRADE.new_mine)
     ))
 
     -- 出售矿山
@@ -523,6 +685,13 @@ end
 
 function ActionModals._TradeNewMine(state)
     local cfg = Balance.TRADE.new_mine
+    -- 检查矿山数量上限
+    local maxMines = cfg.max_mines or 8
+    if #state.mines >= maxMines then
+        UI.Toast.Show(string.format("矿山已达上限（%d/%d）", #state.mines, maxMines),
+            { variant = "warning", duration = 1.5 })
+        return
+    end
     if not ActionModals._CanAfford(state, cfg) then
         UI.Toast.Show("资源不足", { variant = "error", duration = 1.2 })
         return
@@ -601,11 +770,18 @@ function ActionModals._ShowList(title, rows)
             self:Destroy()
         end,
     }
-    local content = UI.Panel {
+    local content = UI.ScrollView {
         width = "100%",
-        flexDirection = "column",
-        gap = 8,
-        children = rows,
+        maxHeight = 480,
+        flexShrink = 1,
+        children = {
+            UI.Panel {
+                width = "100%",
+                flexDirection = "column",
+                gap = 8,
+                children = rows,
+            },
+        },
     }
     currentModal_:AddContent(content)
     -- Modal 必须加入 UI 树才能渲染

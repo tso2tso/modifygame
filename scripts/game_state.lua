@@ -91,12 +91,15 @@ function GameState.CreateNew()
         },
 
         -- ============================
-        -- 胜利进度
+        -- 胜利进度（v2：分离累积分与即时统计）
         -- ============================
         victory = {
             economic = 0,
             military = 0,
         },
+        battle_wins_total = 0,            -- 累计战斗胜利场次（用于军事胜利公式）
+        emergency_gold_sold = false,      -- 本回合是否触发过紧急变卖黄金（快照验证用）
+        culture_action_this_turn = false,  -- 本季是否执行过文化行动（Influence 衰减豁免）
 
         -- ============================
         -- 回合阶段
@@ -160,8 +163,8 @@ function GameState.CreateNew()
                 icon = "🏰",
                 type = "local_clan",
                 cash = Balance.AI.local_clan.start_cash,
-                attitude = 0,    -- 对玩家态度 -100~100
-                power = 30,      -- 势力值
+                attitude = -5,   -- 对玩家态度 -100~100（初始微妙敌意）
+                power = 38,      -- 势力值（起步更强）
                 desc = "扎根当地百年的传统望族，控制着大片土地和人脉网络。",
             },
             {
@@ -170,8 +173,8 @@ function GameState.CreateNew()
                 icon = "💼",
                 type = "foreign_capital",
                 cash = Balance.AI.foreign_capital.start_cash,
-                attitude = 10,
-                power = 40,
+                attitude = 5,    -- 外资初始中立偏友好
+                power = 45,      -- 资本集团势力更强
                 desc = "来自帝国首都的资本集团，资金雄厚但在本地根基较浅。",
             },
         },
@@ -246,6 +249,50 @@ function GameState.AdvanceQuarter(state)
     state.ap.bonus_used = 0
 end
 
+--- 计算玩家地区总控制度
+---@param state table
+---@return number
+function GameState.CalcTotalControl(state)
+    local total = 0
+    for _, r in ipairs(state.regions) do
+        total = total + (r.control or 0)
+    end
+    return total
+end
+
+--- 计算玩家总影响力（所有地区 influence 之和）
+---@param state table
+---@return number
+function GameState.CalcTotalInfluence(state)
+    local total = 0
+    for _, r in ipairs(state.regions) do
+        total = total + (r.influence or 0)
+    end
+    return total
+end
+
+--- 经济胜利快照验证
+---@param state table
+---@return boolean
+function GameState.CheckEconomicSnapshot(state)
+    local snap = Balance.VICTORY.economic.snapshot
+    if state.cash < snap.min_cash then return false end
+    if state.gold < snap.min_gold then return false end
+    if GameState.CalcTotalControl(state) < snap.min_total_control then return false end
+    return true
+end
+
+--- 军事胜利快照验证
+---@param state table
+---@return boolean
+function GameState.CheckMilitarySnapshot(state)
+    local snap = Balance.VICTORY.military.snapshot
+    if state.military.guards < snap.min_guards then return false end
+    if state.military.morale < snap.min_morale then return false end
+    if GameState.CalcTotalControl(state) < snap.min_total_control then return false end
+    return true
+end
+
 --- 检查游戏是否结束
 ---@param state table
 ---@return boolean
@@ -256,11 +303,18 @@ function GameState.IsGameOver(state)
     if state.year == BT.end_year and state.quarter > BT.end_quarter then
         return true
     end
-    -- 胜利条件
-    if state.victory.economic >= Balance.VICTORY.threshold then
+    -- 经济胜利：分数达标 + 章节门控 + 快照验证
+    local BVE = Balance.VICTORY.economic
+    if state.victory.economic >= BVE.threshold
+        and state.year >= BVE.gate_year
+        and GameState.CheckEconomicSnapshot(state) then
         return true
     end
-    if state.victory.military >= Balance.VICTORY.threshold then
+    -- 军事胜利：分数达标 + 章节门控 + 快照验证
+    local BVM = Balance.VICTORY.military
+    if state.victory.military >= BVM.threshold
+        and state.year >= BVM.gate_year
+        and GameState.CheckMilitarySnapshot(state) then
         return true
     end
     return false
@@ -270,10 +324,16 @@ end
 ---@param state table
 ---@return string|nil victoryType "economic" / "military" / "timeout" / nil
 function GameState.GetVictoryType(state)
-    if state.victory.economic >= Balance.VICTORY.threshold then
+    local BVE = Balance.VICTORY.economic
+    if state.victory.economic >= BVE.threshold
+        and state.year >= BVE.gate_year
+        and GameState.CheckEconomicSnapshot(state) then
         return "economic"
     end
-    if state.victory.military >= Balance.VICTORY.threshold then
+    local BVM = Balance.VICTORY.military
+    if state.victory.military >= BVM.threshold
+        and state.year >= BVM.gate_year
+        and GameState.CheckMilitarySnapshot(state) then
         return "military"
     end
     if state.year > BT.end_year or
@@ -324,7 +384,25 @@ function GameState.CalcMaxAP(state)
         ap = ap + BA.vacant_penalty
     end
 
-    -- TODO: 阶段 D 添加加成（高级经理、科技、特质、通讯基建）
+    -- 科技加成：遍历已研究科技，累加 ap_bonus
+    if state.tech and state.tech.researched then
+        local TechData = require("data.tech_data")
+        local allTechs = TechData.GetAll()
+        for _, t in ipairs(allTechs) do
+            if state.tech.researched[t.id] and t.effects and t.effects.kind == "ap_bonus" then
+                ap = ap + (t.effects.value or 0)
+            end
+        end
+    end
+
+    -- 影响力里程碑"政治联盟"（>=120 影响力）→ AP +1
+    local totalInfluence = 0
+    for _, r in ipairs(state.regions) do
+        totalInfluence = totalInfluence + (r.influence or 0)
+    end
+    if totalInfluence >= 120 then
+        ap = ap + 1
+    end
 
     -- 上限和下限
     ap = math.min(ap, BA.base + BA.max_bonus)

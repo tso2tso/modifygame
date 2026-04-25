@@ -28,9 +28,9 @@ Config.ERAS = {
     {
         id = 2, start_year = 1914, end_year = 1918,
         label  = "第二章 战报红章",
-        accent = { 204,  51,   0, 255 },  -- #CC3300 警报红
-        border = { 139,   0,   0, 255 },  -- #8B0000 暗红
-        overlay = { 139,   0,   0, 46 },  -- 18% 暗红
+        accent = { 230, 115,  50, 255 },  -- #E67332 战火橙红（与跌色 #C0392B 区分）
+        border = { 160,  50,  20, 255 },  -- #A03214 铁锈
+        overlay = { 160,  50,  20, 46 },  -- 18% 铁锈
         war_stripe = true,
         glitch = false,
     },
@@ -46,7 +46,7 @@ Config.ERAS = {
     {
         id = 4, start_year = 1941, end_year = 1945,
         label  = "第四章 战时灰幕",
-        accent = { 139,   0,   0, 255 },  -- #8B0000 危机红
+        accent = { 165,  75,  75, 255 },  -- #A54B4B 灰烬红（与 accent_red #C0392B 区分）
         border = {  74,  74,  74, 255 },  -- #4A4A4A 铅灰
         overlay = {  45,  45,  45, 102 }, -- 40% 战灰
         war_stripe = true,

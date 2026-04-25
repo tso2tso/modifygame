@@ -87,7 +87,7 @@ Balance.MILITARY = {
     base_morale      = 70,
     morale_decay     = -2,    -- 每季自然衰减
     victory_morale   = 10,    -- 胜利提升
-    defeat_morale    = -15,   -- 失败损失
+    defeat_morale    = -18,   -- 失败损失（统一数值）
 }
 
 -- ============================================================================
@@ -107,22 +107,59 @@ Balance.ECONOMY = {
 }
 
 -- ============================================================================
--- 胜利条件
+-- 胜利条件（v2 — 大幅降速 + 章节门控 + 快照验证）
 -- ============================================================================
 Balance.VICTORY = {
-    threshold        = 100,   -- 胜利阈值
-    -- 经济胜利：累积资产分
+    -- 经济胜利：每季增量 = (floor(cash/3000) + floor(gold*0.35) + floor(total_control/20) + floor(total_influence/60)) * war_mod
     economic = {
-        cash_divisor    = 500,   -- 每 500 现金 +1 点
-        gold_multiplier = 2,     -- 每黄金 +2 点
-        asset_divisor   = 1000,  -- 每 1000 资产 +1 点
+        threshold       = 2000,  -- 经济胜利点阈值
+        cash_divisor    = 3000,  -- 每 3000 现金 +1 点
+        gold_multiplier = 0.35,  -- 每黄金 +0.35 点
+        control_divisor = 20,    -- 每 20 总控制度 +1 点
+        influence_divisor = 60,  -- 每 60 总影响力 +1 点
+        war_mod         = 0.6,   -- 战时乘数（战争拖慢经济胜利）
+        gate_year       = 1950,  -- 章节门控：经济线要到 1950 年后才结算
+        -- 快照验证：达到阈值瞬间必须满足以下条件，否则视为无效
+        snapshot = {
+            min_cash          = 15000,
+            min_gold          = 25,
+            min_total_control = 100,
+        },
     },
-    -- 军事胜利：累积武装分
+    -- 军事胜利：每季增量 = (floor(guards*0.25) + floor(morale/28) + floor(total_control/14) + min(battle_wins_total, 20)) * war_mod
     military = {
-        guard_multiplier = 0.5,   -- 每护卫 +0.5 点
-        morale_divisor   = 20,    -- 每 20 士气 +1 点
-        control_divisor  = 10,    -- 每 10 控制度 +1 点
-        victory_bonus    = 5,     -- 每次战斗胜利 +5 点
+        threshold        = 2500,  -- 军事胜利点阈值
+        guard_multiplier = 0.25,  -- 每护卫 +0.25 点
+        morale_divisor   = 28,    -- 每 28 士气 +1 点
+        control_divisor  = 14,    -- 每 14 总控制度 +1 点
+        battle_wins_cap  = 20,    -- 战斗胜利计入上限
+        war_mod          = 1.25,  -- 战时乘数（战争加速军事胜利）
+        gate_year        = 1940,  -- 章节门控：军事线要到 1940 年后才结算
+        -- 快照验证
+        snapshot = {
+            min_guards        = 30,
+            min_morale        = 55,
+            min_total_control = 120,
+        },
+    },
+}
+
+-- ============================================================================
+-- 影响力 (Influence) 系统
+-- ============================================================================
+Balance.INFLUENCE = {
+    decay_per_season = -1,   -- 每季自然衰减 -1（除非本季执行了文化行动）
+    -- 行动消耗
+    cost_treaty      = 30,   -- 签订协议消耗影响力
+    cost_bribe       = 15,   -- 收买 AI 消耗影响力
+    cost_infiltrate  = 20,   -- 政治渗透消耗影响力
+    -- 阈值被动效果
+    thresholds = {
+        { min = 30,  label = "地方认可",     desc = "地区安全 +1" },
+        { min = 70,  label = "舆论优势",     desc = "招募费 -10%" },
+        { min = 120, label = "政治联盟",     desc = "AP 上限 +1" },
+        { min = 200, label = "文化霸权",     desc = "科技研发 -1 季" },
+        { min = 300, label = "不朽影响力",   desc = "经济/军事双线各 +5/季" },
     },
 }
 
@@ -229,6 +266,8 @@ Balance.LOAN = {
         { amount = 4000, interest = 0.08, duration = 8 },
     },
     default_penalty = 0.10,    -- 违约（资金不足付息）时本金膨胀
+    max_rollovers  = 1,        -- 最多展期次数，超过则强制清算
+    default_morale_penalty = -10,  -- 坏账核销士气惩罚
 }
 
 -- ============================================================================
@@ -272,7 +311,7 @@ Balance.DIPLOMACY = {
 -- 资产交易
 -- ============================================================================
 Balance.TRADE = {
-    new_mine = { ap = 2, cash = 1200, base_reserve = 600 },
+    new_mine = { ap = 2, cash = 1200, base_reserve = 600, max_mines = 8 },
     sell_mine = { ap = 2, cash_per_level = 500 },
     raid_ai = { ap = 2, cash = 400, ai_cash_loss = 200, power_loss = 8 },
 }
@@ -281,12 +320,12 @@ Balance.TRADE = {
 -- 战斗
 -- ============================================================================
 Balance.COMBAT = {
-    ai_attack_threshold = -30,   -- AI attitude 低于此值才可能进攻
-    ai_attack_power_req = 60,    -- 且 AI power 达到阈值
-    ai_attack_chance    = 0.25,  -- 每季 25% 概率主动进攻
+    ai_attack_threshold = -20,   -- AI attitude 低于此值才可能进攻（降低门槛）
+    ai_attack_power_req = 40,    -- 且 AI power 达到阈值（降低门槛）
+    ai_attack_chance    = 0.35,  -- 每季 35% 概率主动进攻（提高概率）
     equipment_bonus     = 0.15,  -- 每级装备 +15% 战力
     win_morale          = 10,
-    lose_morale         = -20,
+    lose_morale         = -18,
     lose_guards_ratio   = 0.30,  -- 战败损失 30% 护卫
     loot_ratio          = 0.25,  -- 战胜抢夺 AI 25% 现金
 }

@@ -234,21 +234,32 @@ end
 -- ============================================================================
 function TopBar._CreateAPRow(state, era)
     era = era or Config.GetEraByYear(state.year)
-    local apCurrent = state.ap.current
+    local tempAP = state.ap.temp or 0
+    local totalAvail = state.ap.current + tempAP
     local apMax = state.ap.max
+    local totalDots = apMax + tempAP  -- 临时 AP 额外显示圆点
 
     -- AP 圆点：实心=剩余可用（era_accent），空心=已用
     -- 对应 HTML 中的 --era-accent 接入点之一
     local dots = {}
-    for i = 1, apMax do
-        local isFilled = (i <= apCurrent)
+    for i = 1, totalDots do
+        local isFilled = (i <= totalAvail)
+        local isTemp = (i > apMax)  -- 超出 max 的属于临时 AP
         -- 空心描边：era_accent 35% 透明
         local emptyBorder = { era.accent[1], era.accent[2], era.accent[3], 89 }
+        local fillColor
+        if isFilled then
+            fillColor = isTemp
+                and { era.accent[1], era.accent[2], era.accent[3], 160 }  -- 临时 AP 半透明
+                or era.accent
+        else
+            fillColor = { 0, 0, 0, 0 }
+        end
         table.insert(dots, UI.Panel {
             width = S.ap_dot_size,
             height = S.ap_dot_size,
             borderRadius = S.ap_dot_size / 2,
-            backgroundColor = isFilled and era.accent or { 0, 0, 0, 0 },
+            backgroundColor = fillColor,
             borderWidth = isFilled and 0 or 1,
             borderColor = emptyBorder,
         })
@@ -314,7 +325,7 @@ function TopBar._CreateAPRow(state, era)
                 children = {
                     UI.Label {
                         id = "apCountLabel",
-                        text = string.format("%d / %d", apCurrent, apMax),
+                        text = string.format("%d / %d", totalAvail, apMax),
                         fontSize = F.card_title,
                         fontWeight = "bold",
                         fontColor = C.text_primary,
@@ -452,9 +463,39 @@ function TopBar.Refresh(root, state)
     if repVal then repVal:SetText(tostring(reputation)) end
 
     local apLabel = root:FindById("apCountLabel")
+    local totalAvail = state.ap.current + (state.ap.temp or 0)
     if apLabel then
-        local totalAvail = state.ap.current + (state.ap.temp or 0)
         apLabel:SetText(string.format("%d / %d", totalAvail, state.ap.max))
+    end
+
+    -- 刷新 AP 圆点（含临时 AP）
+    local apDots = root:FindById("apDots")
+    if apDots then
+        apDots:ClearChildren()
+        local apMax = state.ap.max
+        local tempAP = state.ap.temp or 0
+        local totalDots = apMax + tempAP  -- 临时 AP 额外显示圆点
+        for i = 1, totalDots do
+            local isFilled = (i <= totalAvail)
+            local isTemp = (i > apMax)  -- 超出 max 的属于临时 AP
+            local emptyBorder = { era.accent[1], era.accent[2], era.accent[3], 89 }
+            local fillColor
+            if isFilled then
+                fillColor = isTemp
+                    and { era.accent[1], era.accent[2], era.accent[3], 160 }  -- 临时 AP 半透明
+                    or era.accent
+            else
+                fillColor = { 0, 0, 0, 0 }
+            end
+            apDots:AddChild(UI.Panel {
+                width = S.ap_dot_size,
+                height = S.ap_dot_size,
+                borderRadius = S.ap_dot_size / 2,
+                backgroundColor = fillColor,
+                borderWidth = isFilled and 0 or 1,
+                borderColor = emptyBorder,
+            })
+        end
     end
 end
 

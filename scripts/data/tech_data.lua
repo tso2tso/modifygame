@@ -68,10 +68,10 @@ function TechData.GetAll()
             id   = "finance_net",
             name = "金融网络",
             icon = "💹",
-            desc = "金融网络使股市交易手续费降低，并提升信托股基本面。",
+            desc = "金融网络优化资金调度，军事补给成本 -20%，每季被动收入 +80。",
             cost = 700,   turns = 5,
             requires = "accounting",
-            effects = { kind = "stock_boost", stock_id = "austro_bank_trust", value = 0.01 },
+            effects = { kind = "finance_network" },
         },
         {
             id   = "propaganda",

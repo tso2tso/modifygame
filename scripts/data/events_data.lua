@@ -272,7 +272,7 @@ function EventsData.GetRandomEventTemplates()
                 cooldown = 4,  -- 触发后冷却 4 季度
             },
             -- 触发概率 (每季度检查)
-            chance = 0.15,
+            chance = 0.20,
             desc = "矿井深处发生塌方事故，多名矿工被困。救援行动刻不容缓，但也需要大量资金。",
             options = {
                 {
@@ -314,7 +314,7 @@ function EventsData.GetRandomEventTemplates()
                 min_workers = 15,
                 cooldown = 6,
             },
-            chance = 0.12,
+            chance = 0.18,
             desc = "矿工们要求提高工资和改善工作条件。如果不妥善处理，生产将陷入停滞。",
             options = {
                 {
@@ -365,7 +365,7 @@ function EventsData.GetRandomEventTemplates()
                 min_development = 2,
                 cooldown = 8,
             },
-            chance = 0.10,
+            chance = 0.15,
             desc = "一支来自维也纳的投资考察团对你的矿业经营产生了兴趣。他们愿意提供资金，但要求分享利润和决策权。",
             options = {
                 {
@@ -401,6 +401,131 @@ function EventsData.GetRandomEventTemplates()
             },
             -- 特殊：本季度 +1 临时 AP
             bonus_ap = 1,
+        },
+
+        -- ================================================================
+        -- 矿脉发现
+        -- ================================================================
+        {
+            id = "ore_vein_discovery",
+            title = "新矿脉发现",
+            priority = EventsData.PRIORITY.REGION,
+            icon = "💎",
+            trigger = {
+                requires_mine = true,
+                min_year = 1905,
+                cooldown = 6,
+            },
+            chance = 0.12,
+            desc = "矿工们在深处发现了一条富含金银的新矿脉。这可能让产量大幅提升，但开发需要额外投入。",
+            options = {
+                {
+                    text = "立即开发新矿脉",
+                    desc = "投入资金，提升产能 4 季",
+                    effects = {
+                        cash = -250,
+                        modifiers = {
+                            { target = "mine_output", value = 2, duration = 4 },
+                        },
+                    },
+                },
+                {
+                    text = "谨慎勘探，稳步推进",
+                    desc = "小投入，长期收益",
+                    effects = {
+                        cash = -80,
+                        gold = 3,
+                    },
+                },
+            },
+        },
+
+        -- ================================================================
+        -- 地方势力施压
+        -- ================================================================
+        {
+            id = "local_pressure",
+            title = "地方势力施压",
+            priority = EventsData.PRIORITY.REGION,
+            icon = "🏛️",
+            trigger = {
+                min_year = 1906,
+                cooldown = 5,
+            },
+            chance = 0.16,
+            desc = "当地传统势力对你的崛起感到不安，他们通过各种渠道向你施加压力，要求分享利益或限制扩张。",
+            options = {
+                {
+                    text = "缴纳保护费，息事宁人",
+                    desc = "破财消灾",
+                    effects = {
+                        cash = -200,
+                        modifiers = {
+                            { target = "local_relations", value = 10, duration = 0 },
+                        },
+                    },
+                },
+                {
+                    text = "针锋相对，强硬回击",
+                    desc = "树敌但显示实力",
+                    effects = {
+                        cash = -50,
+                        security_bonus = -1,
+                        modifiers = {
+                            { target = "local_relations", value = -20, duration = 0 },
+                        },
+                    },
+                },
+                {
+                    text = "寻找高层靠山对抗",
+                    desc = "花费影响力换取保护",
+                    effects = {
+                        cash = -100,
+                        modifiers = {
+                            { target = "legitimacy", value = 5, duration = 0 },
+                        },
+                    },
+                },
+            },
+        },
+
+        -- ================================================================
+        -- 黄金价格波动
+        -- ================================================================
+        {
+            id = "gold_price_surge",
+            title = "金价异动",
+            priority = EventsData.PRIORITY.MINOR,
+            icon = "📊",
+            trigger = {
+                min_year = 1905,
+                cooldown = 4,
+            },
+            chance = 0.14,
+            desc = "国际市场传来消息，黄金价格出现剧烈波动。此刻出手可能大赚，但也可能买在高点。",
+            options = {
+                {
+                    text = "趁高价抛售库存黄金",
+                    desc = "卖出 5 单位黄金，高价兑现",
+                    effects = {
+                        gold = -5,
+                        cash = 400,
+                    },
+                },
+                {
+                    text = "逢低吸纳，增加储备",
+                    desc = "花钱买入更多黄金",
+                    effects = {
+                        cash = -200,
+                        gold = 6,
+                    },
+                },
+                {
+                    text = "按兵不动",
+                    desc = "不冒险",
+                    effects = {},
+                },
+            },
         },
     }
 end
