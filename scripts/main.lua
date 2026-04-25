@@ -74,11 +74,12 @@ function Start()
     SubscribeToEvent("Update", "HandleUpdate")
     SubscribeToEvent("KeyDown", "HandleKeyDown")
 
-    -- 6. 检查开局事件（新游戏首回合）—— 入队后交由仪表盘展示
+    -- 6. 检查开局事件（新游戏首回合）—— 入队后刷新仪表盘立即显示
     if not loaded then
         local startEvents = Events.CheckEvents(state_)
         if #startEvents > 0 then
             Events.Enqueue(state_, startEvents)
+            UIManager.RefreshAll(state_)
         end
     end
 
@@ -114,11 +115,12 @@ function HandleNewGame(newState)
     EventModal.SetRoot(UIManager.GetRoot())
     UIManager.BackToDashboard()
 
-    -- 新游戏检查开局事件 —— 入队后交由仪表盘展示
+    -- 新游戏检查开局事件 —— 入队后刷新仪表盘立即显示
     if state_.turn_count == 0 then
         local startEvents = Events.CheckEvents(state_)
         if #startEvents > 0 then
             Events.Enqueue(state_, startEvents)
+            UIManager.RefreshAll(state_)
         end
     end
 end

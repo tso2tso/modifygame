@@ -117,12 +117,26 @@ function Events._CheckTrigger(state, event)
     return true
 end
 
---- 将事件加入处理队列
+--- 将事件加入处理队列（自动去重 + 标记 events_fired 防止重复触发）
 ---@param state table
 ---@param events table[]
 function Events.Enqueue(state, events)
     for _, event in ipairs(events) do
-        table.insert(state.event_queue, event)
+        -- 去重：检查队列中是否已有同 id 事件
+        local already = false
+        for _, queued in ipairs(state.event_queue) do
+            if queued.id == event.id then
+                already = true
+                break
+            end
+        end
+        if not already then
+            table.insert(state.event_queue, event)
+            -- 固定事件入队即标记，防止下次 CheckEvents 再次命中
+            if event.fixed_date then
+                state.events_fired[event.id] = true
+            end
+        end
     end
 end
 
