@@ -50,8 +50,11 @@ function Economy.Settle(state)
         bankrupt = false,
     }
 
-    -- 通胀乘数（影响出售价）
-    local inflation = state.inflation_factor or 1.0
+    -- 通胀影响名义价格；资产价格修正影响矿山/地产等资本品估值
+    local inflation = GameState.GetInflationFactor(state)
+    local laborCostFactor = GameState.GetLaborCostFactor(state)
+    local civilianDemand = GameState.GetModifierValue(state, "civilian_consumption")
+    local transportRisk = math.max(0, GameState.GetModifierValue(state, "transport_risk"))
 
     -- ============================
     -- 1. 矿山产出（金 + 银）
@@ -113,11 +116,11 @@ function Economy.Settle(state)
     -- ============================
     -- 3. 工资支出（通胀作用于所有人力成本）
     -- ============================
-    report.worker_expense = math.floor(state.workers.hired * state.workers.wage * inflation)
+    report.worker_expense = math.floor(state.workers.hired * state.workers.wage * laborCostFactor)
     report.military_expense = math.floor(state.military.guards * state.military.wage * inflation)
     local supplyDiscount = 1.0 - (state.finance_supply_discount or 0)
     report.supply_expense = math.floor(state.military.guards * BMI.supply_per_guard
-        * BMI.supply_cost * inflation * supplyDiscount)
+        * BMI.supply_cost * inflation * supplyDiscount * (1 + math.min(0.5, transportRisk)))
 
     -- 金融网络被动收入
     report.finance_income = state.finance_passive_income or 0
@@ -144,13 +147,14 @@ function Economy.Settle(state)
             -- 控制度 >= 50%: 每 10% 超出部分给 +20 被动收入
             if r.control >= 50 then
                 local bonus = math.floor((r.control - 50) / 10) * 20
+                bonus = math.floor(bonus * inflation)
                 report.region_income = report.region_income + bonus
             end
         end
         -- ── 工业城 (industrial): 控制度 >= 40% 时获得贸易收入
         if r.type == "industrial" then
             if r.control >= 40 then
-                local tradeIncome = math.floor(r.control * 1.5)
+                local tradeIncome = math.floor(r.control * 1.5 * inflation * math.max(0.4, 1 + civilianDemand))
                 report.region_income = report.region_income + tradeIncome
             end
         end
@@ -163,10 +167,24 @@ function Economy.Settle(state)
                 if presence >= 50 then
                     -- AI 高存在度：每 10% 超出 50 的部分，额外支出 +15
                     local penalty = math.floor((presence - 50) / 10) * 15
+                    penalty = math.floor(penalty * inflation)
                     report.ai_penalty = report.ai_penalty + penalty
                 end
             end
         end
+    end
+
+    report.shadow_income = 0
+    local shadowIncome = GameState.GetModifierValue(state, "shadow_income")
+    if shadowIncome > 0 then
+        report.shadow_income = math.floor(shadowIncome * inflation)
+        state.cash = state.cash + report.shadow_income
+    end
+
+    report.transport_penalty = 0
+    if transportRisk > 0 then
+        local exposedIncome = report.gold_income + report.silver_income + report.region_income + report.shadow_income
+        report.transport_penalty = math.floor(exposedIncome * math.min(0.30, transportRisk * 0.25))
     end
 
     -- 地区被动收入加到现金
@@ -179,12 +197,19 @@ function Economy.Settle(state)
     -- 4. 税收
     -- ============================
     local taxRate = BE.base_tax_rate
-    if state.flags.at_war then
+    if state.flags and state.flags.at_war then
         taxRate = BE.war_tax_rate
     end
     -- 事件修正
     local taxMod = GameState.GetModifierValue(state, "tax_rate")
     taxRate = taxRate + taxMod
+    taxRate = taxRate
+        - GameState.GetModifierValue(state, "legitimacy") * 0.0004
+        - GameState.GetModifierValue(state, "political_standing") * 0.0004
+        - GameState.GetModifierValue(state, "public_support") * 0.0002
+        + GameState.GetModifierValue(state, "corruption_risk") * 0.0005
+        + math.max(0, GameState.GetModifierValue(state, "risk")) * 0.0004
+        + (state.regulation_pressure or 0) * 0.0008
     -- 首都控制度 >= 30% 减税：每 10% 超出部分减 1% 税率
     for _, r in ipairs(state.regions) do
         if r.type == "capital" and r.control >= 30 then
@@ -192,7 +217,7 @@ function Economy.Settle(state)
             taxRate = taxRate - taxReduction
         end
     end
-    taxRate = math.max(0, taxRate)
+    taxRate = math.max(0, math.min(0.35, taxRate))
     report.tax = math.max(0, math.floor(state.cash * taxRate))
 
     -- ============================
@@ -200,9 +225,9 @@ function Economy.Settle(state)
     -- ============================
     -- 注意：gold_income / silver_income / region_income 已在步骤 2-3.5 加到 state.cash，此处只减支出
     report.total_income = report.gold_income + report.silver_income + report.region_income
-        + report.finance_income
+        + report.finance_income + report.shadow_income
     report.total_expense = report.worker_expense + report.military_expense
-        + report.supply_expense + report.tax + report.ai_penalty
+        + report.supply_expense + report.tax + report.ai_penalty + report.transport_penalty
     report.net = report.total_income - report.total_expense
 
     state.cash = state.cash - report.total_expense
@@ -218,9 +243,10 @@ function Economy.Settle(state)
         report.bankrupt = true
         -- 紧急变卖黄金
         local needed = math.abs(state.cash)
-        local sellGold = math.min(state.gold, math.ceil(needed / BM.gold_price))
+        local emergencyGoldPrice = math.max(1, math.floor(BM.gold_price * inflation))
+        local sellGold = math.min(state.gold, math.ceil(needed / emergencyGoldPrice))
         if sellGold > 0 then
-            state.cash = state.cash + sellGold * BM.gold_price
+            state.cash = state.cash + sellGold * emergencyGoldPrice
             state.gold = state.gold - sellGold
             state.emergency_gold_sold = true
             GameState.AddLog(state, string.format(
@@ -257,25 +283,78 @@ end
 
 --- 获取当前季度预估收支
 ---@param state table
----@return number income, number expense
+---@return number income, number expense, table details
 function Economy.GetEstimate(state)
-    local inflation = state.inflation_factor or 1.0
+    local inflation = GameState.GetInflationFactor(state)
+    local laborCostFactor = GameState.GetLaborCostFactor(state)
     local income = 0
+    local details = {
+        gold_potential_income = 0,
+        gold_auto_income = 0,
+        silver_income = 0,
+        region_income = 0,
+        finance_income = state.finance_passive_income or 0,
+        shadow_income = 0,
+        transport_penalty = 0,
+        tax = 0,
+    }
+
     for _, mine in ipairs(state.mines) do
         if mine.active then
             local goldOut = Economy._CalcMineOutput(state, mine)
-            income = income + math.floor(goldOut * BM.gold_price * inflation)
+            local goldPrice = math.floor(BM.gold_price * inflation)
+            details.gold_potential_income = details.gold_potential_income + goldOut * goldPrice
+            if state.gold_auto_sell then
+                local sellable = math.max(0, (state.gold or 0) + goldOut - 10)
+                details.gold_auto_income = sellable * goldPrice
+            end
             local silverOut = math.floor(BM.base_silver_output
                 * (1 + (mine.level - 1) * BM.level_output_bonus))
-            income = income + math.floor(silverOut * BM.silver_price * inflation)
+            details.silver_income = details.silver_income + math.floor(silverOut * BM.silver_price * inflation)
         end
     end
 
-    local expense = math.floor(state.workers.hired * state.workers.wage * inflation)
+    local civilianDemand = GameState.GetModifierValue(state, "civilian_consumption")
+    local transportRisk = math.max(0, GameState.GetModifierValue(state, "transport_risk"))
+    for _, r in ipairs(state.regions) do
+        if r.type == "mine" and r.control >= 50 then
+            details.region_income = details.region_income + math.floor(math.floor((r.control - 50) / 10) * 20 * inflation)
+        elseif r.type == "industrial" and r.control >= 40 then
+            details.region_income = details.region_income
+                + math.floor(r.control * 1.5 * inflation * math.max(0.4, 1 + civilianDemand))
+        end
+    end
+    local shadowIncome = GameState.GetModifierValue(state, "shadow_income")
+    if shadowIncome > 0 then
+        details.shadow_income = math.floor(shadowIncome * inflation)
+    end
+
+    income = details.gold_auto_income + details.silver_income + details.region_income
+        + details.finance_income + details.shadow_income
+
+    if transportRisk > 0 then
+        details.transport_penalty = math.floor(income * math.min(0.30, transportRisk * 0.25))
+    end
+
+    local expenseBeforeTax = math.floor(state.workers.hired * state.workers.wage * laborCostFactor)
         + math.floor(state.military.guards * state.military.wage * inflation)
         + math.floor(state.military.guards * BMI.supply_per_guard * BMI.supply_cost * inflation)
+        + details.transport_penalty
 
-    return income, expense
+    local taxRate = BE.base_tax_rate
+    if state.flags and state.flags.at_war then taxRate = BE.war_tax_rate end
+    taxRate = taxRate + GameState.GetModifierValue(state, "tax_rate")
+        - GameState.GetModifierValue(state, "legitimacy") * 0.0004
+        - GameState.GetModifierValue(state, "political_standing") * 0.0004
+        - GameState.GetModifierValue(state, "public_support") * 0.0002
+        + GameState.GetModifierValue(state, "corruption_risk") * 0.0005
+        + math.max(0, GameState.GetModifierValue(state, "risk")) * 0.0004
+        + (state.regulation_pressure or 0) * 0.0008
+    taxRate = math.max(0, math.min(0.35, taxRate))
+    details.tax = math.floor(math.max(0, state.cash + income) * taxRate)
+    local expense = expenseBeforeTax + details.tax
+
+    return income, expense, details
 end
 
 return Economy

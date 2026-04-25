@@ -64,7 +64,7 @@ end
 
 --- 收支预估卡片（§6.3 资产卡片样式）
 function IndustryPage._CreateEstimateCard(state)
-    local estIncome, estExpense = Economy.GetEstimate(state)
+    local estIncome, estExpense, estimateDetails = Economy.GetEstimate(state)
     local estNet = estIncome - estExpense
     local netColor = estNet >= 0 and C.accent_green or C.accent_red
     local inflation = state.inflation_factor or 1.0
@@ -109,11 +109,10 @@ function IndustryPage._CreateEstimateCard(state)
                 children = {
                     IndustryPage._EstimateItem("⚪ 白银库存",
                         tostring(state.silver or 0) .. " 单位", C.paper_light),
+                    IndustryPage._EstimateItem("潜在售金",
+                        "+" .. (estimateDetails.gold_potential_income or 0), C.accent_gold),
                     IndustryPage._EstimateItem("📊 通胀倍率",
                         string.format("×%.2f", inflation), inflColor),
-                    IndustryPage._EstimateItem("💸 贷款数",
-                        tostring(#(state.loans or {})),
-                        (#(state.loans or {}) > 0) and C.accent_amber or C.text_primary),
                 },
             },
         },
@@ -159,7 +158,7 @@ function IndustryPage._CreateMineCard(state, mine)
     local directorColor = directorMember and C.accent_green or C.accent_red
 
     -- 升级费用
-    local upgradeCost = BM.upgrade_cost * mine.level
+    local upgradeCost = math.floor(BM.upgrade_cost * mine.level * GameState.GetAssetPriceFactor(state))
     local canUpgrade = mine.level < BM.max_level and state.cash >= upgradeCost and state.ap.current >= 1
 
     return UI.Panel {
@@ -308,7 +307,8 @@ function IndustryPage._CreateWorkerCard(state)
     local moraleText = morale >= 80 and "高涨" or (morale >= 60 and "正常"
         or (morale >= 40 and "低落" or "极差"))
 
-    local hireCost = BW.hire_cost
+    local hireCost = math.floor(BW.hire_cost * GameState.GetLaborCostFactor(state)
+        * (1 - GameState.GetInfluenceRecruitDiscount(state)))
 
     return UI.Panel {
         id = "workerCard",
@@ -548,7 +548,7 @@ function IndustryPage._OnUpgradeMine(mineId)
                 return
             end
 
-            local cost = BM.upgrade_cost * mine.level
+            local cost = math.floor(BM.upgrade_cost * mine.level * GameState.GetAssetPriceFactor(stateRef_))
             if stateRef_.cash < cost then
                 UI.Toast.Show("资金不足", { variant = "error", duration = 1.5 })
                 return
@@ -575,7 +575,8 @@ end
 function IndustryPage._OnHireWorkers(count)
     if not stateRef_ then return end
 
-    local totalCost = BW.hire_cost * count
+    local totalCost = math.floor(BW.hire_cost * GameState.GetLaborCostFactor(stateRef_)
+        * (1 - GameState.GetInfluenceRecruitDiscount(stateRef_))) * count
     if stateRef_.cash < totalCost then
         UI.Toast.Show("资金不足", { variant = "error", duration = 1.5 })
         return
@@ -600,7 +601,7 @@ function IndustryPage._OnFireWorkers(count)
     count = math.min(count, stateRef_.workers.hired)
     if count <= 0 then return end
 
-    local compensation = BW.fire_penalty * count
+    local compensation = math.floor(BW.fire_penalty * GameState.GetLaborCostFactor(stateRef_)) * count
     stateRef_.cash = stateRef_.cash - compensation
     stateRef_.workers.hired = stateRef_.workers.hired - count
     stateRef_.workers.morale = math.max(0, stateRef_.workers.morale - 5)

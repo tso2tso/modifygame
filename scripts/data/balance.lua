@@ -97,9 +97,6 @@ Balance.ECONOMY = {
     -- 税率（基础，受事件修正）
     base_tax_rate    = 0.05,  -- 5% 所得税
     war_tax_rate     = 0.12,  -- 战时税率
-    -- 通胀（战时）
-    war_inflation    = 0.08,  -- 战时通胀率/季
-    peace_inflation  = 0.01,  -- 和平通胀率/季
     -- 利率
     loan_interest    = 0.06,  -- 贷款季利率
     -- 维护费
@@ -126,13 +123,13 @@ Balance.VICTORY = {
             min_total_control = 100,
         },
     },
-    -- 军事胜利：每季增量 = (floor(guards*0.25) + floor(morale/28) + floor(total_control/14) + min(battle_wins_total, 20)) * war_mod
+    -- 军事胜利：每季增量 = (floor(guards*0.25) + floor(morale/28) + floor(total_control/14) + 本季/近期胜场) * war_mod
     military = {
         threshold        = 2500,  -- 军事胜利点阈值
         guard_multiplier = 0.25,  -- 每护卫 +0.25 点
         morale_divisor   = 28,    -- 每 28 士气 +1 点
         control_divisor  = 14,    -- 每 14 总控制度 +1 点
-        battle_wins_cap  = 20,    -- 战斗胜利计入上限
+        battle_wins_cap  = 3,     -- 每季最多计入 3 场近期胜利，避免累计胜场重复滚雪球
         war_mod          = 1.25,  -- 战时乘数（战争加速军事胜利）
         gate_year        = 1940,  -- 章节门控：军事线要到 1940 年后才结算
         -- 快照验证
@@ -275,9 +272,13 @@ Balance.LOAN = {
 -- ============================================================================
 Balance.INFLATION = {
     base_factor       = 1.0,
+    floor_factor      = 0.65,    -- 萧条/危机可压低名义价格，但不允许塌穿
     quarter_drift_peace = 0.004,   -- +0.4%/季（和平温和）
     quarter_drift_war   = 0.025,   -- +2.5%/季（战时恶性）
+    quarter_drift_crisis_floor = -0.015, -- 事件可短期通缩，但每季降幅有限
     cap_factor        = 4.0,       -- 不超过 4 倍
+    asset_mod_floor   = -0.45,     -- 资产价格事件修正下限（萧条/战后清算）
+    asset_mod_cap     = 0.60,      -- 资产价格事件修正上限（战时/泡沫）
 }
 
 -- ============================================================================
@@ -323,6 +324,8 @@ Balance.COMBAT = {
     ai_attack_threshold = -20,   -- AI attitude 低于此值才可能进攻（降低门槛）
     ai_attack_power_req = 40,    -- 且 AI power 达到阈值（降低门槛）
     ai_attack_chance    = 0.35,  -- 每季 35% 概率主动进攻（提高概率）
+    player_attack_ap    = 2,     -- 主动突袭 AI 消耗 AP
+    player_attack_cash  = 180,   -- 主动突袭的情报/补给准备费
     equipment_bonus     = 0.15,  -- 每级装备 +15% 战力
     win_morale          = 10,
     lose_morale         = -18,

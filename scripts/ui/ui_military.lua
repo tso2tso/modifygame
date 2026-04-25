@@ -7,6 +7,7 @@ local UI = require("urhox-libs/UI")
 local Config = require("config")
 local GameState = require("game_state")
 local Balance = require("data.balance")
+local Combat = require("systems.combat")
 
 local C = Config.COLORS
 local F = Config.FONT
@@ -44,14 +45,16 @@ function MilitaryPage._BuildContent(state)
     local chiefBonus = GameState.GetPositionBonus(state, "military_chief")
 
     -- 战力计算
-    local combatPower = mil.guards * BMI.guard_base_power * (1 + mil.morale * BMI.morale_multiplier)
-    combatPower = math.floor(combatPower * (1 + chiefBonus * 0.5))
+    local combatPower = math.floor(Combat.PlayerPower(state))
 
     -- 每季军费
-    local quarterCost = mil.guards * mil.wage + mil.guards * BMI.supply_per_guard * BMI.supply_cost
+    local inflation = GameState.GetInflationFactor(state)
+    local quarterCost = math.floor(mil.guards * mil.wage * inflation
+        + mil.guards * BMI.supply_per_guard * BMI.supply_cost * inflation)
 
     -- 招募费用
-    local recruitCost = BMI.recruit_cost
+    local recruitCost = math.floor(BMI.recruit_cost * inflation
+        * (1 - GameState.GetInfluenceRecruitDiscount(state)))
 
     return UI.Panel {
         id = "militaryContent",
@@ -255,7 +258,8 @@ end
 --- 招募护卫
 function MilitaryPage._OnRecruit(count)
     if not stateRef_ then return end
-    local cost = BMI.recruit_cost * count
+    local cost = math.floor(BMI.recruit_cost * GameState.GetInflationFactor(stateRef_)
+        * (1 - GameState.GetInfluenceRecruitDiscount(stateRef_))) * count
     if stateRef_.cash < cost then
         UI.Toast.Show("资金不足", { variant = "error", duration = 1.5 }); return
     end
@@ -284,7 +288,7 @@ end
 --- 补充补给
 function MilitaryPage._OnResupply(amount)
     if not stateRef_ then return end
-    local cost = amount * BMI.supply_cost
+    local cost = math.floor(amount * BMI.supply_cost * GameState.GetInflationFactor(stateRef_))
     if stateRef_.cash < cost then
         UI.Toast.Show("资金不足", { variant = "error", duration = 1.5 }); return
     end

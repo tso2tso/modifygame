@@ -97,7 +97,8 @@ function GameState.CreateNew()
             economic = 0,
             military = 0,
         },
-        battle_wins_total = 0,            -- 累计战斗胜利场次（用于军事胜利公式）
+        battle_wins_total = 0,            -- 累计战斗胜利场次（用于军事胜利快照/记录）
+        battle_wins_unclaimed = 0,        -- 尚未结算进军事胜利点的近期胜场
         emergency_gold_sold = false,      -- 本回合是否触发过紧急变卖黄金（快照验证用）
         culture_action_this_turn = false,  -- 本季是否执行过文化行动（Influence 衰减豁免）
 
@@ -271,14 +272,34 @@ function GameState.CalcTotalInfluence(state)
     return total
 end
 
+--- 是否达到某个总影响力阈值
+---@param state table
+---@param threshold number
+---@return boolean
+function GameState.HasInfluenceThreshold(state, threshold)
+    return GameState.CalcTotalInfluence(state) >= threshold
+end
+
+--- 影响力带来的招募/雇佣折扣
+---@param state table
+---@return number discount 0..0.25
+function GameState.GetInfluenceRecruitDiscount(state)
+    if GameState.HasInfluenceThreshold(state, 70) then
+        return 0.10
+    end
+    return 0
+end
+
 --- 经济胜利快照验证
 ---@param state table
 ---@return boolean
 function GameState.CheckEconomicSnapshot(state)
     local snap = Balance.VICTORY.economic.snapshot
+    local totalAssets = GameState.GetModifierValue(state, "total_assets")
     if state.cash < snap.min_cash then return false end
     if state.gold < snap.min_gold then return false end
     if GameState.CalcTotalControl(state) < snap.min_total_control then return false end
+    if snap.min_total_assets and totalAssets < snap.min_total_assets then return false end
     return true
 end
 
@@ -396,10 +417,7 @@ function GameState.CalcMaxAP(state)
     end
 
     -- 影响力里程碑"政治联盟"（>=120 影响力）→ AP +1
-    local totalInfluence = 0
-    for _, r in ipairs(state.regions) do
-        totalInfluence = totalInfluence + (r.influence or 0)
-    end
+    local totalInfluence = GameState.CalcTotalInfluence(state)
     if totalInfluence >= 120 then
         ap = ap + 1
     end
@@ -508,6 +526,7 @@ end
 ---@param value number
 ---@param duration number 持续回合数（0 = 永久）
 function GameState.AddModifier(state, id, target, value, duration)
+    state.modifiers = state.modifiers or {}
     table.insert(state.modifiers, {
         id = id,
         target = target,
@@ -522,12 +541,41 @@ end
 ---@return number
 function GameState.GetModifierValue(state, target)
     local total = 0
+    if not state.modifiers then return total end
     for _, mod in ipairs(state.modifiers) do
         if mod.target == target then
             total = total + mod.value
         end
     end
     return total
+end
+
+--- 当前通胀乘数
+---@param state table
+---@return number
+function GameState.GetInflationFactor(state)
+    return state.inflation_factor or Balance.INFLATION.base_factor or 1.0
+end
+
+--- 当前资产价格乘数：通胀 + 历史事件造成的资产溢价/折价
+---@param state table
+---@return number
+function GameState.GetAssetPriceFactor(state)
+    local infl = GameState.GetInflationFactor(state)
+    local cfg = Balance.INFLATION
+    local assetMod = GameState.GetModifierValue(state, "asset_price_mod")
+    assetMod = math.max(cfg.asset_mod_floor or -0.45,
+        math.min(cfg.asset_mod_cap or 0.60, assetMod))
+    return math.max(0.1, infl * (1 + assetMod))
+end
+
+--- 人力成本乘数：通胀 + 事件造成的工资/配给压力
+---@param state table
+---@return number
+function GameState.GetLaborCostFactor(state)
+    local laborMod = GameState.GetModifierValue(state, "worker_cost_multiplier")
+    laborMod = math.max(-0.35, math.min(0.75, laborMod))
+    return GameState.GetInflationFactor(state) * (1 + laborMod)
 end
 
 --- 推进修正器（每回合调用，减少剩余时间，移除到期的）

@@ -37,6 +37,14 @@ function Tech.Start(state, techId)
     -- 科技顾问加成：减少研发周期
     local bonus = GameState.GetPositionBonus(state, "tech_advisor")
     local total = math.max(1, math.floor(tech.turns * (1 - bonus * 0.5)))
+    if GameState.HasInfluenceThreshold(state, 200) then
+        total = math.max(1, total - 1)
+    end
+    if state.tech.bonus_points and state.tech.bonus_points > 0 then
+        local used = math.min(state.tech.bonus_points, total - 1)
+        total = total - used
+        state.tech.bonus_points = state.tech.bonus_points - used
+    end
     state.tech.in_progress = { id = techId, progress = 0, total = total }
     GameState.AddLog(state, string.format("[科技] 启动：%s（预计 %d 季）", tech.name, total))
     return true, "启动研发：" .. tech.name

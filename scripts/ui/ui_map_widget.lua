@@ -55,6 +55,7 @@ local FACTION_COLORS = {
     foreign_capital = { 39, 174,  96 },  -- #27AE60 资本绿
     armed_group    = { 44,  62,  80 },  -- #2C3E50 钢铁灰
     neutral        = { 110, 110, 110 },  -- 中立灰
+    contested      = { 170, 118,  48 },  -- 争议琥珀
 }
 
 -- ============================================================================
@@ -95,6 +96,8 @@ local RESOURCE_ICONS = {
     coal_reserve   = "C",
     steel_capacity = "Fe",
 }
+
+local RESOURCE_ORDER = { "gold_reserve", "silver_reserve", "coal_reserve", "steel_capacity" }
 
 -- ============================================================================
 -- 欧洲国家/势力多边形（背景，不可交互）
@@ -187,6 +190,7 @@ function MapWidget:Init(props)
     self.lastPtrX_  = 0
     self.lastPtrY_  = 0
     self.ptrInside_ = false
+    self.showLegend_ = false
 
     Widget.Init(self, props)
 end
@@ -551,7 +555,8 @@ function MapWidget:_DrawResourceLayer(nvg, mx, my, mw, mh)
             local iconSize = math.max(8, math.min(12, 6 + self.zoom_ * 1.0))
             nvgFontFace(nvg, "sans"); nvgFontSize(nvg, iconSize)
             nvgTextAlign(nvg, NVG_ALIGN_LEFT + NVG_ALIGN_MIDDLE)
-            for resKey, resVal in pairs(rd.resources) do
+            for _, resKey in ipairs(RESOURCE_ORDER) do
+                local resVal = rd.resources[resKey] or 0
                 if resVal > 0 and RESOURCE_ICONS[resKey] then
                     local tag = RESOURCE_ICONS[resKey]
                     -- 背景胶囊
@@ -582,6 +587,25 @@ function MapWidget:_DrawGameNode(nvg, gn, mx, my, mw, mh)
     local nt = NODE_TYPES[gn.nodeType] or NODE_TYPES.mine
     local baseR = nt.size
     local r = math.max(6, baseR * (0.6 + self.zoom_ * 0.15))
+    local nfill = self:_GetNodeFill(rd, isSel, isHov)
+
+    if self.zoom_ < 2.5 then
+        local dotR = isSel and 7 or (isHov and 6 or math.max(4, self.zoom_ * 2.2))
+        nvgBeginPath(nvg)
+        nvgCircle(nvg, sx, sy, dotR + (isSel and 3 or 0))
+        nvgFillColor(nvg, nvgRGBA(20, 18, 14, isSel and 180 or 120))
+        nvgFill(nvg)
+        nvgBeginPath(nvg)
+        nvgCircle(nvg, sx, sy, dotR)
+        nvgFillColor(nvg, nvgRGBA(nfill[1], nfill[2], nfill[3], isHov and 245 or 220))
+        nvgFill(nvg)
+        if isSel or isHov then
+            nvgStrokeColor(nvg, nvgRGBA(C.accent_gold[1], C.accent_gold[2], C.accent_gold[3], 220))
+            nvgStrokeWidth(nvg, 1.4)
+            nvgStroke(nvg)
+        end
+        return
+    end
 
     -- 选中/悬停光环
     if isSel or isHov then
@@ -591,7 +615,6 @@ function MapWidget:_DrawGameNode(nvg, gn, mx, my, mw, mh)
     end
 
     -- 节点形状
-    local nfill = self:_GetNodeFill(rd, isSel, isHov)
     self:_DrawNodeShape(nvg, sx, sy, r, gn.nodeType)
     nvgFillColor(nvg, nvgRGBA(nfill[1], nfill[2], nfill[3], nfill[4]))
     nvgFill(nvg)
@@ -640,11 +663,6 @@ function MapWidget:_DrawGameNode(nvg, gn, mx, my, mw, mh)
             nvgFillColor(nvg, nvgRGBA(ctrlC[1], ctrlC[2], ctrlC[3], 210))
             nvgText(nvg, sx, sy + r + 3 + nameSize + 2, ctrl .. "%")
         end
-    elseif self.zoom_ < 2.5 then
-        -- 太远看不清节点形状 → 画小圆点
-        nvgBeginPath(nvg); nvgCircle(nvg, sx, sy, math.max(3, self.zoom_ * 2))
-        local nf = self:_GetNodeFill(rd, isSel, isHov)
-        nvgFillColor(nvg, nvgRGBA(nf[1], nf[2], nf[3], 220)); nvgFill(nvg)
     end
 end
 
@@ -699,7 +717,7 @@ function MapWidget:_DrawLayerSelector(nvg, wx, wy, ww)
         else
             nvgFillColor(nvg, nvgRGBA(168, 152, 128, 200))
         end
-        nvgText(nvg, px + pillW * 0.5, py + LAYER_PILL_H * 0.5, isLocked and ("🔒") or layer.label)
+        nvgText(nvg, px + pillW * 0.5, py + LAYER_PILL_H * 0.5, layer.label)
 
         px = px + pillW + LAYER_PILL_GAP
     end
@@ -713,12 +731,11 @@ function MapWidget:_DrawControls(nvg, wx, wy, ww, wh)
     local bx = wx + ww - BTN_MARGIN - BTN_SIZE
     local by = wy + BTN_MARGIN
 
-    -- 缩放百分比
+    -- 缩放倍率
     nvgFontFace(nvg, "sans"); nvgFontSize(nvg, 9)
     nvgTextAlign(nvg, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)
     nvgFillColor(nvg, nvgRGBA(200, 185, 155, 140))
-    local pct = math.floor(self.zoom_ / MAX_ZOOM * 100)
-    nvgText(nvg, bx + BTN_SIZE * 0.5, by - 2, pct .. "%")
+    nvgText(nvg, bx + BTN_SIZE * 0.5, by - 2, string.format("%.1fx", self.zoom_))
 
     self:_DrawBtn(nvg, bx, by, "+")
     self:_DrawBtn(nvg, bx, by + BTN_SIZE + BTN_GAP, "−")
@@ -728,6 +745,10 @@ function MapWidget:_DrawControls(nvg, wx, wy, ww, wh)
     -- 图例按钮（右下角）
     local legendY = wy + wh - BTN_MARGIN - BTN_SIZE
     self:_DrawBtn(nvg, bx, legendY, "?")
+
+    if self.showLegend_ then
+        self:_DrawLegendPanel(nvg, wx + ww - 178, legendY - 132)
+    end
 
     -- 势力图例（左下角微型）
     if self.activeLayers_.control then
@@ -743,7 +764,7 @@ function MapWidget:_DrawControls(nvg, wx, wy, ww, wh)
             { "玩家", FACTION_COLORS.player },
             { "家族", FACTION_COLORS.local_clan },
             { "外资", FACTION_COLORS.foreign_capital },
-            { "中立", FACTION_COLORS.neutral },
+            { "争议", FACTION_COLORS.contested },
         }
         for i, item in ipairs(legendItems) do
             local iy = ly + 5 + (i - 1) * 11
@@ -754,6 +775,40 @@ function MapWidget:_DrawControls(nvg, wx, wy, ww, wh)
             nvgFillColor(nvg, nvgRGBA(180, 170, 150, 200))
             nvgText(nvg, lx + 14, iy + 3, item[1])
         end
+    end
+end
+
+function MapWidget:_DrawLegendPanel(nvg, x, y)
+    local w, h = 168, 122
+    nvgBeginPath(nvg)
+    nvgRoundedRect(nvg, x, y, w, h, 5)
+    nvgFillColor(nvg, nvgRGBA(25, 23, 18, 235))
+    nvgFill(nvg)
+    nvgStrokeColor(nvg, nvgRGBA(C.accent_gold[1], C.accent_gold[2], C.accent_gold[3], 120))
+    nvgStrokeWidth(nvg, 1)
+    nvgStroke(nvg)
+
+    nvgFontFace(nvg, "sans")
+    nvgTextAlign(nvg, NVG_ALIGN_LEFT + NVG_ALIGN_MIDDLE)
+    nvgFontSize(nvg, 10)
+    nvgFillColor(nvg, nvgRGBA(240, 230, 208, 230))
+    nvgText(nvg, x + 10, y + 14, "地图图例")
+
+    local rows = {
+        { "控制色：玩家/家族/外资/争议", C.accent_gold },
+        { "安全层：红低、绿高", C.accent_red },
+        { "资源：Au 金 / Ag 银 / C 煤 / Fe 钢", C.accent_amber },
+        { "◎ 聚焦波黑，地球显示全欧", C.accent_blue },
+    }
+    nvgFontSize(nvg, 8)
+    for i, row in ipairs(rows) do
+        local iy = y + 34 + (i - 1) * 20
+        nvgBeginPath(nvg)
+        nvgCircle(nvg, x + 12, iy, 3)
+        nvgFillColor(nvg, nvgRGBA(row[2][1], row[2][2], row[2][3], 220))
+        nvgFill(nvg)
+        nvgFillColor(nvg, nvgRGBA(190, 176, 148, 220))
+        nvgText(nvg, x + 22, iy, row[1])
     end
 end
 
@@ -834,6 +889,7 @@ function MapWidget:OnPointerDown(event)
     -- 图例按钮
     local legendY = l.y + LAYER_BAR_H + (l.h - LAYER_BAR_H) - BTN_MARGIN - BTN_SIZE
     if self:_HitRect(px, py, bx, legendY, BTN_SIZE, BTN_SIZE) then
+        self.showLegend_ = not self.showLegend_
         event:StopPropagation(); return
     end
 

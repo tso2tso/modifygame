@@ -10,6 +10,18 @@ local EventMarketEffects = require("data.event_market_effects")
 
 local Events = {}
 
+local function ClampInflation(value)
+    local infl = Balance.INFLATION
+    return math.max(infl.floor_factor or infl.base_factor or 1.0,
+        math.min(infl.cap_factor, value))
+end
+
+local function AddRegulationPressure(state, delta)
+    if not delta or delta == 0 then return end
+    state.regulation_pressure = math.max(0, math.min(100,
+        (state.regulation_pressure or 0) + delta))
+end
+
 --- 检查当季应触发的事件，返回事件列表
 ---@param state table
 ---@return table[] triggeredEvents
@@ -71,7 +83,11 @@ function Events._CheckTrigger(state, event)
     -- 最高治安限制
     if trigger.max_security then
         local mineRegion = GameState.GetRegion(state, "mine_district")
-        if mineRegion and mineRegion.security > trigger.max_security then
+        local effectiveSecurity = mineRegion and mineRegion.security or 0
+        if mineRegion and GameState.HasInfluenceThreshold(state, 30) then
+            effectiveSecurity = effectiveSecurity + 1
+        end
+        if mineRegion and effectiveSecurity > trigger.max_security then
             return false
         end
     end
@@ -128,6 +144,34 @@ function Events.ApplyOption(state, event, optionIndex)
         state.gold = math.max(0, state.gold + effects.gold)
     end
 
+    -- 1.5 历史事件对宏观环境的直接冲击
+    if effects.inflation_delta then
+        state.inflation_factor = ClampInflation((state.inflation_factor or 1.0) + effects.inflation_delta)
+    end
+    if effects.war_state ~= nil then
+        state.flags = state.flags or {}
+        state.flags.at_war = effects.war_state and true or false
+        if state.flags.at_war then
+            state.flags.war_start_turn = state.turn_count
+        else
+            state.flags.war_end_turn = state.turn_count
+        end
+    end
+    if effects.inflation_drift_mod then
+        GameState.AddModifier(state,
+            event.id .. "_inflation_drift",
+            "inflation_drift",
+            effects.inflation_drift_mod,
+            effects.inflation_drift_duration or 4)
+    end
+    if effects.asset_price_mod then
+        GameState.AddModifier(state,
+            event.id .. "_asset_price_mod",
+            "asset_price_mod",
+            effects.asset_price_mod,
+            effects.asset_price_duration or 4)
+    end
+
     -- 2. 工人加成
     if effects.workers_bonus then
         state.workers.hired = state.workers.hired + effects.workers_bonus
@@ -145,11 +189,32 @@ function Events.ApplyOption(state, event, optionIndex)
     -- 4. 修正器
     if effects.modifiers then
         for _, mod in ipairs(effects.modifiers) do
-            GameState.AddModifier(state,
-                event.id .. "_" .. mod.target,
-                mod.target,
-                mod.value,
-                mod.duration or 0)
+            if mod.target == "security" then
+                local mineRegion = GameState.GetRegion(state, "mine_district")
+                if mineRegion then
+                    mineRegion.security = math.max(1, math.min(5,
+                        mineRegion.security + mod.value))
+                end
+            elseif mod.target == "tech_bonus" then
+                state.tech = state.tech or { researched = {}, in_progress = nil, bonus_points = 0 }
+                state.tech.bonus_points = (state.tech.bonus_points or 0) + mod.value
+            else
+                GameState.AddModifier(state,
+                    event.id .. "_" .. mod.target,
+                    mod.target,
+                    mod.value,
+                    mod.duration or 0)
+            end
+
+            if mod.target == "corruption_risk" then
+                AddRegulationPressure(state, math.ceil(mod.value * 0.5))
+            elseif mod.target == "shadow_income" then
+                AddRegulationPressure(state, math.ceil(math.max(0, mod.value) / 25))
+            elseif mod.target == "legitimacy" or mod.target == "political_standing" then
+                AddRegulationPressure(state, -math.floor(mod.value / 10))
+            elseif mod.target == "risk" then
+                AddRegulationPressure(state, math.ceil(math.max(0, mod.value) * 0.3))
+            end
         end
     end
 
@@ -221,8 +286,9 @@ function Events.ApplyOption(state, event, optionIndex)
         state.random_cooldowns[event.id] = event.trigger.cooldown
     end
 
-    -- 11. 战争状态触发
-    if event.id == "sarajevo_shots_1914" then
+    -- 11. 兼容旧事件：没有显式 war_state 的萨拉热窝枪声仍会进入战时
+    if event.id == "sarajevo_shots_1914" and effects.war_state == nil then
+        state.flags = state.flags or {}
         state.flags.at_war = true
         state.flags.war_start_turn = state.turn_count
     end

@@ -3,6 +3,7 @@
 -- ============================================================================
 
 local Balance = require("data.balance")
+local Config = require("config")
 local GameState = require("game_state")
 local Economy = require("systems.economy")
 local Events = require("systems.events")
@@ -13,6 +14,28 @@ local Tech = require("systems.tech")
 local BV = Balance.VICTORY
 
 local TurnEngine = {}
+
+local function PickAIExpansionRegion(state, faction)
+    local bestRegion = nil
+    local bestScore = -math.huge
+    for _, r in ipairs(state.regions or {}) do
+        if r.ai_presence and r.ai_presence[faction.id] ~= nil then
+            local presence = r.ai_presence[faction.id] or 0
+            local control = r.control or 0
+            local resourceScore = 0
+            if r.type == "mine" then resourceScore = resourceScore + 20 end
+            if r.type == "industrial" then resourceScore = resourceScore + 16 end
+            if r.type == "capital" then resourceScore = resourceScore + 12 end
+            local score = presence * 1.2 + math.max(0, 70 - control) + resourceScore
+                + (5 - (r.security or 3)) * 4 + math.random(0, 8)
+            if score > bestScore then
+                bestScore = score
+                bestRegion = r
+            end
+        end
+    end
+    return bestRegion
+end
 
 --- 回合结算结果
 ---@class TurnReport
@@ -38,9 +61,13 @@ function TurnEngine.EndTurn(state)
     -- 阶段 0: 通胀推进（影响本季价格）
     -- ========================================
     local infl = Balance.INFLATION
-    local drift = state.flags.at_war and infl.quarter_drift_war or infl.quarter_drift_peace
-    state.inflation_factor = math.min(infl.cap_factor,
-        (state.inflation_factor or 1.0) + drift)
+    local era = Config.GetEraByYear and Config.GetEraByYear(state.year) or nil
+    local isWarPressure = (state.flags and state.flags.at_war) or (era and era.war_stripe)
+    local drift = isWarPressure and infl.quarter_drift_war or infl.quarter_drift_peace
+    drift = drift + GameState.GetModifierValue(state, "inflation_drift")
+    drift = math.max(infl.quarter_drift_crisis_floor or -0.015, drift)
+    state.inflation_factor = math.max(infl.floor_factor or infl.base_factor or 1.0,
+        math.min(infl.cap_factor, (state.inflation_factor or 1.0) + drift))
 
     -- ========================================
     -- 阶段 1: 经济结算
@@ -102,7 +129,8 @@ function TurnEngine.EndTurn(state)
                         remaining = remaining - cashPay
                         -- 2) 再用黄金按市价抵扣
                         if remaining > 0 and state.gold > 0 then
-                            local goldPrice = Balance.MINE.gold_price
+                            local goldPrice = math.max(1,
+                                math.floor(Balance.MINE.gold_price * GameState.GetInflationFactor(state)))
                             local goldNeeded = math.ceil(remaining / goldPrice)
                             local goldUsed = math.min(state.gold, goldNeeded)
                             state.gold = state.gold - goldUsed
@@ -195,7 +223,7 @@ function TurnEngine.EndTurn(state)
         local guardPart   = math.floor(state.military.guards * BVM.guard_multiplier)
         local moralePart  = math.floor(state.military.morale / BVM.morale_divisor)
         local controlPart = math.floor(totalControl / BVM.control_divisor)
-        local winsPart    = math.min(state.battle_wins_total or 0, BVM.battle_wins_cap)
+        local winsPart    = math.min(state.battle_wins_unclaimed or 0, BVM.battle_wins_cap)
         milDelta = guardPart + moralePart + controlPart + winsPart
         -- war_mod
         if isWar then
@@ -216,6 +244,7 @@ function TurnEngine.EndTurn(state)
 
     report.victory_delta.economic = state.victory.economic - oldEco
     report.victory_delta.military = state.victory.military - oldMil
+    state.battle_wins_unclaimed = 0
 
     -- ========================================
     -- 阶段 4: 修正器推进
@@ -236,6 +265,17 @@ function TurnEngine.EndTurn(state)
     state.culture_action_this_turn = false
     -- 重置紧急变卖标记
     state.emergency_gold_sold = false
+
+    if (state.regulation_pressure or 0) >= 50 then
+        local checkChance = math.min(0.35, (state.regulation_pressure or 0) / 300)
+        if math.random() < checkChance then
+            local penalty = math.floor(state.cash * 0.03)
+            state.cash = math.max(0, state.cash - penalty)
+            state.regulation_pressure = math.max(0, (state.regulation_pressure or 0) - 8)
+            table.insert(report.warnings, string.format("监管检查罚没 %d 现金", penalty))
+            GameState.AddLog(state, string.format("监管检查：罚没 %d 现金，压力略有下降", penalty))
+        end
+    end
 
     -- ========================================
     -- 阶段 5: 武装士气衰减
@@ -267,12 +307,29 @@ function TurnEngine.EndTurn(state)
             end
             local growth = math.floor(faction.cash * math.max(0, rate))
             faction.cash = faction.cash + growth
+            local foreignControl = GameState.GetModifierValue(state, "foreign_control")
+            if faction.type == "foreign_capital" and foreignControl ~= 0 then
+                faction.attitude = math.max(-100, math.min(100,
+                    faction.attitude + math.floor(foreignControl / 10)))
+                faction.power = math.max(0, math.min(100,
+                    faction.power + math.floor(foreignControl / 12)))
+            end
 
             -- 势力增长（加速：每季 +2，上限 100）
             if faction.power < 100 then
                 local powerGain = 2
                 -- 战时 AI 势力增长更快
                 if state.flags.at_war then powerGain = 3 end
+                if faction.cash >= (aiConfig.expand_threshold or math.huge) then
+                    powerGain = powerGain + 1
+                    local targetRegion = PickAIExpansionRegion(state, faction)
+                    if targetRegion then
+                        local before = targetRegion.ai_presence[faction.id] or 0
+                        targetRegion.ai_presence[faction.id] = math.min(100, before + 2)
+                        table.insert(report.ai_changes,
+                            string.format("%s 扩大了在%s的地区存在度", faction.name, targetRegion.name))
+                    end
+                end
                 faction.power = math.min(100, faction.power + powerGain)
             end
 

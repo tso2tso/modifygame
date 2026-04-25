@@ -914,7 +914,8 @@ end
 --- 快捷雇佣工人
 function Dashboard._OnHireWorkers(state)
     if not stateRef_ then return end
-    local hireCost = Balance.WORKERS.hire_cost * 5
+    local hireCost = math.floor(Balance.WORKERS.hire_cost * GameState.GetLaborCostFactor(stateRef_)
+        * (1 - GameState.GetInfluenceRecruitDiscount(stateRef_))) * 5
     if stateRef_.cash < hireCost then
         UI.Toast.Show("资金不足", { variant = "error", duration = 1.5 })
         return
@@ -937,7 +938,7 @@ function Dashboard._OnUpgradeMine(state, mine)
         UI.Toast.Show("矿山已达最高等级", { variant = "warning", duration = 1.5 })
         return
     end
-    local cost = Balance.MINE.upgrade_cost * mine.level
+    local cost = math.floor(Balance.MINE.upgrade_cost * mine.level * GameState.GetAssetPriceFactor(stateRef_))
     if stateRef_.cash < cost then
         UI.Toast.Show("资金不足", { variant = "error", duration = 1.5 })
         return

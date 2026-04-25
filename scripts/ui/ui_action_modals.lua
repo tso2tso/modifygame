@@ -603,21 +603,23 @@ function ActionModals.ShowTrade(state, accent)
     -- 开发新矿
     local maxMines = Balance.TRADE.new_mine.max_mines or 8
     local minesFull = #state.mines >= maxMines
+    local assetPriceFactor = GameState.GetAssetPriceFactor(state)
+    local newMineCost = math.floor(Balance.TRADE.new_mine.cash * assetPriceFactor)
     table.insert(rows, ActionModals._TradeOption(
         "⛏️ 开发新矿区",
         string.format("投入 %d 克朗 / %d AP 建立一座新矿（%d/%d）",
-            Balance.TRADE.new_mine.cash, Balance.TRADE.new_mine.ap,
+            newMineCost, Balance.TRADE.new_mine.ap,
             #state.mines, maxMines),
         accent,
         function() ActionModals._TradeNewMine(state) end,
-        minesFull or not ActionModals._CanAfford(state, Balance.TRADE.new_mine)
+        minesFull or state.cash < newMineCost or state.ap.current < Balance.TRADE.new_mine.ap
     ))
 
     -- 出售矿山
     for _, mine in ipairs(state.mines) do
         if mine.active and #state.mines > 1 then
             local mineLocal = mine
-            local salePrice = mine.level * Balance.TRADE.sell_mine.cash_per_level
+            local salePrice = math.floor(mine.level * Balance.TRADE.sell_mine.cash_per_level * assetPriceFactor)
             table.insert(rows, ActionModals._TradeOption(
                 "💸 出售 " .. mine.name,
                 string.format("得现金 %d 克朗（Lv.%d）",
@@ -641,6 +643,15 @@ function ActionModals.ShowTrade(state, accent)
             accent,
             function() ActionModals._TradeRaid(state, factionLocal) end,
             not ActionModals._CanAfford(state, Balance.TRADE.raid_ai)
+        ))
+        local attackCfg = { ap = Balance.COMBAT.player_attack_ap, cash = Balance.COMBAT.player_attack_cash }
+        table.insert(rows, ActionModals._TradeOption(
+            "🛡 武装突袭：" .. faction.name,
+            string.format("花 %d 克朗 / %d AP 发动一次军事打击，胜负会改变地区控制",
+                attackCfg.cash, attackCfg.ap),
+            C.accent_red,
+            function() ActionModals._TradeMilitaryStrike(state, factionLocal) end,
+            not ActionModals._CanAfford(state, attackCfg)
         ))
     end
 
@@ -685,6 +696,7 @@ end
 
 function ActionModals._TradeNewMine(state)
     local cfg = Balance.TRADE.new_mine
+    local cashCost = math.floor(cfg.cash * GameState.GetAssetPriceFactor(state))
     -- 检查矿山数量上限
     local maxMines = cfg.max_mines or 8
     if #state.mines >= maxMines then
@@ -692,11 +704,15 @@ function ActionModals._TradeNewMine(state)
             { variant = "warning", duration = 1.5 })
         return
     end
-    if not ActionModals._CanAfford(state, cfg) then
+    if state.cash < cashCost or state.ap.current < cfg.ap then
         UI.Toast.Show("资源不足", { variant = "error", duration = 1.2 })
         return
     end
-    ActionModals._Spend(state, cfg)
+    if not GameState.SpendAP(state, cfg.ap) then
+        UI.Toast.Show("行动点不足", { variant = "error", duration = 1.2 })
+        return
+    end
+    state.cash = state.cash - cashCost
     local id = "mine_" .. tostring(state.turn_count) .. "_" .. tostring(math.random(1000, 9999))
     -- 扩展矿区资源
     local region = state.regions[1]  -- 放在主矿区上
@@ -751,6 +767,24 @@ function ActionModals._TradeRaid(state, faction)
     GameState.AddLog(state, string.format("[交易] 对 %s 发动资本攻击：现金 -%d 势力 -%d",
         faction.name, cfg.ai_cash_loss, cfg.power_loss))
     UI.Toast.Show("资本攻击成功", { variant = "success", duration = 1.5 })
+    closeModal()
+    notifyChanged()
+end
+
+function ActionModals._TradeMilitaryStrike(state, faction)
+    local cfg = { ap = Balance.COMBAT.player_attack_ap, cash = Balance.COMBAT.player_attack_cash }
+    if not ActionModals._CanAfford(state, cfg) then
+        UI.Toast.Show("资源不足", { variant = "error", duration = 1.2 })
+        return
+    end
+    ActionModals._Spend(state, cfg)
+    local ok, msg = Combat.PlayerAttack(state, faction.id)
+    if ok then
+        faction.attitude = math.max(-100, (faction.attitude or 0) - 20)
+        UI.Toast.Show("突袭完成", { variant = "success", duration = 1.5 })
+    else
+        UI.Toast.Show(msg or "突袭失败", { variant = "error", duration = 1.5 })
+    end
     closeModal()
     notifyChanged()
 end
