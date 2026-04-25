@@ -80,6 +80,9 @@ function GameState.CreateNew()
         -- 贷款
         -- ============================
         loans = {},  -- { { id, principal, interest, remaining_turns, total_paid } }
+        loan_consecutive_defaults = 0,   -- 连续违约季度数
+        negative_net_worth_turns = 0,    -- 净资产为负连续季度数
+        bankrupt = false,                -- 是否已破产（游戏结束条件）
 
         -- ============================
         -- 科技
@@ -318,6 +321,10 @@ end
 ---@param state table
 ---@return boolean
 function GameState.IsGameOver(state)
+    -- 破产失败
+    if state.bankrupt then
+        return true
+    end
     if state.year > BT.end_year then
         return true
     end
@@ -343,8 +350,12 @@ end
 
 --- 获取胜利类型（如果已胜利）
 ---@param state table
----@return string|nil victoryType "economic" / "military" / "timeout" / nil
+---@return string|nil victoryType "economic" / "military" / "timeout" / "bankrupt" / nil
 function GameState.GetVictoryType(state)
+    -- 破产失败
+    if state.bankrupt then
+        return "bankrupt"
+    end
     local BVE = Balance.VICTORY.economic
     if state.victory.economic >= BVE.threshold
         and state.year >= BVE.gate_year
@@ -630,6 +641,71 @@ function GameState.GetRegion(state, regionId)
         end
     end
     return nil
+end
+
+-- ============================================================================
+-- 资产估值（贷款额度、破产判断用）
+-- ============================================================================
+
+--- 计算玩家总资产估值
+--- 现金 + 黄金市值 + 矿山估值 + 股票持仓市值
+---@param state table
+---@return number totalAssets
+---@return table details { cash, gold_value, mine_value, stock_value }
+function GameState.CalcTotalAssets(state)
+    local inflation = GameState.GetInflationFactor(state)
+    local goldPrice = math.floor(Balance.MINE.gold_price * inflation)
+
+    local cash = math.max(0, state.cash)
+    local goldValue = (state.gold or 0) * goldPrice
+
+    -- 矿山估值：等级 × 基础价值
+    local mineValue = 0
+    for _, mine in ipairs(state.mines) do
+        mineValue = mineValue + mine.level * math.floor(Balance.MINE.upgrade_cost
+            * GameState.GetAssetPriceFactor(state))
+    end
+
+    -- 股票持仓市值
+    local stockValue = 0
+    if state.portfolio and state.portfolio.holdings then
+        for stockId, h in pairs(state.portfolio.holdings) do
+            for _, s in ipairs(state.stocks or {}) do
+                if s.id == stockId then
+                    stockValue = stockValue + math.floor(s.price * h.shares)
+                    break
+                end
+            end
+        end
+    end
+
+    local total = cash + goldValue + mineValue + stockValue
+    return total, {
+        cash = cash,
+        gold_value = goldValue,
+        mine_value = mineValue,
+        stock_value = stockValue,
+    }
+end
+
+--- 计算当前总负债
+---@param state table
+---@return number totalDebt
+function GameState.CalcTotalDebt(state)
+    local total = 0
+    for _, loan in ipairs(state.loans or {}) do
+        total = total + loan.principal
+    end
+    return total
+end
+
+--- 计算杠杆率（负债/资产）
+---@param state table
+---@return number leverage 0~∞
+function GameState.CalcLeverage(state)
+    local assets = GameState.CalcTotalAssets(state)
+    if assets <= 0 then return 999 end
+    return GameState.CalcTotalDebt(state) / assets
 end
 
 return GameState

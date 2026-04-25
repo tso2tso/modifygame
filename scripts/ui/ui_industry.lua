@@ -421,10 +421,93 @@ function IndustryPage._CreateWorkerCard(state)
     }
 end
 
---- 操作卡片（§6.3 底部新增资产样式）
+--- 操作卡片（§6.3 底部新增资产样式）— 支持部分出售
 function IndustryPage._CreateActionCard(state)
     local goldPrice = BM.gold_price
     local canSell = state.gold > 0
+
+    -- 出售数量（闭包状态）
+    local sellQty = math.min(10, state.gold)
+    local qtyLabel  ---@type table
+    local revenueLabel ---@type table
+    local sellBtn ---@type table
+
+    local function refreshSellUI()
+        if qtyLabel then
+            qtyLabel:SetText(tostring(sellQty))
+        end
+        if revenueLabel then
+            revenueLabel:SetText(string.format("预计收入：💰%d", sellQty * goldPrice))
+        end
+        if sellBtn then
+            local canSellNow = stateRef_ and sellQty > 0 and sellQty <= (stateRef_.gold or 0)
+            sellBtn:SetText(canSellNow
+                and string.format("出售 %d 单位 → 💰%d", sellQty, sellQty * goldPrice)
+                or "无法出售")
+        end
+    end
+
+    local function adjustQty(delta)
+        if not stateRef_ then return end
+        sellQty = math.max(1, math.min(stateRef_.gold, sellQty + delta))
+        refreshSellUI()
+    end
+
+    -- 数量显示标签
+    qtyLabel = UI.Label {
+        text = tostring(sellQty),
+        fontSize = F.card_title,
+        fontWeight = "bold",
+        fontColor = C.text_primary,
+        textAlign = "center",
+        minWidth = 50,
+    }
+
+    -- 预计收入标签
+    revenueLabel = UI.Label {
+        text = string.format("预计收入：💰%d", sellQty * goldPrice),
+        fontSize = F.body_minor,
+        fontColor = C.accent_gold,
+    }
+
+    -- 出售按钮
+    sellBtn = UI.Button {
+        id = "sellGoldQty",
+        text = canSell and string.format("出售 %d 单位 → 💰%d", sellQty, sellQty * goldPrice)
+            or "无黄金可售",
+        fontSize = F.body_minor,
+        height = S.btn_small_height,
+        width = "100%",
+        variant = canSell and "primary" or "outlined",
+        disabled = not canSell,
+        backgroundColor = canSell and C.accent_gold or nil,
+        fontColor = canSell and C.bg_base or C.text_muted,
+        borderRadius = S.radius_btn,
+        onClick = function(self)
+            IndustryPage._OnSellGold(sellQty)
+        end,
+    }
+
+    -- 数量调节按钮工厂
+    local function qtyBtn(label, delta)
+        return UI.Panel {
+            width = 36, height = 32,
+            borderRadius = S.radius_btn,
+            backgroundColor = C.bg_elevated,
+            borderWidth = 1, borderColor = C.paper_light,
+            justifyContent = "center", alignItems = "center",
+            pointerEvents = "auto",
+            onPointerUp = function(self) adjustQty(delta) end,
+            children = {
+                UI.Label {
+                    text = label,
+                    fontSize = F.body,
+                    fontColor = C.text_primary,
+                    pointerEvents = "none",
+                },
+            },
+        }
+    end
 
     return UI.Panel {
         id = "actionCard",
@@ -490,22 +573,87 @@ function IndustryPage._CreateActionCard(state)
                     },
                 },
             },
-            UI.Button {
-                id = "sellAllGold",
-                text = canSell and string.format("立即出售全部 (%d 单位 → 💰%d)",
-                    state.gold, state.gold * goldPrice) or "无黄金可售",
-                fontSize = F.body_minor,
-                height = S.btn_small_height,
+            -- 数量选择器
+            canSell and UI.Panel {
                 width = "100%",
-                variant = canSell and "primary" or "outlined",
-                disabled = not canSell,
-                backgroundColor = canSell and C.accent_gold or nil,
-                fontColor = canSell and C.bg_base or C.text_muted,
-                borderRadius = S.radius_btn,
-                onClick = function(self)
-                    IndustryPage._OnSellAllGold()
-                end,
-            },
+                flexDirection = "column",
+                gap = 6,
+                children = {
+                    UI.Label {
+                        text = "出售数量",
+                        fontSize = F.body_minor,
+                        fontColor = C.text_secondary,
+                    },
+                    UI.Panel {
+                        width = "100%",
+                        flexDirection = "row",
+                        alignItems = "center",
+                        justifyContent = "center",
+                        gap = 6,
+                        children = {
+                            qtyBtn("-10", -10),
+                            qtyBtn("-1", -1),
+                            qtyLabel,
+                            qtyBtn("+1", 1),
+                            qtyBtn("+10", 10),
+                        },
+                    },
+                    -- 快捷按钮：半数 / 全部
+                    UI.Panel {
+                        width = "100%",
+                        flexDirection = "row",
+                        gap = 8,
+                        justifyContent = "center",
+                        children = {
+                            UI.Panel {
+                                paddingHorizontal = 12, paddingVertical = 4,
+                                borderRadius = S.radius_btn,
+                                backgroundColor = C.bg_elevated,
+                                borderWidth = 1, borderColor = C.paper_light,
+                                pointerEvents = "auto",
+                                onPointerUp = function(self)
+                                    if stateRef_ then
+                                        sellQty = math.max(1, math.floor(stateRef_.gold / 2))
+                                        refreshSellUI()
+                                    end
+                                end,
+                                children = {
+                                    UI.Label {
+                                        text = "半数",
+                                        fontSize = F.label,
+                                        fontColor = C.text_secondary,
+                                        pointerEvents = "none",
+                                    },
+                                },
+                            },
+                            UI.Panel {
+                                paddingHorizontal = 12, paddingVertical = 4,
+                                borderRadius = S.radius_btn,
+                                backgroundColor = C.bg_elevated,
+                                borderWidth = 1, borderColor = C.paper_light,
+                                pointerEvents = "auto",
+                                onPointerUp = function(self)
+                                    if stateRef_ then
+                                        sellQty = stateRef_.gold
+                                        refreshSellUI()
+                                    end
+                                end,
+                                children = {
+                                    UI.Label {
+                                        text = "全部",
+                                        fontSize = F.label,
+                                        fontColor = C.text_secondary,
+                                        pointerEvents = "none",
+                                    },
+                                },
+                            },
+                        },
+                    },
+                    revenueLabel,
+                },
+            } or UI.Panel { width = 0, height = 0 },
+            -- 出售按钮
+            sellBtn,
         },
     }
 end
@@ -612,8 +760,8 @@ function IndustryPage._OnFireWorkers(count)
     if onStateChanged_ then onStateChanged_() end
 end
 
---- 手动出售全部黄金
-function IndustryPage._OnSellAllGold()
+--- 手动出售指定数量黄金
+function IndustryPage._OnSellGold(amount)
     if not stateRef_ then return end
 
     if stateRef_.gold <= 0 then
@@ -621,9 +769,9 @@ function IndustryPage._OnSellAllGold()
         return
     end
 
-    local amount = stateRef_.gold
+    amount = math.max(1, math.min(amount or stateRef_.gold, stateRef_.gold))
     local revenue = amount * BM.gold_price
-    stateRef_.gold = 0
+    stateRef_.gold = stateRef_.gold - amount
     stateRef_.cash = stateRef_.cash + revenue
 
     GameState.AddLog(stateRef_, string.format("手动出售 %d 单位黄金，获得 %d", amount, revenue))

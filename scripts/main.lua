@@ -163,13 +163,17 @@ function HandleEndTurn()
     if GameState.IsGameOver(state_) then
         local vType = GameState.GetVictoryType(state_)
         local msg = "百年家族史已书写完毕！"
+        local variant = "info"
         if vType == "economic" then
             msg = "经济胜利！黄金帝国已建成！"
         elseif vType == "military" then
             msg = "军事胜利！钢铁执政者崛起！"
+        elseif vType == "bankrupt" then
+            msg = "💀 家族破产！债台高筑，黄金王朝轰然倒塌…"
+            variant = "error"
         end
         print("[结局] " .. msg)
-        UI.Toast.Show(msg, { variant = "info", duration = 4 })
+        UI.Toast.Show(msg, { variant = variant, duration = 4 })
         return
     end
 
@@ -225,6 +229,13 @@ function FinalizeEndTurn()
 
     -- 刷新 UI
     UIManager.RefreshAll(state_)
+
+    -- 破产检测（EndTurn 中可能触发）
+    if state_.bankrupt then
+        UI.Toast.Show("💀 家族破产！债台高筑，黄金王朝轰然倒塌…",
+            { variant = "error", duration = 5 })
+        return
+    end
 
     -- Toast 提示
     local toastMsg = string.format("%s - 净利 %d",

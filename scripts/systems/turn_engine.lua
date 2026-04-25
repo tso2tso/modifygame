@@ -81,14 +81,21 @@ function TurnEngine.EndTurn(state)
     StockEngine.UpdateAll(state)
 
     -- ========================================
-    -- 阶段 1.6: 贷款利息结算 & 到期还本
+    -- 阶段 1.6: 贷款利息结算 & 到期还本 & 破产检测
     -- ========================================
     report.loan_interest = 0
     report.loan_defaulted = false
+    local anyDefaultThisTurn = false
     if state.loans and #state.loans > 0 then
+        -- 计算当前杠杆率（用于动态利率）
+        local currentLeverage = GameState.CalcLeverage(state)
+        local leverageMul = Balance.LOAN.leverage_interest_multiplier or 1.5
+
         local kept = {}
         for _, loan in ipairs(state.loans) do
-            local interest = math.ceil(loan.principal * loan.interest)
+            -- 动态利率：base_interest × (1 + leverage × multiplier)
+            local effectiveRate = loan.interest * (1 + currentLeverage * leverageMul)
+            local interest = math.ceil(loan.principal * effectiveRate)
             report.loan_interest = report.loan_interest + interest
             if state.cash >= interest then
                 state.cash = state.cash - interest
@@ -97,6 +104,7 @@ function TurnEngine.EndTurn(state)
                 -- 违约：本金按违约率膨胀
                 loan.principal = math.floor(loan.principal * (1 + Balance.LOAN.default_penalty))
                 report.loan_defaulted = true
+                anyDefaultThisTurn = true
                 GameState.AddLog(state, string.format("贷款违约！利息 %d 付不出，本金膨胀至 %d",
                     interest, loan.principal))
             end
@@ -141,6 +149,7 @@ function TurnEngine.EndTurn(state)
                         end
                         -- 3) 仍不够则坏账核销
                         if remaining > 0 then
+                            anyDefaultThisTurn = true
                             state.military.morale = math.max(0,
                                 state.military.morale + (Balance.LOAN.default_morale_penalty or -10))
                             GameState.AddLog(state, string.format(
@@ -157,6 +166,38 @@ function TurnEngine.EndTurn(state)
             end
         end
         state.loans = kept
+    end
+
+    -- ── 破产检测 ──
+    local bkConfig = Balance.LOAN.bankruptcy or {}
+    -- 连续违约追踪
+    if anyDefaultThisTurn then
+        state.loan_consecutive_defaults = (state.loan_consecutive_defaults or 0) + 1
+    else
+        state.loan_consecutive_defaults = 0
+    end
+    -- 净资产追踪
+    local totalAssets = GameState.CalcTotalAssets(state)
+    local totalDebt = GameState.CalcTotalDebt(state)
+    if totalAssets < totalDebt then
+        state.negative_net_worth_turns = (state.negative_net_worth_turns or 0) + 1
+    else
+        state.negative_net_worth_turns = 0
+    end
+    -- 触发破产
+    local bkDefaults = bkConfig.consecutive_defaults or 3
+    local bkNegTurns = bkConfig.negative_net_worth_turns or 4
+    if (state.loan_consecutive_defaults >= bkDefaults)
+        or (state.negative_net_worth_turns >= bkNegTurns) then
+        state.bankrupt = true
+        local reason = ""
+        if state.loan_consecutive_defaults >= bkDefaults then
+            reason = string.format("连续 %d 季贷款违约", state.loan_consecutive_defaults)
+        else
+            reason = string.format("净资产连续 %d 季为负", state.negative_net_worth_turns)
+        end
+        GameState.AddLog(state, "💀 家族宣告破产！原因：" .. reason)
+        table.insert(report.warnings, "家族破产！" .. reason)
     end
 
     -- ========================================

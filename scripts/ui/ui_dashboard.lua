@@ -303,6 +303,7 @@ function Dashboard._FocusCard(state, mine, era)
     local accent = era.accent
     local region = GameState.GetRegion(state, mine.region_id)
     local goldReserve = region and region.resources.gold_reserve or 0
+    local goldInventory = state.gold or 0
     local security = region and region.security or 0
     local secText = RegionsData.GetSecurityText(security)
     local secColor = security <= 2 and C.accent_red
@@ -436,7 +437,7 @@ function Dashboard._FocusCard(state, mine, era)
                 gap = 4,
                 children = {
                     Dashboard._MiniStat("📦", "库存",
-                        goldReserve .. " 吨"),
+                        goldInventory .. " 单位"),
                     Dashboard._MiniStat("💎", "品质",
                         mine.level >= 3 and "高" or (mine.level >= 2 and "中" or "低")),
                     Dashboard._MiniStat("💰", "开采成本",

@@ -253,18 +253,28 @@ Balance.AP_PURCHASE = {
 }
 
 -- ============================================================================
--- 贷款
+-- 贷款（v2 — 基于资产估值 + 杠杆利率）
 -- ============================================================================
 Balance.LOAN = {
     max_active    = 3,         -- 同时最多持有 3 笔贷款
-    options = {                -- 可选贷款档
-        { amount = 500,  interest = 0.06, duration = 4 },
-        { amount = 1500, interest = 0.07, duration = 6 },
-        { amount = 4000, interest = 0.08, duration = 8 },
+    -- 贷款档位：amount_ratio = 占总资产的比例（实际额度 = 总资产 × ratio，最低保底 min_amount）
+    options = {
+        { amount_ratio = 0.15, min_amount = 300,  base_interest = 0.04, duration = 4, label = "小额短贷" },
+        { amount_ratio = 0.35, min_amount = 800,  base_interest = 0.05, duration = 6, label = "中额贷款" },
+        { amount_ratio = 0.60, min_amount = 2000, base_interest = 0.06, duration = 8, label = "大额长贷" },
     },
-    default_penalty = 0.10,    -- 违约（资金不足付息）时本金膨胀
+    -- 杠杆利率加成：实际利率 = base_interest × (1 + leverage × leverage_interest_multiplier)
+    -- leverage = 总负债 / 总资产
+    leverage_interest_multiplier = 1.5,  -- 杠杆率 0.5 → 利率 ×1.75；杠杆率 1.0 → 利率 ×2.5
+    max_leverage   = 0.80,     -- 杠杆率超过 80% 时禁止再贷款
+    default_penalty = 0.15,    -- 违约（资金不足付息）时本金膨胀 15%
     max_rollovers  = 1,        -- 最多展期次数，超过则强制清算
     default_morale_penalty = -10,  -- 坏账核销士气惩罚
+    -- 破产条件
+    bankruptcy = {
+        consecutive_defaults = 3,     -- 连续违约 3 季触发破产
+        negative_net_worth_turns = 4, -- 净资产连续为负 4 季触发破产
+    },
 }
 
 -- ============================================================================

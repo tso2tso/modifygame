@@ -166,23 +166,28 @@ function MarketPage._LoansTabContent(state, accent)
 
     -- 贷款概览
     state.loans = state.loans or {}
-    local totalDebt = 0
-    for _, loan in ipairs(state.loans) do
-        totalDebt = totalDebt + loan.principal
-    end
+    local totalDebt = GameState.CalcTotalDebt(state)
+    local totalAssets = GameState.CalcTotalAssets(state)
+    local leverage = GameState.CalcLeverage(state)
+    local leveragePct = math.floor(leverage * 100)
+    local maxLev = Balance.LOAN.max_leverage or 0.80
+    local leverageColor = leverage >= maxLev and C.accent_red
+        or (leverage >= maxLev * 0.6 and C.accent_amber or C.accent_green)
 
     table.insert(children, UI.Panel {
         width = "100%",
         padding = S.card_padding,
         backgroundColor = C.bg_surface,
         borderRadius = S.radius_card,
-        flexDirection = "row",
-        justifyContent = "space-between",
-        alignItems = "center",
+        flexDirection = "column",
+        gap = 8,
         children = {
+            -- 第一行：标题 + 贷款笔数
             UI.Panel {
-                flexDirection = "column",
-                gap = 2,
+                width = "100%",
+                flexDirection = "row",
+                justifyContent = "space-between",
+                alignItems = "center",
                 children = {
                     UI.Label {
                         text = "贷款总览",
@@ -191,31 +196,65 @@ function MarketPage._LoansTabContent(state, accent)
                         fontColor = C.text_primary,
                     },
                     UI.Label {
-                        text = string.format("活跃贷款：%d / %d 笔",
+                        text = string.format("活跃 %d / %d 笔",
                             #state.loans, Balance.LOAN.max_active),
                         fontSize = F.body_minor,
                         fontColor = C.text_secondary,
                     },
                 },
             },
+            -- 第二行：资产/负债/杠杆
             UI.Panel {
-                flexDirection = "column",
-                alignItems = "flex-end",
-                gap = 2,
+                width = "100%",
+                flexDirection = "row",
+                justifyContent = "space-between",
                 children = {
-                    UI.Label {
-                        text = "总负债",
-                        fontSize = F.body_minor,
-                        fontColor = C.text_secondary,
-                    },
-                    UI.Label {
-                        text = Config.FormatNumber(totalDebt),
-                        fontSize = F.card_title,
-                        fontWeight = "bold",
-                        fontColor = totalDebt > 0 and C.accent_red or C.text_primary,
-                    },
+                    MarketPage._LoanDetailCol("总资产",
+                        Config.FormatNumber(totalAssets), C.accent_green),
+                    MarketPage._LoanDetailCol("总负债",
+                        Config.FormatNumber(totalDebt),
+                        totalDebt > 0 and C.accent_red or C.text_primary),
+                    MarketPage._LoanDetailCol("杠杆率",
+                        leveragePct .. "%", leverageColor),
                 },
             },
+            -- 破产风险提示
+            (state.loan_consecutive_defaults or 0) >= 2 and UI.Panel {
+                width = "100%",
+                padding = 6,
+                backgroundColor = { 180, 40, 40, 40 },
+                borderRadius = S.radius_btn,
+                borderWidth = 1,
+                borderColor = C.accent_red,
+                justifyContent = "center", alignItems = "center",
+                children = {
+                    UI.Label {
+                        text = string.format("⚠ 已连续违约 %d 季，达 %d 季将破产！",
+                            state.loan_consecutive_defaults,
+                            (Balance.LOAN.bankruptcy or {}).consecutive_defaults or 3),
+                        fontSize = F.body_minor,
+                        fontColor = C.accent_red,
+                    },
+                },
+            } or nil,
+            (state.negative_net_worth_turns or 0) >= 2 and UI.Panel {
+                width = "100%",
+                padding = 6,
+                backgroundColor = { 180, 40, 40, 40 },
+                borderRadius = S.radius_btn,
+                borderWidth = 1,
+                borderColor = C.accent_red,
+                justifyContent = "center", alignItems = "center",
+                children = {
+                    UI.Label {
+                        text = string.format("⚠ 净资产连续为负 %d 季，达 %d 季将破产！",
+                            state.negative_net_worth_turns,
+                            (Balance.LOAN.bankruptcy or {}).negative_net_worth_turns or 4),
+                        fontSize = F.body_minor,
+                        fontColor = C.accent_red,
+                    },
+                },
+            } or nil,
         },
     })
 
@@ -363,11 +402,25 @@ function MarketPage._LoanDetailCol(label, value, color)
     }
 end
 
---- 贷款选项网格
+--- 贷款选项网格（动态额度 = 总资产 × ratio，利率根据杠杆动态调整）
 function MarketPage._LoanOptionsGrid(state, accent)
+    local totalAssets = GameState.CalcTotalAssets(state)
+    local leverage = GameState.CalcLeverage(state)
+    local maxLev = Balance.LOAN.max_leverage or 0.80
+    local leverageMul = Balance.LOAN.leverage_interest_multiplier or 1.5
+    local slotsLeft = Balance.LOAN.max_active - #(state.loans or {})
+
     local optionCards = {}
     for _, opt in ipairs(Balance.LOAN.options) do
-        local canTake = (#(state.loans or {}) < Balance.LOAN.max_active)
+        -- 动态计算额度
+        local calcAmount = math.max(
+            opt.min_amount or 300,
+            math.floor(totalAssets * (opt.amount_ratio or 0.15)))
+        -- 动态利率
+        local effectiveRate = (opt.base_interest or 0.04) * (1 + leverage * leverageMul)
+        -- 能否借
+        local canTake = slotsLeft > 0 and leverage < maxLev
+
         table.insert(optionCards, UI.Panel {
             flexGrow = 1, flexBasis = 0,
             padding = 10,
@@ -380,27 +433,36 @@ function MarketPage._LoanOptionsGrid(state, accent)
             gap = 4,
             pointerEvents = "auto",
             opacity = canTake and 1.0 or 0.45,
-            onPointerUp = (function(option)
+            onPointerUp = (function(option, amount, rate)
                 return function(self)
-                    MarketPage._OnTakeLoan(state, option)
+                    MarketPage._OnTakeLoan(state, option, amount, rate)
                 end
-            end)(opt),
+            end)(opt, calcAmount, effectiveRate),
             children = {
                 UI.Label {
-                    text = Config.FormatNumber(opt.amount),
+                    text = opt.label or "贷款",
+                    fontSize = F.body_minor,
+                    fontWeight = "bold",
+                    fontColor = C.text_secondary,
+                    pointerEvents = "none",
+                },
+                UI.Label {
+                    text = Config.FormatNumber(calcAmount),
                     fontSize = F.card_title,
                     fontWeight = "bold",
                     fontColor = accent,
                     pointerEvents = "none",
                 },
                 UI.Label {
-                    text = string.format("利率 %.0f%%", opt.interest * 100),
+                    text = string.format("利率 %.1f%%", effectiveRate * 100),
                     fontSize = F.body_minor,
-                    fontColor = C.text_secondary,
+                    fontColor = effectiveRate > 0.08 and C.accent_red or C.text_secondary,
                     pointerEvents = "none",
                 },
                 UI.Label {
-                    text = string.format("%d 季", opt.duration),
+                    text = string.format("%d 季 | 息 %d/季",
+                        opt.duration,
+                        math.ceil(calcAmount * effectiveRate)),
                     fontSize = F.label,
                     fontColor = C.text_muted,
                     pointerEvents = "none",
@@ -409,9 +471,27 @@ function MarketPage._LoanOptionsGrid(state, accent)
         })
     end
 
+    -- 杠杆过高警告
+    if leverage >= maxLev then
+        table.insert(optionCards, UI.Panel {
+            width = "100%",
+            paddingVertical = 8,
+            justifyContent = "center", alignItems = "center",
+            children = {
+                UI.Label {
+                    text = string.format("杠杆率 %d%% 超过上限 %d%%，无法继续贷款",
+                        math.floor(leverage * 100), math.floor(maxLev * 100)),
+                    fontSize = F.body_minor,
+                    fontColor = C.accent_red,
+                },
+            },
+        })
+    end
+
     return UI.Panel {
         width = "100%",
         flexDirection = "row",
+        flexWrap = "wrap",
         gap = 8,
         children = optionCards,
     }
@@ -1101,23 +1181,34 @@ function MarketPage._OnSell(state, stockId, qty)
     end
 end
 
-function MarketPage._OnTakeLoan(state, opt)
+function MarketPage._OnTakeLoan(state, opt, calcAmount, effectiveRate)
     state.loans = state.loans or {}
     if #state.loans >= Balance.LOAN.max_active then
         UI.Toast.Show("贷款数量已达上限（" .. Balance.LOAN.max_active .. "）",
             { variant = "warning", duration = 1.5 })
         return
     end
-    state.cash = state.cash + opt.amount
+    -- 杠杆检查
+    local leverage = GameState.CalcLeverage(state)
+    local maxLev = Balance.LOAN.max_leverage or 0.80
+    if leverage >= maxLev then
+        UI.Toast.Show(string.format("杠杆率 %d%% 已超上限 %d%%，无法贷款",
+            math.floor(leverage * 100), math.floor(maxLev * 100)),
+            { variant = "error", duration = 2 })
+        return
+    end
+    state.cash = state.cash + calcAmount
     table.insert(state.loans, {
-        principal       = opt.amount,
-        interest        = opt.interest,
+        principal       = calcAmount,
+        interest        = opt.base_interest or effectiveRate,  -- 存 base_interest，结算时动态计算
         remaining_turns = opt.duration,
         total_paid      = 0,
+        rollovers       = 0,
     })
-    GameState.AddLog(state, string.format("[贷款] 借入 %d，%d 季后到期，季利率 %.1f%%",
-        opt.amount, opt.duration, opt.interest * 100))
-    UI.Toast.Show(string.format("借入 %d 克朗", opt.amount),
+    GameState.AddLog(state, string.format("[贷款] 借入 %s（%s），%d 季后到期，当前利率 %.1f%%",
+        Config.FormatNumber(calcAmount), opt.label or "贷款",
+        opt.duration, effectiveRate * 100))
+    UI.Toast.Show(string.format("借入 %s 克朗", Config.FormatNumber(calcAmount)),
         { variant = "success", duration = 1.5 })
     if onStateChanged_ then onStateChanged_() end
 end
