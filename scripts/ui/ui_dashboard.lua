@@ -77,6 +77,63 @@ local MSG_TYPE_STYLE = {
     warning     = { icon = "⚠",  bg = { 110, 85, 30, 255 },  fg = { 255, 230, 160, 255 } },
 }
 
+function Dashboard._SectionHeader(title, badgeText, badgeColor)
+    return UI.Panel {
+        width = "100%",
+        flexDirection = "row",
+        alignItems = "center",
+        justifyContent = "space-between",
+        children = {
+            UI.Panel {
+                flexDirection = "row",
+                alignItems = "center",
+                gap = 7,
+                children = {
+                    UI.Panel {
+                        width = 3,
+                        height = 16,
+                        borderRadius = 2,
+                        backgroundColor = badgeColor or C.accent_gold,
+                    },
+                    UI.Label {
+                        text = title,
+                        fontSize = F.subtitle,
+                        fontWeight = "bold",
+                        fontColor = C.text_primary,
+                    },
+                },
+            },
+            badgeText and Dashboard._Badge(badgeText, badgeColor or C.paper_mid) or UI.Panel { width = 0, height = 0 },
+        },
+    }
+end
+
+function Dashboard._Badge(text, bg, fg)
+    return UI.Panel {
+        backgroundColor = bg or C.paper_mid,
+        borderRadius = S.radius_badge,
+        paddingHorizontal = 7,
+        paddingVertical = 3,
+        children = {
+            UI.Label {
+                text = text,
+                fontSize = F.label,
+                fontWeight = "bold",
+                fontColor = fg or { 30, 25, 15, 255 },
+                pointerEvents = "none",
+            },
+        },
+    }
+end
+
+function Dashboard._FineDivider()
+    return UI.Panel {
+        width = "100%",
+        height = S.hairline_height,
+        backgroundColor = C.divider,
+    }
+end
+
 function Dashboard._TurnMessagesSection(state, era)
     local messages = state.turn_messages or {}
     if #messages == 0 then return nil end
@@ -203,40 +260,18 @@ function Dashboard._EventSection(state, era)
         width = "100%",
         backgroundColor = C.bg_surface,
         borderRadius = S.radius_card,
+        borderWidth = 1,
+        borderColor = C.border_soft,
         padding = S.card_padding,
         flexDirection = "column",
         gap = S.card_gap,
         children = {
-            UI.Panel {
-                width = "100%",
-                flexDirection = "row",
-                alignItems = "center",
-                justifyContent = "space-between",
-                children = {
-                    UI.Label {
-                        text = string.format("当前事件（%d）", count),
-                        fontSize = F.subtitle,
-                        fontWeight = "bold",
-                        fontColor = C.text_primary,
-                    },
-                    count > 0 and UI.Panel {
-                        backgroundColor = era.accent,
-                        borderRadius = S.radius_badge,
-                        paddingHorizontal = 6, paddingVertical = 2,
-                        children = {
-                            UI.Label {
-                                text = "待处理",
-                                fontSize = F.label,
-                                fontColor = { 30, 25, 15, 255 },
-                                pointerEvents = "none",
-                            },
-                        },
-                    } or UI.Panel { width = 0, height = 0 },
-                },
-            },
+            Dashboard._SectionHeader(string.format("当前事件（%d）", count),
+                count > 0 and "待处理" or nil, era.accent),
             UI.Panel {
                 width = "100%",
                 flexDirection = "column",
+                gap = 8,
                 children = eventCards,
             },
         },
@@ -250,33 +285,9 @@ function Dashboard._EventCard(evt, index, era)
 
     local badge
     if isMain then
-        badge = UI.Panel {
-            backgroundColor = C.accent_red,
-            borderRadius = S.radius_badge,
-            paddingHorizontal = 6, paddingVertical = 2,
-            children = {
-                UI.Label {
-                    text = "❗主线",
-                    fontSize = F.body_minor,
-                    fontColor = { 255, 255, 255, 255 },
-                    pointerEvents = "none",
-                },
-            },
-        }
+        badge = Dashboard._Badge("主线", C.danger_bg, { 255, 220, 210, 255 })
     else
-        badge = UI.Panel {
-            backgroundColor = C.paper_mid,
-            borderRadius = S.radius_badge,
-            paddingHorizontal = 6, paddingVertical = 2,
-            children = {
-                UI.Label {
-                    text = "支线",
-                    fontSize = F.body_minor,
-                    fontColor = C.text_secondary,
-                    pointerEvents = "none",
-                },
-            },
-        }
+        badge = Dashboard._Badge("支线", C.paper_mid, C.text_secondary)
     end
 
     local deadlineWidget = nil
@@ -290,26 +301,31 @@ function Dashboard._EventCard(evt, index, era)
 
     return UI.Panel {
         width = "100%",
-        paddingVertical = 8,
+        padding = 8,
+        backgroundColor = isMain and C.bg_inset or C.bg_elevated,
+        borderRadius = S.radius_card,
+        borderWidth = 1,
+        borderColor = isMain and { accent[1], accent[2], accent[3], 120 } or C.border_soft,
         flexDirection = "row",
         alignItems = "flex-start",
-        gap = S.card_gap,
+        gap = 9,
         borderLeftWidth = isMain and 3 or 0,
         borderLeftColor = isMain and accent or nil,
-        paddingLeft = isMain and 8 or 0,
         children = {
             UI.Panel {
-                width = S.event_img_size,
-                height = S.event_img_size,
+                width = 58,
+                height = 58,
                 backgroundColor = C.paper_mid,
                 borderRadius = S.radius_btn,
+                borderWidth = 1,
+                borderColor = C.border_soft,
                 justifyContent = "center",
                 alignItems = "center",
                 flexShrink = 0,
                 children = {
                     UI.Label {
                         text = evt.icon or "📜",
-                        fontSize = 28,
+                        fontSize = 27,
                         textAlign = "center",
                         pointerEvents = "none",
                     },
@@ -318,7 +334,7 @@ function Dashboard._EventCard(evt, index, era)
             UI.Panel {
                 flexGrow = 1, flexShrink = 1,
                 flexDirection = "column",
-                gap = 3,
+                gap = 4,
                 children = {
                     UI.Panel {
                         flexDirection = "row",
@@ -330,7 +346,7 @@ function Dashboard._EventCard(evt, index, era)
                                 text = evt.title or "未知事件",
                                 fontSize = F.body,
                                 fontWeight = "bold",
-                                fontColor = isMain and C.accent_red or C.text_primary,
+                                fontColor = isMain and accent or C.text_primary,
                                 flexShrink = 1,
                             },
                         },
@@ -347,10 +363,11 @@ function Dashboard._EventCard(evt, index, era)
                 },
             },
             UI.Panel {
-                width = 80, height = S.btn_small_height,
-                backgroundColor = C.paper_dark,
+                width = 66, height = S.btn_small_height,
+                backgroundColor = isMain and accent or C.paper_dark,
                 borderRadius = S.radius_btn,
-                borderWidth = 1, borderColor = accent,
+                borderWidth = isMain and 0 or 1,
+                borderColor = accent,
                 justifyContent = "center", alignItems = "center",
                 flexShrink = 0,
                 pointerEvents = "auto",
@@ -363,7 +380,8 @@ function Dashboard._EventCard(evt, index, era)
                     UI.Label {
                         text = "处理",
                         fontSize = F.body,
-                        fontColor = accent,
+                        fontWeight = "bold",
+                        fontColor = isMain and { 30, 25, 15, 255 } or accent,
                         pointerEvents = "none",
                     },
                 },
@@ -375,6 +393,97 @@ end
 -- ============================================================================
 -- 焦点卡片（Focus Card）— 核心 KPI + 资源储量 + 雇佣快捷按钮
 -- ============================================================================
+function Dashboard._FocusMetric(label, value, valueColor, barPct)
+    local children = {
+        UI.Label {
+            text = label,
+            fontSize = F.label,
+            fontColor = C.text_secondary,
+        },
+        UI.Label {
+            text = value,
+            fontSize = F.data_mid,
+            fontWeight = "bold",
+            fontColor = valueColor or C.text_primary,
+        },
+    }
+
+    if barPct then
+        table.insert(children, UI.Panel {
+            width = "100%",
+            height = 5,
+            backgroundColor = C.paper_mid,
+            borderRadius = 3,
+            overflow = "hidden",
+            children = {
+                UI.Panel {
+                    width = math.min(140, math.max(0, barPct)) .. "%",
+                    height = 5,
+                    backgroundColor = valueColor or C.accent_green,
+                    borderRadius = 3,
+                },
+            },
+        })
+    end
+
+    return UI.Panel {
+        flexGrow = 1,
+        flexBasis = 0,
+        minHeight = 54,
+        padding = 8,
+        backgroundColor = C.bg_inset,
+        borderRadius = S.radius_btn,
+        borderWidth = 1,
+        borderColor = C.border_soft,
+        flexDirection = "column",
+        gap = 3,
+        children = children,
+    }
+end
+
+function Dashboard._FocusPill(icon, label, value, color)
+    return UI.Panel {
+        flexGrow = 1,
+        flexBasis = 0,
+        minHeight = 40,
+        paddingVertical = 6,
+        paddingHorizontal = 7,
+        backgroundColor = C.bg_inset,
+        borderRadius = S.radius_btn,
+        borderWidth = 1,
+        borderColor = C.border_soft,
+        flexDirection = "row",
+        alignItems = "center",
+        gap = 5,
+        children = {
+            UI.Label {
+                text = icon,
+                fontSize = 14,
+                pointerEvents = "none",
+            },
+            UI.Panel {
+                flexDirection = "column",
+                flexShrink = 1,
+                children = {
+                    UI.Label {
+                        text = label,
+                        fontSize = 9,
+                        fontColor = C.text_muted,
+                        pointerEvents = "none",
+                    },
+                    UI.Label {
+                        text = value,
+                        fontSize = F.label,
+                        fontWeight = "bold",
+                        fontColor = color or C.text_primary,
+                        pointerEvents = "none",
+                    },
+                },
+            },
+        },
+    }
+end
+
 function Dashboard._FocusCard(state, mine, era)
     era = era or Config.GetEraByYear(state.year)
     local accent = era.accent
@@ -402,6 +511,9 @@ function Dashboard._FocusCard(state, mine, era)
     local silverReserve = region and region.resources.silver_reserve or 0
     local goldColor = goldReserve < 50 and C.accent_red or C.accent_gold
     local silverColor = silverReserve < 100 and C.accent_red or C.text_secondary
+    local security = region and region.security or 0
+    local securityColor = security <= 2 and C.accent_red
+        or (security >= 4 and C.accent_green or C.accent_amber)
 
     -- 雇佣费用
     local BW = Balance.WORKERS
@@ -418,11 +530,16 @@ function Dashboard._FocusCard(state, mine, era)
         flexDirection = "column",
         overflow = "hidden",
         children = {
+            UI.Panel {
+                width = "100%",
+                height = 1,
+                backgroundColor = C.highlight,
+            },
             -- 头部：资产名 + 类型标签
             UI.Panel {
                 width = "100%",
                 padding = S.card_padding,
-                paddingBottom = 6,
+                paddingBottom = 8,
                 flexDirection = "row",
                 alignItems = "center",
                 gap = 8,
@@ -459,21 +576,30 @@ function Dashboard._FocusCard(state, mine, era)
             UI.Panel {
                 width = "100%",
                 paddingHorizontal = S.card_padding,
-                paddingBottom = 6,
+                paddingBottom = 8,
                 flexDirection = "row",
                 gap = 8,
                 children = {
                     -- 左：资产图片
                     UI.Panel {
-                        width = 80, height = 80,
-                        backgroundColor = C.paper_mid,
+                        width = 88, height = 96,
+                        backgroundColor = C.bg_inset,
                         borderRadius = S.radius_btn,
+                        borderWidth = 1,
+                        borderColor = C.border_soft,
                         justifyContent = "center", alignItems = "center",
                         flexShrink = 0,
                         children = {
+                            UI.Panel {
+                                position = "absolute",
+                                left = 8, right = 8, bottom = 8,
+                                height = 2,
+                                borderRadius = 1,
+                                backgroundColor = { accent[1], accent[2], accent[3], 120 },
+                            },
                             UI.Label {
                                 text = "⛏️",
-                                fontSize = 30,
+                                fontSize = 34,
                                 textAlign = "center",
                             },
                         },
@@ -489,10 +615,10 @@ function Dashboard._FocusCard(state, mine, era)
                                 flexDirection = "row",
                                 gap = 6,
                                 children = {
-                                    Dashboard._KPICell("产量(本季)",
-                                        output .. " 单位", nil, accent),
-                                    Dashboard._KPICell("产能利用率",
-                                        utilization .. "%", nil, utilColor, utilization),
+                                    Dashboard._FocusMetric("产量(本季)",
+                                        output .. " 单位", accent),
+                                    Dashboard._FocusMetric("产能利用率",
+                                        utilization .. "%", utilColor, utilization),
                                 },
                             },
                             UI.Panel {
@@ -500,11 +626,11 @@ function Dashboard._FocusCard(state, mine, era)
                                 flexDirection = "row",
                                 gap = 6,
                                 children = {
-                                    Dashboard._KPICell("工人状态",
-                                        moraleIcon .. moraleText, nil,
+                                    Dashboard._FocusMetric("工人状态",
+                                        moraleIcon .. moraleText,
                                         morale >= 60 and C.text_primary or C.accent_red),
-                                    Dashboard._KPICell("维护费用",
-                                        "-" .. Config.FormatNumber(workerExpense), nil,
+                                    Dashboard._FocusMetric("维护费用",
+                                        "-" .. Config.FormatNumber(workerExpense),
                                         workerExpense > state.cash * 0.3 and C.accent_red or C.text_secondary),
                                 },
                             },
@@ -513,60 +639,30 @@ function Dashboard._FocusCard(state, mine, era)
                 },
             },
 
-            -- 资源储量 + 雇佣按钮 行
             UI.Panel {
                 width = "100%",
                 paddingHorizontal = S.card_padding,
-                paddingBottom = S.card_padding,
+                paddingBottom = 8,
                 flexDirection = "row",
                 alignItems = "center",
                 gap = 6,
                 children = {
-                    -- 黄金储量
-                    UI.Panel {
-                        flexDirection = "row",
-                        alignItems = "center",
-                        gap = 3,
-                        children = {
-                            UI.Label {
-                                text = "🟡",
-                                fontSize = 10,
-                            },
-                            UI.Label {
-                                text = tostring(goldReserve),
-                                fontSize = F.body_minor,
-                                fontWeight = "bold",
-                                fontColor = goldColor,
-                            },
-                        },
-                    },
-                    -- 白银储量
-                    UI.Panel {
-                        flexDirection = "row",
-                        alignItems = "center",
-                        gap = 3,
-                        children = {
-                            UI.Label {
-                                text = "⚪",
-                                fontSize = 10,
-                            },
-                            UI.Label {
-                                text = tostring(silverReserve),
-                                fontSize = F.body_minor,
-                                fontWeight = "bold",
-                                fontColor = silverColor,
-                            },
-                        },
-                    },
-                    -- 弹性撑开
-                    UI.Panel { flexGrow = 1 },
-                    -- 雇佣按钮
+                    Dashboard._FocusPill("●", "黄金储量", tostring(goldReserve), goldColor),
+                    Dashboard._FocusPill("○", "白银储量", tostring(silverReserve), silverColor),
+                    Dashboard._FocusPill("🛡", "安全", RegionsData.GetSecurityText(security), securityColor),
+                },
+            },
+            UI.Panel {
+                width = "100%",
+                paddingHorizontal = S.card_padding,
+                paddingBottom = S.card_padding,
+                children = {
                     UI.Button {
                         id = "focusHireBtn",
-                        text = string.format("招募+5 (💰%d ⚡1)", hireCost * 5),
-                        fontSize = F.label,
-                        height = 28,
-                        paddingHorizontal = 10,
+                        text = string.format("招募工人 +5    %d 克朗 / 1 AP", hireCost * 5),
+                        fontSize = F.body_minor,
+                        height = 32,
+                        width = "100%",
                         variant = canHire and "primary" or "outlined",
                         disabled = not canHire,
                         borderRadius = S.radius_btn,
@@ -632,23 +728,25 @@ end
 -- ============================================================================
 -- 快速操作区（Quick Actions）
 -- 仅展示消耗 AP 的操作项，导航类已由底部 Tab 承担
--- 单行 4 格，紧凑排列
+-- 2x2 网格，突出 AP 消耗与可用状态
 -- ============================================================================
 function Dashboard._QuickActions(state, era)
     era = era or Config.GetEraByYear(state.year)
     local items = {}
-    for _, action in ipairs(Config.QUICK_ACTIONS) do
+    for index, action in ipairs(Config.QUICK_ACTIONS) do
         local totalAP = state.ap.current + (state.ap.temp or 0)
         local canAfford = totalAP >= action.ap_cost
         table.insert(items, UI.Panel {
             flexGrow = 1, flexBasis = 0,
-            minHeight = 48,
-            paddingVertical = 4,
-            backgroundColor = C.bg_elevated,
+            minHeight = S.quick_action_height,
+            padding = 9,
+            backgroundColor = canAfford and C.bg_pressed or C.bg_inset,
             borderRadius = S.radius_card,
-            borderWidth = 1, borderColor = C.paper_mid,
-            justifyContent = "center", alignItems = "center",
-            gap = 1,
+            borderWidth = 1,
+            borderColor = canAfford and C.border_card or C.border_soft,
+            flexDirection = "row",
+            alignItems = "center",
+            gap = 8,
             pointerEvents = "auto",
             opacity = canAfford and 1.0 or 0.45,
             onPointerUp = (function(actionId)
@@ -659,57 +757,154 @@ function Dashboard._QuickActions(state, era)
                 end)
             end)(action.id),
             children = {
-                UI.Label {
-                    text = action.icon,
-                    fontSize = 18,
-                    textAlign = "center",
-                    pointerEvents = "none",
+                UI.Panel {
+                    width = 34,
+                    height = 34,
+                    borderRadius = S.radius_btn,
+                    backgroundColor = canAfford and C.bg_inset or C.bg_surface,
+                    borderWidth = 1,
+                    borderColor = canAfford and era.accent or C.border_soft,
+                    justifyContent = "center",
+                    alignItems = "center",
+                    children = {
+                        UI.Label {
+                            text = action.icon,
+                            fontSize = 18,
+                            textAlign = "center",
+                            pointerEvents = "none",
+                        },
+                    },
                 },
-                UI.Label {
-                    text = action.label,
-                    fontSize = F.label,
-                    fontColor = C.text_primary,
-                    textAlign = "center",
-                    pointerEvents = "none",
+                UI.Panel {
+                    flexGrow = 1,
+                    flexDirection = "column",
+                    gap = 2,
+                    children = {
+                        UI.Label {
+                            text = action.label,
+                            fontSize = F.body_minor,
+                            fontWeight = "bold",
+                            fontColor = C.text_primary,
+                            pointerEvents = "none",
+                        },
+                        UI.Label {
+                            text = canAfford and "可执行" or "AP不足",
+                            fontSize = F.label,
+                            fontColor = canAfford and C.text_secondary or C.accent_red,
+                            pointerEvents = "none",
+                        },
+                    },
                 },
-                UI.Label {
-                    text = action.ap_cost .. " AP",
-                    fontSize = 9,
-                    fontColor = C.text_secondary,
-                    textAlign = "center",
-                    pointerEvents = "none",
+                UI.Panel {
+                    backgroundColor = action.ap_cost >= 2 and C.warning_bg or C.bg_inset,
+                    borderRadius = S.radius_badge,
+                    paddingHorizontal = 6,
+                    paddingVertical = 3,
+                    children = {
+                        UI.Label {
+                            text = action.ap_cost .. " AP",
+                            fontSize = F.label,
+                            fontWeight = "bold",
+                            fontColor = action.ap_cost >= 2 and { 255, 220, 160, 255 } or C.text_secondary,
+                            pointerEvents = "none",
+                        },
+                    },
                 },
             },
         })
+        if index == 2 then
+            table.insert(items, "__break__")
+        end
+    end
+
+    local row1, row2 = {}, {}
+    local current = row1
+    for _, item in ipairs(items) do
+        if item == "__break__" then
+            current = row2
+        else
+            table.insert(current, item)
+        end
     end
 
     return UI.Panel {
         id = "quickActions",
         width = "100%",
         flexDirection = "column",
-        gap = 4,
+        gap = 7,
         marginBottom = 4,
         children = {
-            UI.Label {
-                text = "快速行动（消耗AP）",
-                fontSize = F.subtitle,
-                fontWeight = "medium",
-                fontColor = C.text_secondary,
+            Dashboard._SectionHeader("快速行动", "消耗 AP", era.accent),
+            UI.Panel {
+                width = "100%",
+                flexDirection = "row",
+                gap = 7,
+                children = row1,
             },
             UI.Panel {
                 width = "100%",
                 flexDirection = "row",
-                gap = 6,
-                children = items,
+                gap = 7,
+                children = row2,
             },
         },
     }
 end
 
 -- ============================================================================
--- 本季概览（Season Overview）— 紧凑版
--- 去掉矿产储量进度条（产业页有更详细版本），改为单行 4 格经济指标
+-- 本季概览（Season Overview）— 储量 + 经济指标
 -- ============================================================================
+function Dashboard._ReserveRow(icon, label, value, maxValue, color)
+    local pct = math.floor(math.min(1, math.max(0, value / math.max(1, maxValue))) * 100)
+    local barColor = pct > 50 and C.accent_green or (pct >= 20 and C.accent_amber or C.accent_red)
+    return UI.Panel {
+        width = "100%",
+        flexDirection = "row",
+        alignItems = "center",
+        gap = 6,
+        children = {
+            UI.Label {
+                text = icon,
+                fontSize = 12,
+                width = 18,
+                textAlign = "center",
+                pointerEvents = "none",
+            },
+            UI.Label {
+                text = label,
+                fontSize = F.label,
+                fontColor = C.text_secondary,
+                width = 34,
+                pointerEvents = "none",
+            },
+            UI.Panel {
+                flexGrow = 1,
+                height = 5,
+                backgroundColor = C.paper_mid,
+                borderRadius = 3,
+                overflow = "hidden",
+                children = {
+                    UI.Panel {
+                        width = pct .. "%",
+                        height = 5,
+                        borderRadius = 3,
+                        backgroundColor = barColor,
+                    },
+                },
+            },
+            UI.Label {
+                text = tostring(value),
+                fontSize = F.label,
+                fontWeight = "bold",
+                fontColor = color or C.text_primary,
+                width = 36,
+                textAlign = "right",
+                pointerEvents = "none",
+            },
+        },
+    }
+end
+
 function Dashboard._SeasonOverview(state)
     local estIncome, estExpense = Economy.GetEstimate(state)
     local cashFlow = estIncome - estExpense
@@ -724,36 +919,73 @@ function Dashboard._SeasonOverview(state)
     local cashFlowColor = cashFlow >= 0 and C.accent_green or C.accent_red
     local debtColor = debtRatio > 30 and C.accent_amber or C.text_primary
     local sentimentColor = publicSentiment < 50 and C.accent_red or C.text_primary
+    local mineRegion = GameState.GetRegion(state, "mine_district")
+    local industrialRegion = GameState.GetRegion(state, "industrial_town")
+    local mineResources = mineRegion and mineRegion.resources or {}
+    local industrialResources = industrialRegion and industrialRegion.resources or {}
 
     return UI.Panel {
         id = "seasonOverview",
         width = "100%",
         flexDirection = "column",
-        gap = 4,
+        gap = 7,
         children = {
-            UI.Label {
-                text = "本季概览",
-                fontSize = F.subtitle,
-                fontWeight = "medium",
-                fontColor = C.text_secondary,
-            },
+            Dashboard._SectionHeader("本季概览", "经营摘要", C.accent_blue),
             UI.Panel {
                 width = "100%",
                 backgroundColor = C.bg_surface,
                 borderRadius = S.radius_card,
+                borderWidth = 1,
+                borderColor = C.border_soft,
                 flexDirection = "row",
-                alignItems = "center",
-                paddingVertical = 8,
-                paddingHorizontal = 6,
+                padding = S.inset_padding,
+                gap = 10,
                 children = {
-                    Dashboard._OverviewCol("💰", "现金流",
-                        (cashFlow >= 0 and "+" or "") .. Config.FormatNumber(cashFlow), cashFlowColor),
+                    UI.Panel {
+                        flexGrow = 1,
+                        flexBasis = 0,
+                        flexDirection = "column",
+                        gap = 6,
+                        children = {
+                            UI.Label {
+                                text = "矿产储量",
+                                fontSize = F.label,
+                                fontWeight = "bold",
+                                fontColor = C.text_secondary,
+                            },
+                            Dashboard._ReserveRow("●", "金矿", mineResources.gold_reserve or 0, 500, C.accent_gold),
+                            Dashboard._ReserveRow("○", "银矿", mineResources.silver_reserve or 0, 1200, C.text_secondary),
+                            Dashboard._ReserveRow("◆", "煤矿", industrialResources.coal_reserve or 0, 2500, C.text_primary),
+                        },
+                    },
                     Dashboard._OverviewDivider(),
-                    Dashboard._OverviewCol("📊", "负债率", debtRatio .. "%", debtColor),
-                    Dashboard._OverviewDivider(),
-                    Dashboard._OverviewCol("❤️", "民心", tostring(publicSentiment), sentimentColor),
-                    Dashboard._OverviewDivider(),
-                    Dashboard._OverviewCol("🌐", "影响力", tostring(influence), C.text_primary),
+                    UI.Panel {
+                        flexGrow = 1,
+                        flexBasis = 0,
+                        flexDirection = "column",
+                        gap = 7,
+                        children = {
+                            UI.Panel {
+                                width = "100%",
+                                flexDirection = "row",
+                                gap = 7,
+                                children = {
+                                    Dashboard._OverviewCol("💰", "现金流",
+                                        (cashFlow >= 0 and "+" or "") .. Config.FormatNumber(cashFlow), cashFlowColor),
+                                    Dashboard._OverviewCol("📊", "负债率", debtRatio .. "%", debtColor),
+                                },
+                            },
+                            UI.Panel {
+                                width = "100%",
+                                flexDirection = "row",
+                                gap = 7,
+                                children = {
+                                    Dashboard._OverviewCol("❤️", "民心", tostring(publicSentiment), sentimentColor),
+                                    Dashboard._OverviewCol("🌐", "影响力", tostring(influence), C.text_primary),
+                                },
+                            },
+                        },
+                    },
                 },
             },
         },
@@ -764,7 +996,12 @@ end
 function Dashboard._OverviewCol(icon, label, value, valueColor)
     return UI.Panel {
         flexGrow = 1, flexBasis = 0,
-        paddingVertical = 4,
+        minHeight = 44,
+        backgroundColor = C.bg_inset,
+        borderRadius = S.radius_btn,
+        borderWidth = 1,
+        borderColor = C.border_soft,
+        paddingVertical = 5,
         justifyContent = "center", alignItems = "center",
         gap = 1,
         children = {
@@ -793,8 +1030,9 @@ end
 --- 概览竖分隔线
 function Dashboard._OverviewDivider()
     return UI.Panel {
-        width = 1, height = "60%",
-        backgroundColor = C.paper_mid,
+        width = 1,
+        height = "100%",
+        backgroundColor = C.divider,
     }
 end
 

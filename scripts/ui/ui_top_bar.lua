@@ -109,6 +109,7 @@ function TopBar._CreateInfoRow(state, era)
             UI.Panel {
                 flexDirection = "column",
                 flexShrink = 0,
+                width = 136,
                 children = {
                     UI.Label {
                         id = "yearLabel",
@@ -133,89 +134,102 @@ function TopBar._CreateInfoRow(state, era)
                 },
             },
 
-            -- 弹性间隔
-            UI.Panel { flexGrow = 1 },
-
-            -- §4.1 中部核心资源4格（图标+数字+标签，竖线分隔）
-            -- 💰现金(+🎰广告) / 🟡黄金(吨) / ⛏产能 / ⭐声望
+            -- §4.1 中部核心资源：压成一个内嵌资源组，减少窄屏横向挤压
             UI.Panel {
+                flexGrow = 1,
+                flexShrink = 1,
                 flexDirection = "row",
                 alignItems = "center",
-                gap = 2,
+                justifyContent = "flex-end",
+                gap = 4,
                 children = {
-                    TopBar._ResourceCell("cashCell", "💰",
-                        Config.FormatNumber(state.cash), era.accent, "现金"),
-                    -- 🎰 看广告按钮（小圆角按钮，紧贴现金格右侧）
                     UI.Panel {
-                        id = "luckyAdBtn",
-                        width = 26, height = 26,
-                        borderRadius = 13,
-                        backgroundColor = { 255, 215, 0, 40 },  -- 淡金色底
-                        borderWidth = 1,
-                        borderColor = { 255, 215, 0, 120 },
-                        justifyContent = "center",
+                        flexDirection = "row",
                         alignItems = "center",
-                        pointerEvents = "auto",
-                        onPointerUp = Config.TapGuard(function(self)
-                            TopBar._OnWatchAd()
-                        end),
+                        backgroundColor = C.bg_inset,
+                        borderRadius = S.radius_card,
+                        borderWidth = 1,
+                        borderColor = C.border_soft,
+                        paddingHorizontal = 4,
+                        paddingVertical = 4,
+                        gap = 2,
+                        flexShrink = 1,
                         children = {
-                            UI.Label {
-                                text = "🎰",
-                                fontSize = 14,
-                                textAlign = "center",
-                                pointerEvents = "none",
+                            TopBar._ResourceCell("cashCell", "💰",
+                                Config.FormatNumber(state.cash), era.accent, "现金"),
+                            UI.Panel {
+                                id = "luckyAdBtn",
+                                width = 24, height = 24,
+                                borderRadius = 12,
+                                backgroundColor = { era.accent[1], era.accent[2], era.accent[3], 36 },
+                                borderWidth = 1,
+                                borderColor = { era.accent[1], era.accent[2], era.accent[3], 120 },
+                                justifyContent = "center",
+                                alignItems = "center",
+                                pointerEvents = "auto",
+                                onPointerUp = Config.TapGuard(function(self)
+                                    TopBar._OnWatchAd()
+                                end),
+                                children = {
+                                    UI.Label {
+                                        text = "🎰",
+                                        fontSize = 13,
+                                        textAlign = "center",
+                                        pointerEvents = "none",
+                                    },
+                                },
                             },
+                            TopBar._ResourceCell("goldCell", "●",
+                                tostring(state.gold), C.text_primary, "黄金"),
+                            TopBar._ResourceCell("prodCell", "⛏",
+                                tostring(production), C.text_primary, "产能"),
+                            TopBar._ResourceCell("repCell", "★",
+                                tostring(reputation), C.text_primary, "声望"),
                         },
                     },
+                    (function()
+                        local totalAssets = GameState.CalcTotalAssets(state)
+                        local totalDebt = GameState.CalcTotalDebt(state)
+                        local netWorth = totalAssets - totalDebt
+                        local nwColor = netWorth < 0 and C.accent_red or C.accent_green
+                        return TopBar._ResourceCell("netWorthCell", "🏦",
+                            Config.FormatNumber(netWorth), nwColor, "净资产", true)
+                    end)(),
                 },
             },
-            TopBar._VerticalDivider(),
-            TopBar._ResourceCell("goldCell", "🟡",
-                tostring(state.gold), C.text_primary, "黄金(吨)"),
-            TopBar._VerticalDivider(),
-            TopBar._ResourceCell("prodCell", "⛏️",
-                tostring(production), C.text_primary, "产能"),
-            TopBar._VerticalDivider(),
-            TopBar._ResourceCell("repCell", "⭐",
-                tostring(reputation), C.text_primary, "声望"),
-
-            -- 右侧：净资产显示（替代设置图标）
-            TopBar._VerticalDivider(),
-            (function()
-                local totalAssets = GameState.CalcTotalAssets(state)
-                local totalDebt = GameState.CalcTotalDebt(state)
-                local netWorth = totalAssets - totalDebt
-                local nwColor = netWorth < 0 and C.accent_red or C.accent_green
-                return TopBar._ResourceCell("netWorthCell", "🏦",
-                    Config.FormatNumber(netWorth), nwColor, "净资产")
-            end)(),
         },
     }
 end
 
 --- §4.1 资源格：图标16px + 数值16px bold + 标签11px text_secondary
-function TopBar._ResourceCell(id, icon, valueText, valueColor, label)
+function TopBar._ResourceCell(id, icon, valueText, valueColor, label, framed)
     return UI.Panel {
         id = id,
         flexDirection = "column",
         alignItems = "center",
         gap = 1,
-        paddingHorizontal = 6,
+        paddingHorizontal = framed and 6 or 4,
+        paddingVertical = framed and 4 or 0,
+        backgroundColor = framed and C.bg_inset or nil,
+        borderRadius = framed and S.radius_card or nil,
+        borderWidth = framed and 1 or 0,
+        borderColor = framed and C.border_soft or nil,
+        flexShrink = 0,
         children = {
             UI.Panel {
                 flexDirection = "row",
                 alignItems = "center",
-                gap = 3,
+                gap = 2,
                 children = {
                     UI.Label {
                         text = icon,
-                        fontSize = S.icon_resource,
+                        fontSize = framed and 13 or 12,
+                        fontColor = valueColor or C.text_primary,
                     },
                     UI.Label {
                         id = id .. "_val",
                         text = valueText,
-                        fontSize = F.data_small,
+                        fontSize = framed and F.body_minor or F.label,
                         fontWeight = "bold",
                         fontColor = valueColor or C.text_primary,
                     },
@@ -223,7 +237,7 @@ function TopBar._ResourceCell(id, icon, valueText, valueColor, label)
             },
             label and UI.Label {
                 text = label,
-                fontSize = 10,
+                fontSize = 9,
                 fontColor = C.text_muted,
             } or nil,
         },
@@ -308,45 +322,52 @@ function TopBar._CreateAPRow(state, era)
         paddingHorizontal = S.page_padding,
         backgroundColor = C.bg_surface,
         children = {
-            -- 设计图左侧：AP 圆形标签 + 数字（接入 era_accent）
             UI.Panel {
-                width = 32, height = 32,
-                borderRadius = 16,
-                backgroundColor = C.paper_dark,
-                borderWidth = 1,
-                borderColor = era.accent,
-                justifyContent = "center",
+                flexDirection = "row",
                 alignItems = "center",
-                marginRight = 6,
+                backgroundColor = C.bg_inset,
+                borderRadius = S.radius_card,
+                borderWidth = 1,
+                borderColor = C.border_soft,
+                paddingHorizontal = 8,
+                paddingVertical = 5,
+                gap = 7,
                 children = {
-                    UI.Label {
-                        text = "AP",
-                        fontSize = F.label,
-                        fontWeight = "bold",
-                        fontColor = era.accent,
-                        textAlign = "center",
-                        pointerEvents = "none",
+                    UI.Panel {
+                        width = 28, height = 28,
+                        borderRadius = 14,
+                        backgroundColor = C.paper_dark,
+                        borderWidth = 1,
+                        borderColor = era.accent,
+                        justifyContent = "center",
+                        alignItems = "center",
+                        children = {
+                            UI.Label {
+                                text = "AP",
+                                fontSize = F.label,
+                                fontWeight = "bold",
+                                fontColor = era.accent,
+                                textAlign = "center",
+                                pointerEvents = "none",
+                            },
+                        },
                     },
-                },
-            },
-
-            -- AP 文字：已用/总量 + 副标题
-            UI.Panel {
-                flexDirection = "column",
-                flexShrink = 0,
-                marginRight = S.spacing_sm,
-                children = {
-                    UI.Label {
-                        id = "apCountLabel",
-                        text = string.format("%d / %d", totalAvail, apMax),
-                        fontSize = F.card_title,
-                        fontWeight = "bold",
-                        fontColor = C.text_primary,
-                    },
-                    UI.Label {
-                        text = "本季可用行动点",
-                        fontSize = F.label,
-                        fontColor = C.text_secondary,
+                    UI.Panel {
+                        flexDirection = "column",
+                        children = {
+                            UI.Label {
+                                id = "apCountLabel",
+                                text = string.format("%d / %d", totalAvail, apMax),
+                                fontSize = F.card_title,
+                                fontWeight = "bold",
+                                fontColor = C.text_primary,
+                            },
+                            UI.Label {
+                                text = "本季行动点",
+                                fontSize = F.label,
+                                fontColor = C.text_secondary,
+                            },
+                        },
                     },
                 },
             },
@@ -358,6 +379,7 @@ function TopBar._CreateAPRow(state, era)
                 alignItems = "center",
                 gap = S.ap_dot_gap,
                 flexGrow = 1,
+                marginLeft = 10,
                 children = dots,
             },
 
@@ -371,7 +393,7 @@ function TopBar._CreateAPRow(state, era)
                 borderColor = era.accent,
                 justifyContent = "center",
                 alignItems = "center",
-                marginHorizontal = S.spacing_sm,
+                marginRight = S.spacing_sm,
                 pointerEvents = "auto",
                 onPointerUp = Config.TapGuard(function(self)
                     TopBar._OnBuyAP()

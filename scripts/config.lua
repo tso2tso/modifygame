@@ -113,6 +113,8 @@ Config.COLORS = {
     bg_base       = { 26, 24, 20, 255 },       -- #1A1814 深煤炭棕黑（主背景）
     bg_surface    = { 36, 32, 24, 255 },        -- #242018 略浅的卡片底层
     bg_elevated   = { 46, 41, 32, 255 },        -- #2E2920 悬浮卡片/弹出面板
+    bg_inset      = { 31, 28, 22, 255 },        -- 内嵌面板底色，用于账簿式信息块
+    bg_pressed    = { 56, 49, 38, 255 },        -- 可交互卡片底色
 
     -- 纸张层（内容卡片）
     paper_dark    = { 61, 52, 38, 255 },        -- #3D3426 深羊皮纸（卡片背景主色）
@@ -143,7 +145,15 @@ Config.COLORS = {
     -- 边框/分隔线
     border_card   = { 200, 184, 154, 100 },     -- paper_light 40% opacity
     border_gold   = { 201, 168, 76, 130 },      -- accent_gold 50% opacity
+    border_soft   = { 200, 184, 154, 55 },      -- 细弱描边，避免卡片过重
+    highlight     = { 255, 229, 170, 42 },      -- 顶部/内嵌高光线
     divider       = { 74, 62, 46, 200 },        -- paper_mid
+
+    -- 状态背景
+    success_bg    = { 42, 80, 54, 210 },
+    warning_bg    = { 92, 66, 26, 220 },
+    danger_bg     = { 92, 34, 30, 220 },
+    info_bg       = { 37, 66, 82, 220 },
 
     -- AP 圆点
     ap_filled     = { 201, 168, 76, 255 },      -- accent_gold 实心
@@ -191,6 +201,8 @@ Config.SIZE = {
     card_padding      = 14,   -- §4.3 内边距（16→14 瘦身）
     card_gap          = 10,   -- §4.3 卡片间距（12→10 瘦身）
     section_gap       = 8,    -- 区块间距（10→8 瘦身）
+    inset_padding     = 10,   -- 内嵌信息区内边距
+    hairline_height   = 1,    -- 精细高光/分隔线
 
     -- 圆角（§1.3 禁止 > 8px 大卡片圆角）
     radius_card       = 6,    -- 卡片圆角
@@ -203,11 +215,12 @@ Config.SIZE = {
     icon_resource     = 16,   -- §4.1 资源图标
 
     -- AP 圆点
-    ap_dot_size       = 10,   -- §4.2
-    ap_dot_gap        = 8,    -- §4.2
+    ap_dot_size       = 8,    -- §4.2
+    ap_dot_gap        = 6,    -- §4.2
 
     -- 快速操作
     quick_action_size = 54,   -- §4.5 紧凑化（60→54 瘦身）
+    quick_action_height = 62, -- 首页 2x2 操作按钮高度
 
     -- 事件卡图片
     event_img_size    = 64,   -- §4.3
