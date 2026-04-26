@@ -71,9 +71,9 @@ local function actionBtn(label, bg, onClick, disabled)
         justifyContent = "center", alignItems = "center",
         pointerEvents = disabled and "none" or "auto",
         opacity = disabled and 0.55 or 1.0,
-        onPointerUp = function(self)
+        onPointerUp = Config.TapGuard(function(self)
             if not disabled then onClick() end
-        end,
+        end),
         children = {
             UI.Label {
                 text = label,
@@ -87,8 +87,30 @@ local function actionBtn(label, bg, onClick, disabled)
 end
 
 -- ============================================================================
--- 科技研发弹窗（文明6风格科技树）
+-- 科技研发弹窗（文明6风格科技树 — 30 科技扩展版）
 -- ============================================================================
+
+--- 效果 kind → 可读描述映射
+local EFFECT_LABELS = {
+    mine_output_base  = function(v) return string.format("矿山基础产出 +%d", v) end,
+    mine_output_mult  = function(v) return string.format("矿山产出 +%d%%", math.floor(v * 100)) end,
+    security_bonus    = function(v) return string.format("矿区安全 +%d", v) end,
+    accident_reduction= function(v) return string.format("事故概率 %d%%", math.floor(v * 100)) end,
+    worker_efficiency = function(v) return string.format("工人效率 +%d%%", math.floor(v * 100)) end,
+    tax_reduction     = function(v) return string.format("税率 %d%%", math.floor(v * 100)) end,
+    ap_bonus          = function(v) return string.format("行动点上限 +%d", v) end,
+    equipment_up      = function(v) return string.format("装备等级 +%d", v) end,
+    supply_reduction  = function(v) return string.format("补给消耗 %d", v) end,
+    finance_network   = function() return "补给成本 -20%，被动收入 +80" end,
+    stock_boost_all   = function(v) return string.format("股票收益率 +%d%%", math.floor(v * 100)) end,
+    influence_gain    = function(v) return string.format("每季影响力 +%d", v) end,
+    morale_bonus      = function(v) return string.format("士气 +%d", v) end,
+    guard_power_bonus = function(v) return string.format("护卫战力 +%d%%", math.floor(v * 100)) end,
+    research_speed    = function(v) return string.format("研发速度 +%d%%", math.floor(v * 100)) end,
+    trade_income      = function(v) return string.format("每季贸易收入 +%d", v) end,
+    gold_price_bonus  = function(v) return string.format("黄金售价 +%d%%", math.floor(v * 100)) end,
+    hire_cost_reduction = function(v) return string.format("雇佣成本 %d%%", math.floor(v * 100)) end,
+}
 
 --- 构建科技树节点数据
 local function buildTechTreeNodes(state)
@@ -112,15 +134,15 @@ local function buildTechTreeNodes(state)
         getDepth(t.id)
     end
 
-    -- 布局参数
+    -- 布局参数（扩大间距适配 30 节点）
     local nodeSize = 80
-    local colGap = 200   -- 列间距（加大避免文字重叠）
-    local rowGap = 110   -- 行间距
+    local colGap = 220
+    local rowGap = 120
     local paddingX = 50
     local paddingY = 30
 
     -- 按深度分组排列
-    local colBuckets = {}  -- depth -> { tech, ... }
+    local colBuckets = {}
     for _, t in ipairs(allTechs) do
         local d = depthMap[t.id] or 0
         colBuckets[d] = colBuckets[d] or {}
@@ -136,13 +158,11 @@ local function buildTechTreeNodes(state)
     local nodes = {}
     for d, bucket in pairs(colBuckets) do
         local colCount = #bucket
-        -- 垂直居中偏移
         local offsetY = (maxRows - colCount) * rowGap * 0.5
         for row, t in ipairs(bucket) do
             local isResearched = researched[t.id] == true
             local isInProgress = inProgress and inProgress.id == t.id
 
-            -- 节点显示名称：包含状态标记
             local displayName = t.icon .. " " .. t.name
             if isInProgress then
                 displayName = "⏳ " .. t.name
@@ -156,7 +176,6 @@ local function buildTechTreeNodes(state)
                 y = paddingY + offsetY + (row - 1) * rowGap,
                 parentId = t.requires or nil,
                 unlocked = isResearched,
-                -- 扩展信息
                 techData = t,
                 inProgress = isInProgress,
             })
@@ -164,6 +183,255 @@ local function buildTechTreeNodes(state)
     end
 
     return nodes, nodeSize
+end
+
+local detailModal_ = nil
+--- 显示科技详情弹窗
+---@param state table
+---@param tech table 科技数据
+---@param accent table 强调色
+local function showTechDetail(state, tech, accent)
+    if detailModal_ then
+        local dm = detailModal_
+        detailModal_ = nil
+        dm:Close()  -- onClose 回调会调用 Destroy()
+    end
+
+    local isResearched = state.tech and state.tech.researched[tech.id]
+    local inProgress = state.tech and state.tech.in_progress
+    local isInProgress = inProgress and inProgress.id == tech.id
+    local hasOtherInProgress = inProgress and inProgress.id ~= tech.id
+    local reqMet = (not tech.requires) or (state.tech and state.tech.researched[tech.requires])
+    local canAfford = state.cash >= tech.cost
+    local hasAP = (state.ap.current + (state.ap.temp or 0)) >= Balance.TECH.base_research_ap
+
+    -- 状态标签
+    local statusText, statusColor
+    if isResearched then
+        statusText = "✓ 已研发"
+        statusColor = { 75, 175, 95, 255 }
+    elseif isInProgress then
+        statusText = string.format("⏳ 研发中 %d/%d 季", inProgress.progress, inProgress.total)
+        statusColor = { 90, 155, 225, 255 }
+    elseif not reqMet then
+        statusText = "🔒 未解锁"
+        statusColor = { 120, 120, 140, 255 }
+    elseif hasOtherInProgress then
+        statusText = "⏸ 等待中"
+        statusColor = { 168, 152, 128, 255 }
+    else
+        statusText = "🔓 可研发"
+        statusColor = { 235, 190, 55, 255 }
+    end
+
+    -- 构建效果列表
+    local effectRows = {}
+    for _, eff in ipairs(tech.effects or {}) do
+        local formatter = EFFECT_LABELS[eff.kind]
+        local label = formatter and formatter(eff.value) or (eff.kind .. " " .. tostring(eff.value or ""))
+        table.insert(effectRows, UI.Panel {
+            flexDirection = "row",
+            alignItems = "center",
+            gap = 6,
+            children = {
+                UI.Panel {
+                    width = 6, height = 6,
+                    borderRadius = 3,
+                    backgroundColor = accent,
+                },
+                UI.Label {
+                    text = label,
+                    fontSize = F.body,
+                    fontColor = C.text_primary,
+                },
+            },
+        })
+    end
+
+    -- 前置科技信息
+    local reqText = "无"
+    if tech.requires then
+        local req = TechData.GetById(tech.requires)
+        if req then
+            local reqDone = state.tech and state.tech.researched[req.id]
+            reqText = req.icon .. " " .. req.name .. (reqDone and " ✓" or " ✗")
+        end
+    end
+
+    -- 内容面板
+    local contentChildren = {
+        -- 标题行：图标 + 名称 + 时代标签
+        UI.Panel {
+            width = "100%",
+            flexDirection = "row",
+            alignItems = "center",
+            justifyContent = "space-between",
+            children = {
+                UI.Label {
+                    text = tech.icon .. " " .. tech.name,
+                    fontSize = F.card_title,
+                    fontWeight = "bold",
+                    fontColor = C.text_primary,
+                },
+                UI.Panel {
+                    paddingLeft = 8, paddingRight = 8,
+                    paddingTop = 2, paddingBottom = 2,
+                    borderRadius = 4,
+                    backgroundColor = C.paper_mid,
+                    children = {
+                        UI.Label {
+                            text = tech.era_hint or "",
+                            fontSize = F.label,
+                            fontColor = C.text_secondary,
+                        },
+                    },
+                },
+            },
+        },
+        -- 状态
+        UI.Label {
+            text = statusText,
+            fontSize = F.body,
+            fontWeight = "bold",
+            fontColor = statusColor,
+        },
+        -- 分割线
+        UI.Panel {
+            width = "100%", height = 1,
+            backgroundColor = C.paper_light,
+            marginTop = 2, marginBottom = 2,
+        },
+        -- 描述
+        UI.Label {
+            text = tech.desc,
+            fontSize = F.body,
+            fontColor = C.text_secondary,
+            whiteSpace = "normal",
+            width = "100%",
+        },
+        -- 效果标题
+        UI.Label {
+            text = "效果：",
+            fontSize = F.body,
+            fontWeight = "bold",
+            fontColor = accent,
+            marginTop = 4,
+        },
+    }
+
+    -- 添加效果列表
+    for _, row in ipairs(effectRows) do
+        table.insert(contentChildren, row)
+    end
+
+    -- 分割线
+    table.insert(contentChildren, UI.Panel {
+        width = "100%", height = 1,
+        backgroundColor = C.paper_light,
+        marginTop = 4, marginBottom = 4,
+    })
+
+    -- 费用/时间/前置
+    table.insert(contentChildren, UI.Panel {
+        width = "100%",
+        flexDirection = "row",
+        flexWrap = "wrap",
+        gap = 12,
+        children = {
+            UI.Label {
+                text = string.format("费用 %d 克朗", tech.cost),
+                fontSize = F.body_minor,
+                fontColor = canAfford and C.text_primary or C.accent_red,
+            },
+            UI.Label {
+                text = string.format("研发 %d 季", tech.turns),
+                fontSize = F.body_minor,
+                fontColor = C.text_primary,
+            },
+            UI.Label {
+                text = string.format("AP %d", Balance.TECH.base_research_ap),
+                fontSize = F.body_minor,
+                fontColor = hasAP and C.text_primary or C.accent_red,
+            },
+        },
+    })
+    table.insert(contentChildren, UI.Label {
+        text = "前置：" .. reqText,
+        fontSize = F.body_minor,
+        fontColor = C.text_secondary,
+    })
+
+    -- 研发按钮（仅在可研发时显示）
+    if not isResearched and not isInProgress then
+        local canStart = reqMet and canAfford and hasAP and not hasOtherInProgress
+        local btnLabel = not reqMet and "需要前置科技"
+            or hasOtherInProgress and "正在研发其他科技"
+            or not canAfford and "资金不足"
+            or not hasAP and "行动点不足"
+            or "开始研发"
+        table.insert(contentChildren, UI.Panel {
+            width = "100%",
+            marginTop = 6,
+            height = 36,
+            borderRadius = S.radius_btn,
+            backgroundColor = canStart and accent or C.paper_mid,
+            justifyContent = "center",
+            alignItems = "center",
+            opacity = canStart and 1.0 or 0.55,
+            pointerEvents = canStart and "auto" or "none",
+            onPointerUp = Config.TapGuard(function()
+                if not canStart then return end
+                local ok, msg = Tech.Start(state, tech.id)
+                UI.Toast.Show(msg, {
+                    variant = ok and "success" or "error", duration = 1.5,
+                })
+                if ok then
+                    local dm = detailModal_
+                    detailModal_ = nil
+                    if dm then
+                        dm:Close()  -- onClose 回调会调用 Destroy()
+                    end
+                    closeModal()
+                    notifyChanged()
+                end
+            end),
+            children = {
+                UI.Label {
+                    text = btnLabel,
+                    fontSize = F.body,
+                    fontWeight = "bold",
+                    fontColor = { 255, 255, 255, 255 },
+                    pointerEvents = "none",
+                },
+            },
+        })
+    end
+
+    detailModal_ = UI.Modal {
+        title = "科技详情",
+        size = "sm",
+        closeOnOverlay = true,
+        closeOnEscape = true,
+        showCloseButton = true,
+        onClose = function(self)
+            if detailModal_ == self then
+                detailModal_ = nil
+            end
+            self:Destroy()
+        end,
+    }
+    local content = UI.Panel {
+        width = "100%",
+        flexDirection = "column",
+        gap = 6,
+        padding = 4,
+        children = contentChildren,
+    }
+    detailModal_:AddContent(content)
+    if uiRoot_ then
+        uiRoot_:AddChild(detailModal_)
+    end
+    detailModal_:Open()
 end
 
 function ActionModals.ShowTechnology(state, accent)
@@ -209,23 +477,21 @@ function ActionModals.ShowTechnology(state, accent)
 
     -- 科技树
     local treeNodes, nodeSize = buildTechTreeNodes(state)
-    local hasInProgress = state.tech and state.tech.in_progress
 
     -- 颜色定义
     local COL_DONE       = { 75, 175, 95, 255 }
     local COL_LOCKED     = { 70, 68, 80, 255 }
     local COL_AVAILABLE  = { 235, 190, 55, 255 }
-    local COL_PROGRESS   = { 90, 155, 225, 255 }
 
     ---@type SkillTree
     local skillTree = UI.SkillTree {
         width = "100%",
-        height = 520,
+        height = 620,
         nodes = treeNodes,
         nodeSize = nodeSize,
         nodeShape = "rounded",
         lineWidth = 3,
-        minZoom = 0.5,
+        minZoom = 0.35,
         maxZoom = 2.0,
         colors = {
             unlocked    = COL_DONE,
@@ -237,55 +503,13 @@ function ActionModals.ShowTechnology(state, accent)
             node_border = { 180, 180, 190, 100 },
             text        = { 240, 240, 240, 255 },
         },
-        -- 拦截自动解锁：仅用于展示，不允许 SkillTree 自行切换状态
         onNodeUnlock = function(node)
-            -- 强制撤销 SkillTree 的自动解锁
             node.unlocked = (state.tech.researched[node.id] == true)
         end,
         onNodeClick = function(node)
             local t = node.techData
             if not t then return end
-
-            -- 已研发
-            if state.tech.researched[t.id] then
-                UI.Toast.Show("✓ " .. t.name .. " — " .. t.desc,
-                    { duration = 2.0 })
-                return
-            end
-
-            -- 研发中
-            if hasInProgress and hasInProgress.id == t.id then
-                UI.Toast.Show(string.format("⏳ %s 研发中（%d/%d 季）",
-                    t.name, hasInProgress.progress, hasInProgress.total),
-                    { duration = 1.8 })
-                return
-            end
-
-            -- 已有其他科技在研发
-            if hasInProgress then
-                local ipTech = TechData.GetById(hasInProgress.id)
-                UI.Toast.Show("正在研发：" .. (ipTech and ipTech.name or ""),
-                    { variant = "warning", duration = 1.5 })
-                return
-            end
-
-            -- 检查前置
-            if t.requires and not state.tech.researched[t.requires] then
-                local req = TechData.GetById(t.requires)
-                UI.Toast.Show("需要先研发：" .. (req and req.name or t.requires),
-                    { variant = "warning", duration = 1.5 })
-                return
-            end
-
-            -- 尝试研发
-            local ok, msg = Tech.Start(state, t.id)
-            UI.Toast.Show(msg, {
-                variant = ok and "success" or "error", duration = 1.5,
-            })
-            if ok then
-                closeModal()
-                notifyChanged()
-            end
+            showTechDetail(state, t, accent)
         end,
     }
 
@@ -302,13 +526,12 @@ function ActionModals.ShowTechnology(state, accent)
             ActionModals._TechLegendItem(COL_DONE, "已研发"),
             ActionModals._TechLegendItem(COL_AVAILABLE, "可研发"),
             ActionModals._TechLegendItem(COL_LOCKED, "未解锁"),
-            ActionModals._TechLegendItem(COL_PROGRESS, "研发中"),
         },
     })
 
     -- 提示
     table.insert(rows, UI.Label {
-        text = "点击可研发节点启动研发 · 每次消耗 " .. Balance.TECH.base_research_ap .. " AP · 拖拽平移 · 缩放查看",
+        text = "点击节点查看详情与研发 · 每次消耗 " .. Balance.TECH.base_research_ap .. " AP · 拖拽平移 · 缩放查看",
         fontSize = F.label,
         fontColor = C.text_muted,
         textAlign = "center",

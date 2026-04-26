@@ -53,9 +53,9 @@ function EventModal.Show(event, onChoose)
             gap = 4,
             pointerEvents = "auto",
             onPointerUp = (function(idx)
-                return function(self)
+                return Config.TapGuard(function(self)
                     EventModal._OnChoose(idx)
-                end
+                end)
             end)(i),
             children = {
                 -- §4.8 主文字（13px）

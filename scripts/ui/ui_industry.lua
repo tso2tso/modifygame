@@ -101,14 +101,18 @@ function IndustryPage._CreateEstimateCard(state)
                         (estNet >= 0 and "+" or "") .. estNet, netColor),
                 },
             },
-            -- 副指标：白银库存 + 通胀倍率
+            -- 副指标：白银库存 + 煤炭库存 + 通胀倍率
             UI.Panel {
                 width = "100%",
                 flexDirection = "row",
                 justifyContent = "space-between",
+                flexWrap = "wrap",
+                gap = 4,
                 children = {
                     IndustryPage._EstimateItem("⚪ 白银库存",
                         tostring(state.silver or 0) .. " 单位", C.paper_light),
+                    IndustryPage._EstimateItem("⚫ 煤炭库存",
+                        tostring(state.coal or 0) .. " 单位", { 140, 130, 120, 255 }),
                     IndustryPage._EstimateItem("潜在售金",
                         "+" .. (estimateDetails.gold_potential_income or 0), C.accent_gold),
                     IndustryPage._EstimateItem("📊 通胀倍率",
@@ -157,9 +161,14 @@ function IndustryPage._CreateMineCard(state, mine)
     local directorName = directorMember and directorMember.name or "空缺"
     local directorColor = directorMember and C.accent_green or C.accent_red
 
+    -- 白银储量
+    local silverReserve = region and region.resources.silver_reserve or 0
+
     -- 升级费用
     local upgradeCost = math.floor(BM.upgrade_cost * mine.level * GameState.GetAssetPriceFactor(state))
-    local canUpgrade = mine.level < BM.max_level and state.cash >= upgradeCost and state.ap.current >= 1
+    local reserveDepleted = goldReserve <= 0 and silverReserve <= 0
+    local canUpgrade = mine.level < BM.max_level and state.cash >= upgradeCost
+        and state.ap.current >= 1 and not reserveDepleted
 
     return UI.Panel {
         id = "mineCard_" .. mine.id,
@@ -255,6 +264,17 @@ function IndustryPage._CreateMineCard(state, mine)
                         trackColor = C.bg_surface,
                         fillColor = goldReserve < 50 and C.accent_red or C.accent_gold,
                     },
+                    -- 白银储量
+                    IndustryPage._InfoRow("白银储量", silverReserve .. " 单位",
+                        silverReserve < 100 and C.accent_red or C.text_secondary),
+                    UI.ProgressBar {
+                        value = math.min(1, silverReserve / 500),
+                        width = "100%",
+                        height = 6,
+                        borderRadius = 3,
+                        trackColor = C.bg_surface,
+                        fillColor = silverReserve < 100 and C.accent_red or { 192, 192, 192, 255 },
+                    },
                     -- 治安
                     IndustryPage._InfoRow("矿区治安", secText,
                         security <= 2 and C.accent_red or (security >= 4 and C.accent_green or C.accent_amber)),
@@ -280,7 +300,8 @@ function IndustryPage._CreateMineCard(state, mine)
                     UI.Button {
                         id = "upgradeMine_" .. mine.id,
                         text = mine.level >= BM.max_level and "已满级"
-                            or string.format("升级矿山 (💰%d ⚡1)", upgradeCost),
+                            or (reserveDepleted and "资源耗尽"
+                            or string.format("升级矿山 (💰%d ⚡1)", upgradeCost)),
                         fontSize = F.body_minor,
                         height = S.btn_small_height,
                         flexGrow = 1,
@@ -497,7 +518,7 @@ function IndustryPage._CreateActionCard(state)
             borderWidth = 1, borderColor = C.paper_light,
             justifyContent = "center", alignItems = "center",
             pointerEvents = "auto",
-            onPointerUp = function(self) adjustQty(delta) end,
+            onPointerUp = Config.TapGuard(function(self) adjustQty(delta) end),
             children = {
                 UI.Label {
                     text = label,
@@ -611,12 +632,12 @@ function IndustryPage._CreateActionCard(state)
                                 backgroundColor = C.bg_elevated,
                                 borderWidth = 1, borderColor = C.paper_light,
                                 pointerEvents = "auto",
-                                onPointerUp = function(self)
+                                onPointerUp = Config.TapGuard(function(self)
                                     if stateRef_ then
                                         sellQty = math.max(1, math.floor(stateRef_.gold / 2))
                                         refreshSellUI()
                                     end
-                                end,
+                                end),
                                 children = {
                                     UI.Label {
                                         text = "半数",
@@ -632,12 +653,12 @@ function IndustryPage._CreateActionCard(state)
                                 backgroundColor = C.bg_elevated,
                                 borderWidth = 1, borderColor = C.paper_light,
                                 pointerEvents = "auto",
-                                onPointerUp = function(self)
+                                onPointerUp = Config.TapGuard(function(self)
                                     if stateRef_ then
                                         sellQty = stateRef_.gold
                                         refreshSellUI()
                                     end
-                                end,
+                                end),
                                 children = {
                                     UI.Label {
                                         text = "全部",
@@ -694,6 +715,17 @@ function IndustryPage._OnUpgradeMine(mineId)
             if mine.level >= BM.max_level then
                 UI.Toast.Show("矿山已达最高等级", { variant = "warning", duration = 1.5 })
                 return
+            end
+
+            -- 检查矿区储量是否已耗尽
+            local region = GameState.GetRegion(stateRef_, mine.region_id)
+            if region then
+                local goldRes = region.resources.gold_reserve or 0
+                local silverRes = region.resources.silver_reserve or 0
+                if goldRes <= 0 and silverRes <= 0 then
+                    UI.Toast.Show("矿区资源已耗尽，无法升级", { variant = "error", duration = 2 })
+                    return
+                end
             end
 
             local cost = math.floor(BM.upgrade_cost * mine.level * GameState.GetAssetPriceFactor(stateRef_))

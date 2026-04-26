@@ -41,7 +41,7 @@ function EndingModal.Show(state)
 
     modal_ = UI.Modal {
         title = ending.icon .. " " .. ending.title,
-        size = "lg",
+        size = "fullscreen",
         closeOnOverlay = false,
         closeOnEscape = false,
         showCloseButton = true,
@@ -186,9 +186,13 @@ function EndingModal._StatCell(label, value)
     return UI.Panel {
         flexGrow = 1,
         flexBasis = 0,
+        minWidth = 0,
         padding = 8,
         backgroundColor = C.bg_elevated,
         borderRadius = S.radius_btn,
+        flexDirection = "column",
+        alignItems = "center",
+        gap = 2,
         children = {
             UI.Label {
                 text = value,
@@ -196,12 +200,14 @@ function EndingModal._StatCell(label, value)
                 fontWeight = "bold",
                 fontColor = C.text_primary,
                 textAlign = "center",
+                flexShrink = 1,
             },
             UI.Label {
                 text = label,
                 fontSize = F.label,
                 fontColor = C.text_secondary,
                 textAlign = "center",
+                flexShrink = 1,
             },
         },
     }
@@ -264,9 +270,9 @@ function EndingModal._Button(text, bgColor, textColor, onClick)
         justifyContent = "center",
         alignItems = "center",
         pointerEvents = "auto",
-        onPointerUp = function(self)
+        onPointerUp = Config.TapGuard(function(self)
             if onClick then onClick() end
-        end,
+        end),
         children = {
             UI.Label {
                 text = text,

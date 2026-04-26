@@ -127,7 +127,7 @@ function TopBar._CreateInfoRow(state, era)
                     UI.Label {
                         id = "eraLabel",
                         text = era.label,
-                        fontSize = 9,
+                        fontSize = 10,
                         fontColor = { era.accent[1], era.accent[2], era.accent[3], 180 },
                     },
                 },
@@ -150,17 +150,18 @@ function TopBar._CreateInfoRow(state, era)
             TopBar._ResourceCell("repCell", "⭐",
                 tostring(reputation), C.text_primary, "声望"),
 
-            -- §4.1 右侧：⚙设置图标 24px + "设置"标签
+            -- §4.1 右侧：⚙设置图标 24px + "设置"标签（触控区≥44px）
             UI.Panel {
-                width = 40,
+                width = 44,
+                height = 44,
                 marginLeft = S.spacing_sm,
                 justifyContent = "center",
                 alignItems = "center",
                 gap = 1,
                 pointerEvents = "auto",
-                onPointerUp = function(self)
+                onPointerUp = Config.TapGuard(function(self)
                     if onSettings_ then onSettings_() end
-                end,
+                end),
                 children = {
                     UI.Label {
                         text = "⚙️",
@@ -170,7 +171,7 @@ function TopBar._CreateInfoRow(state, era)
                     },
                     UI.Label {
                         text = "设置",
-                        fontSize = 9,
+                        fontSize = 10,
                         fontColor = C.text_muted,
                         textAlign = "center",
                         pointerEvents = "none",
@@ -210,7 +211,7 @@ function TopBar._ResourceCell(id, icon, valueText, valueColor, label)
             },
             label and UI.Label {
                 text = label,
-                fontSize = 9,
+                fontSize = 10,
                 fontColor = C.text_muted,
             } or nil,
         },
@@ -348,10 +349,10 @@ function TopBar._CreateAPRow(state, era)
                 children = dots,
             },
 
-            -- [+] 按钮（§4.2 获取额外AP，32x32，圆角4px，era_accent 边框）
+            -- [+] 按钮（§4.2 获取额外AP，36x36触控友好，圆角4px，era_accent 边框）
             -- 功能：消耗 Balance.AP_PURCHASE.cost_per_ap 现金 +1 temp AP，本季最多 max_per_season 次
             UI.Panel {
-                width = 32, height = 32,
+                width = 36, height = 36,
                 borderRadius = S.radius_btn,
                 backgroundColor = C.paper_dark,
                 borderWidth = 1,
@@ -360,9 +361,9 @@ function TopBar._CreateAPRow(state, era)
                 alignItems = "center",
                 marginHorizontal = S.spacing_sm,
                 pointerEvents = "auto",
-                onPointerUp = function(self)
+                onPointerUp = Config.TapGuard(function(self)
                     TopBar._OnBuyAP()
-                end,
+                end),
                 children = {
                     UI.Label {
                         text = "+",
@@ -383,7 +384,7 @@ function TopBar._CreateAPRow(state, era)
                 children = {
                     UI.Label {
                         text = "安全等级",
-                        fontSize = 9,
+                        fontSize = 10,
                         fontColor = C.text_muted,
                     },
                     UI.Panel {

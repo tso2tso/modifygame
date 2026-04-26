@@ -53,7 +53,9 @@ function Combat.PlayerPower(state)
     local equipMul = 1.0 + (m.equipment - 1) * BC.equipment_bonus
     -- 军务主管加成
     local chiefBonus = GameState.GetPositionBonus(state, "military_chief")
-    return base * moraleMul * equipMul * (1 + chiefBonus)
+    -- 科技护卫战力加成
+    local techBonus = state.guard_power_tech_bonus or 0
+    return base * moraleMul * equipMul * (1 + chiefBonus) * (1 + techBonus)
 end
 
 ---@param faction table

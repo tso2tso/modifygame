@@ -219,9 +219,9 @@ function UIManager._CreateBottomNav()
             borderTopColor = eraAccent,
             backgroundColor = isActive and C.bg_elevated or nil,
             onPointerUp = (function(tabId)
-                return function(self)
+                return Config.TapGuard(function(self)
                     UIManager.SwitchTab(tabId)
-                end
+                end)
             end)(tab.id),
             children = {
                 UI.Label {

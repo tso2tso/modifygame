@@ -82,10 +82,91 @@ function TurnEngine.EndTurn(state)
 
     -- ========================================
     -- 阶段 1.6: 贷款利息结算 & 到期还本 & 破产检测
+    --   违约流程（渐进式）：
+    --     1) 现金付息
+    --     2) 现金不足 → 强制变卖黄金补足
+    --     3) 黄金不足 → 强制降级矿山换现金
+    --     4) 清算后仍不足 → 真正违约，本金膨胀
     -- ========================================
     report.loan_interest = 0
     report.loan_defaulted = false
+    report.forced_liquidation = {}  -- 记录本季强制清算明细
     local anyDefaultThisTurn = false
+    local forcedLiquidation = Balance.LOAN.forced_liquidation or {}
+
+    --- 强制抵押清算：尝试从资产中凑足 shortfall 金额
+    --- @param st table 游戏状态
+    --- @param shortfall number 需要补足的金额
+    --- @param reportLiq string[] 清算日志输出
+    --- @return number remaining 清算后仍欠的金额（0 表示已补足）
+    local function ForcedLiquidate(st, shortfall, reportLiq)
+        local remaining = shortfall
+        local didLiquidate = false
+
+        -- 步骤 1：强制变卖黄金
+        if remaining > 0 and (forcedLiquidation.sell_gold ~= false) and (st.gold or 0) > 0 then
+            local goldPrice = math.max(1,
+                math.floor(Balance.MINE.gold_price * GameState.GetInflationFactor(st)))
+            local goldNeeded = math.ceil(remaining / goldPrice)
+            local goldUsed = math.min(st.gold, goldNeeded)
+            st.gold = st.gold - goldUsed
+            local recovered = goldUsed * goldPrice
+            st.cash = st.cash + recovered
+            remaining = remaining - recovered
+            st.emergency_gold_sold = true
+            didLiquidate = true
+            local msg = string.format("强制清算：变卖 %d 单位黄金（回收 %d 克朗）", goldUsed, recovered)
+            GameState.AddLog(st, msg)
+            table.insert(reportLiq, msg)
+        end
+
+        -- 步骤 2：强制降级矿山
+        if remaining > 0 and (forcedLiquidation.downgrade_mines ~= false) then
+            local refundRatio = forcedLiquidation.mine_downgrade_refund_ratio or 0.5
+            local assetFactor = GameState.GetAssetPriceFactor(st)
+            -- 按等级从高到低排序，优先降级高等级矿山（回收更多）
+            local sortedMines = {}
+            for _, m in ipairs(st.mines) do
+                table.insert(sortedMines, { mine = m })
+            end
+            table.sort(sortedMines, function(a, b) return a.mine.level > b.mine.level end)
+
+            for _, entry in ipairs(sortedMines) do
+                if remaining <= 0 then break end
+                local mine = entry.mine
+                if mine.level > 1 then
+                    local levelsToSell = 0
+                    local totalRefund = 0
+                    while mine.level > 1 and remaining > 0 do
+                        local refund = math.floor(Balance.MINE.upgrade_cost * assetFactor * refundRatio)
+                        mine.level = mine.level - 1
+                        levelsToSell = levelsToSell + 1
+                        totalRefund = totalRefund + refund
+                        st.cash = st.cash + refund
+                        remaining = remaining - refund
+                    end
+                    if levelsToSell > 0 then
+                        didLiquidate = true
+                        local mineName = mine.name or "矿山"
+                        local msg = string.format(
+                            "强制清算：矿山[%s]降级 %d 级（回收 %d 克朗），当前等级 %d",
+                            mineName, levelsToSell, totalRefund, mine.level)
+                        GameState.AddLog(st, msg)
+                        table.insert(reportLiq, msg)
+                    end
+                end
+            end
+        end
+
+        -- 士气惩罚（只要发生了清算就扣）
+        if didLiquidate then
+            local penalty = forcedLiquidation.morale_penalty or -5
+            st.military.morale = math.max(0, st.military.morale + penalty)
+        end
+
+        return math.max(0, remaining)
+    end
+
     if state.loans and #state.loans > 0 then
         -- 计算当前杠杆率（用于动态利率）
         local currentLeverage = GameState.CalcLeverage(state)
@@ -97,17 +178,39 @@ function TurnEngine.EndTurn(state)
             local effectiveRate = loan.interest * (1 + currentLeverage * leverageMul)
             local interest = math.ceil(loan.principal * effectiveRate)
             report.loan_interest = report.loan_interest + interest
+
             if state.cash >= interest then
+                -- 正常付息
                 state.cash = state.cash - interest
                 loan.total_paid = (loan.total_paid or 0) + interest
             else
-                -- 违约：本金按违约率膨胀
-                loan.principal = math.floor(loan.principal * (1 + Balance.LOAN.default_penalty))
-                report.loan_defaulted = true
-                anyDefaultThisTurn = true
-                GameState.AddLog(state, string.format("贷款违约！利息 %d 付不出，本金膨胀至 %d",
-                    interest, loan.principal))
+                -- 现金不足 → 启动强制抵押清算流程
+                local shortfall = interest - state.cash
+                local afterLiq = ForcedLiquidate(state, shortfall, report.forced_liquidation)
+
+                if afterLiq <= 0 then
+                    -- 清算后凑够了，正常扣款
+                    state.cash = state.cash - interest
+                    loan.total_paid = (loan.total_paid or 0) + interest
+                    GameState.AddLog(state, string.format(
+                        "贷款利息 %d：现金不足，通过强制清算补足", interest))
+                else
+                    -- 清算后仍不够 → 真正违约
+                    -- 先把所有现金用于偿付
+                    local partialPay = state.cash
+                    state.cash = 0
+                    loan.total_paid = (loan.total_paid or 0) + partialPay
+                    -- 未偿付部分 → 本金膨胀
+                    local unpaid = interest - partialPay
+                    loan.principal = math.floor(loan.principal * (1 + Balance.LOAN.default_penalty))
+                    report.loan_defaulted = true
+                    anyDefaultThisTurn = true
+                    GameState.AddLog(state, string.format(
+                        "贷款违约！利息 %d 中 %d 无法偿付（已强制清算），本金膨胀至 %d",
+                        interest, unpaid, loan.principal))
+                end
             end
+
             loan.remaining_turns = loan.remaining_turns - 1
             if loan.remaining_turns <= 0 then
                 -- 到期还本
@@ -129,34 +232,25 @@ function TurnEngine.EndTurn(state)
                             "贷款展期（第%d次）：剩余欠款 %d，延长4季",
                             loan.rollovers, loan.principal))
                     else
-                        -- 已达展期上限 → 强制清算
-                        local remaining = loan.principal
-                        -- 1) 先用现金抵扣
-                        local cashPay = math.min(state.cash, remaining)
-                        state.cash = state.cash - cashPay
-                        remaining = remaining - cashPay
-                        -- 2) 再用黄金按市价抵扣
-                        if remaining > 0 and state.gold > 0 then
-                            local goldPrice = math.max(1,
-                                math.floor(Balance.MINE.gold_price * GameState.GetInflationFactor(state)))
-                            local goldNeeded = math.ceil(remaining / goldPrice)
-                            local goldUsed = math.min(state.gold, goldNeeded)
-                            state.gold = state.gold - goldUsed
-                            remaining = remaining - goldUsed * goldPrice
-                            state.emergency_gold_sold = true
-                            GameState.AddLog(state, string.format(
-                                "强制清算：变卖 %d 单位黄金偿债", goldUsed))
-                        end
-                        -- 3) 仍不够则坏账核销
-                        if remaining > 0 then
+                        -- 已达展期上限 → 强制清算偿还本金
+                        local shortfall = loan.principal - state.cash
+                        local afterLiq = ForcedLiquidate(state, shortfall, report.forced_liquidation)
+
+                        if afterLiq <= 0 then
+                            -- 清算后够还
+                            state.cash = state.cash - loan.principal
+                            GameState.AddLog(state, "贷款到期：通过强制清算完成还本")
+                        else
+                            -- 清算后仍不够 → 坏账核销
+                            local partialPay = state.cash
+                            state.cash = 0
+                            local remaining = loan.principal - partialPay
                             anyDefaultThisTurn = true
                             state.military.morale = math.max(0,
                                 state.military.morale + (Balance.LOAN.default_morale_penalty or -10))
                             GameState.AddLog(state, string.format(
-                                "坏账核销：%d 克朗无力偿还，家族声誉受损，士气 %d",
-                                remaining, Balance.LOAN.default_morale_penalty or -10))
-                        else
-                            GameState.AddLog(state, "贷款到期强制清算完毕")
+                                "坏账核销：%d 克朗无力偿还（已强制清算），家族声誉受损",
+                                remaining))
                         end
                         -- 贷款不保留（不 insert 到 kept）
                     end
@@ -168,9 +262,9 @@ function TurnEngine.EndTurn(state)
         state.loans = kept
     end
 
-    -- ── 破产检测 ──
+    -- ── 破产检测（渐进式：清算 → 警告 → 破产）──
     local bkConfig = Balance.LOAN.bankruptcy or {}
-    -- 连续违约追踪
+    -- 连续违约追踪（只有强制清算后仍违约才计入）
     if anyDefaultThisTurn then
         state.loan_consecutive_defaults = (state.loan_consecutive_defaults or 0) + 1
     else
@@ -184,15 +278,40 @@ function TurnEngine.EndTurn(state)
     else
         state.negative_net_worth_turns = 0
     end
+    -- 警告阶段
+    local warnAt = bkConfig.warning_at_defaults or 2
+    if (state.loan_consecutive_defaults >= warnAt)
+        and not state.bankrupt then
+        local bkDefaults = bkConfig.consecutive_defaults or 4
+        local remaining = bkDefaults - state.loan_consecutive_defaults
+        local warnMsg = string.format(
+            "连续违约 %d 季（强制清算后仍无法偿付），再违约 %d 季将破产！",
+            state.loan_consecutive_defaults, remaining)
+        table.insert(report.warnings, warnMsg)
+        GameState.AddLog(state, "⚠ " .. warnMsg)
+    end
+    if (state.negative_net_worth_turns >= warnAt)
+        and not state.bankrupt then
+        local bkNegTurns = bkConfig.negative_net_worth_turns or 4
+        local remaining = bkNegTurns - state.negative_net_worth_turns
+        if remaining > 0 then
+            local warnMsg = string.format(
+                "净资产连续 %d 季为负，再持续 %d 季将破产！",
+                state.negative_net_worth_turns, remaining)
+            table.insert(report.warnings, warnMsg)
+            GameState.AddLog(state, "⚠ " .. warnMsg)
+        end
+    end
     -- 触发破产
-    local bkDefaults = bkConfig.consecutive_defaults or 3
+    local bkDefaults = bkConfig.consecutive_defaults or 4
     local bkNegTurns = bkConfig.negative_net_worth_turns or 4
     if (state.loan_consecutive_defaults >= bkDefaults)
         or (state.negative_net_worth_turns >= bkNegTurns) then
         state.bankrupt = true
         local reason = ""
         if state.loan_consecutive_defaults >= bkDefaults then
-            reason = string.format("连续 %d 季贷款违约", state.loan_consecutive_defaults)
+            reason = string.format("连续 %d 季贷款违约（强制清算后仍无法偿付）",
+                state.loan_consecutive_defaults)
         else
             reason = string.format("净资产连续 %d 季为负", state.negative_net_worth_turns)
         end
@@ -486,6 +605,11 @@ function TurnEngine.FormatReportSummary(report)
         eco.supply_expense, eco.tax))
     if report.loan_interest and report.loan_interest > 0 then
         table.insert(lines, string.format("贷款利息 %d", report.loan_interest))
+    end
+    if report.forced_liquidation and #report.forced_liquidation > 0 then
+        for _, msg in ipairs(report.forced_liquidation) do
+            table.insert(lines, "⚠ " .. msg)
+        end
     end
     if report.tech_completed then
         local TechData = require("data.tech_data")

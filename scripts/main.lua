@@ -78,6 +78,14 @@ function Start()
     SubscribeToEvent("Update", "HandleUpdate")
     SubscribeToEvent("KeyDown", "HandleKeyDown")
 
+    -- 5.1 全局触控按下位置跟踪（供 Config.TapGuard 滑动/点击区分）
+    SubscribeToEvent("MouseButtonDown", function()
+        Config.TapDown()
+    end)
+    SubscribeToEvent("TouchBegin", function()
+        Config.TapDown()
+    end)
+
     -- 6. 检查开局事件（新游戏首回合）—— 入队后刷新仪表盘立即显示
     if not loaded then
         local startEvents = Events.CheckEvents(state_)
@@ -166,6 +174,11 @@ function HandleEndTurn()
         return
     end
 
+    -- 清空上一轮动态通知
+    if state_ then
+        state_.turn_messages = {}
+    end
+
     -- 检查游戏结束
     if GameState.IsGameOver(state_) then
         local ending = GameState.GetEndingInfo(state_)
@@ -228,6 +241,19 @@ function FinalizeEndTurn()
     pendingReport_ = nil
 
     if not report then return end
+
+    -- 收集本季动态通知（战斗结果、AI行动、警告）
+    state_.turn_messages = {}
+    for _, msg in ipairs(report.ai_changes or {}) do
+        local mtype = "ai_move"
+        if msg:find("⚔") then mtype = "combat_win"
+        elseif msg:find("💥") then mtype = "combat_lose"
+        end
+        table.insert(state_.turn_messages, { text = msg, type = mtype })
+    end
+    for _, w in ipairs(report.warnings or {}) do
+        table.insert(state_.turn_messages, { text = w, type = "warning" })
+    end
 
     -- 自动存档
     SaveLoad.Save(state_)

@@ -39,6 +39,11 @@ function Dashboard._BuildContent(state)
     local era = Config.GetEraByYear(state.year)
     local children = {}
 
+    -- 本季动态（战斗结果、AI行动、警告）
+    local msgSection = Dashboard._TurnMessagesSection(state, era)
+    if msgSection then
+        table.insert(children, msgSection)
+    end
     -- §4.3 事件流
     table.insert(children, Dashboard._EventSection(state, era))
     -- §4.4 焦点卡片
@@ -58,6 +63,112 @@ function Dashboard._BuildContent(state)
         flexDirection = "column",
         gap = S.section_gap,
         children = children,
+    }
+end
+
+-- ============================================================================
+-- 本季动态（Turn Messages）
+-- 展示战斗结果、AI行动、经济警告等被动通知
+-- ============================================================================
+
+--- 消息类型配置：图标、背景色、文字色
+local MSG_TYPE_STYLE = {
+    combat_win  = { icon = "⚔",  bg = { 45, 100, 55, 255 },  fg = { 180, 255, 180, 255 } },
+    combat_lose = { icon = "💥", bg = { 120, 35, 35, 255 },  fg = { 255, 200, 200, 255 } },
+    ai_move     = { icon = "📢", bg = { 60, 55, 45, 255 },   fg = { 200, 195, 175, 255 } },
+    warning     = { icon = "⚠",  bg = { 110, 85, 30, 255 },  fg = { 255, 230, 160, 255 } },
+}
+
+--- 构建本季动态区域（无消息时返回 nil）
+function Dashboard._TurnMessagesSection(state, era)
+    local messages = state.turn_messages or {}
+    if #messages == 0 then return nil end
+
+    local accent = (era and era.accent) or C.accent_gold
+
+    local cards = {}
+    for i, msg in ipairs(messages) do
+        local style = MSG_TYPE_STYLE[msg.type] or MSG_TYPE_STYLE.ai_move
+        -- 分隔线（非首条）
+        if i > 1 then
+            table.insert(cards, UI.Panel {
+                width = "100%", height = 1,
+                backgroundColor = { 80, 70, 55, 100 },
+            })
+        end
+        table.insert(cards, UI.Panel {
+            width = "100%",
+            paddingVertical = 6, paddingHorizontal = 10,
+            flexDirection = "row",
+            alignItems = "center",
+            gap = 8,
+            backgroundColor = style.bg,
+            borderRadius = S.radius_btn,
+            children = {
+                -- 图标
+                UI.Label {
+                    text = style.icon,
+                    fontSize = 18,
+                    width = 24,
+                    textAlign = "center",
+                    pointerEvents = "none",
+                },
+                -- 文本
+                UI.Label {
+                    text = msg.text or "",
+                    fontSize = F.body_minor,
+                    fontColor = style.fg,
+                    flexShrink = 1, flexGrow = 1,
+                    pointerEvents = "none",
+                },
+            },
+        })
+    end
+
+    return UI.Panel {
+        id = "turnMessagesSection",
+        width = "100%",
+        backgroundColor = C.bg_surface,
+        borderRadius = S.radius_card,
+        padding = S.card_padding,
+        flexDirection = "column",
+        gap = 4,
+        children = {
+            -- 标题行
+            UI.Panel {
+                width = "100%",
+                flexDirection = "row",
+                alignItems = "center",
+                justifyContent = "space-between",
+                children = {
+                    UI.Label {
+                        text = string.format("本季动态（%d）", #messages),
+                        fontSize = F.subtitle,
+                        fontWeight = "bold",
+                        fontColor = C.text_primary,
+                    },
+                    UI.Panel {
+                        backgroundColor = accent,
+                        borderRadius = S.radius_badge,
+                        paddingHorizontal = 6, paddingVertical = 2,
+                        children = {
+                            UI.Label {
+                                text = "通知",
+                                fontSize = F.label,
+                                fontColor = { 30, 25, 15, 255 },
+                                pointerEvents = "none",
+                            },
+                        },
+                    },
+                },
+            },
+            -- 消息列表
+            UI.Panel {
+                width = "100%",
+                flexDirection = "column",
+                children = cards,
+            },
+        },
     }
 end
 
@@ -263,20 +374,20 @@ function Dashboard._EventCard(evt, index, era)
                     deadlineWidget or UI.Panel { width = 0, height = 0 },
                 },
             },
-            -- 右侧：处理按钮（§4.3 72x32）— 边框与文字使用 era_accent
+            -- 右侧：处理按钮 — 边框与文字使用 era_accent
             UI.Panel {
-                width = 72, height = S.btn_small_height,
+                width = 80, height = S.btn_small_height,
                 backgroundColor = C.paper_dark,
                 borderRadius = S.radius_btn,
                 borderWidth = 1, borderColor = accent,
                 justifyContent = "center", alignItems = "center",
                 flexShrink = 0,
                 pointerEvents = "auto",
-                onPointerUp = function(self)
+                onPointerUp = Config.TapGuard(function(self)
                     if callbacks_.onProcessEvent then
                         callbacks_.onProcessEvent(index)
                     end
-                end,
+                end),
                 children = {
                     UI.Label {
                         text = "处理",
@@ -318,10 +429,13 @@ function Dashboard._FocusCard(state, mine, era)
         or (morale >= 40 and "低落" or "极差"))
     -- 维护费用
     local workerExpense = state.workers.hired * state.workers.wage
-    -- 利用率
-    local idealWorkers = mine.level * 10
+    -- 利用率（总工人 vs 所有矿山总需求）
+    local totalIdealWorkers = 0
+    for _, m in ipairs(state.mines) do
+        totalIdealWorkers = totalIdealWorkers + m.level * 10
+    end
     local utilization = math.min(100,
-        math.floor(state.workers.hired / math.max(1, idealWorkers) * 100))
+        math.floor(state.workers.hired / math.max(1, totalIdealWorkers) * 100))
     local utilColor = Config.GetUtilColor(utilization)
 
     return UI.Panel {
@@ -453,11 +567,12 @@ function Dashboard._FocusCard(state, mine, era)
                 backgroundColor = C.paper_mid,
             },
 
-            -- §4.4 操作按钮组（4个等宽，高度40px，4px圆角）
+            -- §4.4 操作按钮组（flexWrap 自适应，窄屏 2x2 布局）
             UI.Panel {
                 width = "100%",
                 padding = S.card_padding,
                 flexDirection = "row",
+                flexWrap = "wrap",
                 gap = 8,
                 children = {
                     Dashboard._FocusActionBtn("调整生产", 1, function()
@@ -598,13 +713,13 @@ function Dashboard._MiniStatBadge(label, value, badgeColor)
     }
 end
 
---- §4.4 焦点卡片操作按钮（高度40px, 4px圆角, bg_elevated, paper_light边框）
+--- §4.4 焦点卡片操作按钮（触控友好，窄屏 2x2 自动换行）
 --- 主文字13px + 下方(X AP)11px text_secondary
 --- 2AP 按钮右上角 amber 色徽章
 function Dashboard._FocusActionBtn(label, apCost, onClick)
     local isExpensive = (apCost >= 2)
     return UI.Panel {
-        flexGrow = 1, flexBasis = 0,
+        flexGrow = 1, flexBasis = "40%",
         height = S.btn_height,
         backgroundColor = C.bg_elevated,
         borderRadius = S.radius_btn,
@@ -612,9 +727,9 @@ function Dashboard._FocusActionBtn(label, apCost, onClick)
         justifyContent = "center", alignItems = "center",
         gap = 2,
         pointerEvents = "auto",
-        onPointerUp = function(self)
+        onPointerUp = Config.TapGuard(function(self)
             if onClick then onClick() end
-        end,
+        end),
         children = {
             UI.Label {
                 text = label,
@@ -681,11 +796,11 @@ function Dashboard._QuickActions(state, era)
                     pointerEvents = "auto",
                     opacity = canAfford and 1.0 or 0.45,
                     onPointerUp = (function(actionId)
-                        return function(self)
+                        return Config.TapGuard(function(self)
                             if callbacks_.onQuickAction then
                                 callbacks_.onQuickAction(actionId)
                             end
-                        end
+                        end)
                     end)(action.id),
                     children = {
                         UI.Label {
@@ -791,17 +906,14 @@ function Dashboard._SeasonOverview(state)
         sentimentSuffix = " (-5)"
     end
 
+    -- 使用 flexWrap 双行布局，避免窄屏 5 列挤压
     local columns = {
         Dashboard._OverviewCol("💰", "现金流",
             (cashFlow >= 0 and "+" or "") .. Config.FormatNumber(cashFlow), cashFlowColor),
-        Dashboard._OverviewDivider(),
         Dashboard._OverviewCol("📊", "负债率", debtRatio .. "%", debtColor),
-        Dashboard._OverviewDivider(),
         Dashboard._OverviewCol("❤️", "民心",
             tostring(publicSentiment) .. sentimentSuffix, sentimentColor),
-        Dashboard._OverviewDivider(),
-        Dashboard._OverviewCol("🌐", "地区影响力", tostring(influence), C.text_primary),
-        Dashboard._OverviewDivider(),
+        Dashboard._OverviewCol("🌐", "影响力", tostring(influence), C.text_primary),
         Dashboard._OverviewCol("⚖️", "监管压力", tostring(regulation), C.text_primary),
     }
 
@@ -818,31 +930,34 @@ function Dashboard._SeasonOverview(state)
                 fontWeight = "medium",
                 fontColor = C.text_secondary,
             },
-            -- 概览数据栏
+            -- 概览数据栏（flexWrap 自适应，窄屏自动换行）
             UI.Panel {
                 width = "100%",
-                height = S.season_bar_height,
                 backgroundColor = C.bg_surface,
                 borderRadius = S.radius_card,
                 flexDirection = "row",
+                flexWrap = "wrap",
                 alignItems = "center",
+                paddingVertical = 8,
+                paddingHorizontal = 4,
+                gap = 4,
                 children = columns,
             },
         },
     }
 end
 
---- §4.6 概览列（带图标）
+--- §4.6 概览列（带图标，flexBasis 使窄屏自动换行为 3+2 布局）
 function Dashboard._OverviewCol(icon, label, value, valueColor)
     return UI.Panel {
-        flexGrow = 1, flexBasis = 0,
-        height = "100%",
+        flexGrow = 1, flexBasis = 80,
+        paddingVertical = 6,
         justifyContent = "center", alignItems = "center",
         gap = 1,
         children = {
             UI.Label {
                 text = icon,
-                fontSize = 12,
+                fontSize = 13,
                 textAlign = "center",
             },
             UI.Label {
@@ -889,11 +1004,11 @@ function Dashboard._EndTurnButton(state, era)
                 borderRadius = S.radius_card,
                 justifyContent = "center", alignItems = "center",
                 pointerEvents = "auto",
-                onPointerUp = function(self)
+                onPointerUp = Config.TapGuard(function(self)
                     if callbacks_.onEndTurn then
                         callbacks_.onEndTurn()
                     end
-                end,
+                end),
                 children = {
                     UI.Label {
                         text = "结束回合",

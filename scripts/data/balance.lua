@@ -44,8 +44,10 @@ Balance.START = {
 Balance.MINE = {
     base_gold_output    = 2,     -- 基础每季产金量
     base_silver_output  = 5,     -- 基础每季产银量
+    base_coal_output    = 8,     -- 基础每季采煤量（工业区）
     silver_price        = 10,    -- 白银售价/单位
     gold_price          = 50,    -- 黄金售价/单位
+    coal_price          = 5,     -- 煤炭售价/单位（低单价高产量）
     upgrade_cost        = 300,   -- 矿山升级基础费用
     max_level           = 5,     -- 矿山最大等级
     -- 每级产能加成
@@ -270,10 +272,18 @@ Balance.LOAN = {
     default_penalty = 0.15,    -- 违约（资金不足付息）时本金膨胀 15%
     max_rollovers  = 1,        -- 最多展期次数，超过则强制清算
     default_morale_penalty = -10,  -- 坏账核销士气惩罚
-    -- 破产条件
+    -- 强制抵押清算（违约时优先执行）
+    forced_liquidation = {
+        sell_gold       = true,   -- 第一步：强制变卖黄金偿付利息
+        downgrade_mines = true,   -- 第二步：黄金不够则降级矿山换现金
+        mine_downgrade_refund_ratio = 0.5,  -- 降级矿山退还升级费的 50%
+        morale_penalty  = -5,     -- 每次强制清算士气惩罚
+    },
+    -- 破产条件（强制清算后仍无法偿付才计入连续违约）
     bankruptcy = {
-        consecutive_defaults = 3,     -- 连续违约 3 季触发破产
+        consecutive_defaults = 4,     -- 连续违约 4 季触发破产（清算后仍违约才计数）
         negative_net_worth_turns = 4, -- 净资产连续为负 4 季触发破产
+        warning_at_defaults = 2,      -- 连续违约 2 季开始警告
     },
 }
 

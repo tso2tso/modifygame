@@ -70,13 +70,29 @@ function Economy.Settle(state)
                 state.gold = state.gold + output
                 report.gold_mined = report.gold_mined + output
             end
-            -- 白银副产物：按矿山等级产出（不占 gold_reserve）
+            -- 白银副产物：按矿山等级产出（消耗 silver_reserve）
             local silverOut = math.floor(BM.base_silver_output
                 * (1 + (mine.level - 1) * BM.level_output_bonus))
-            if silverOut > 0 then
+            if silverOut > 0 and region and (region.resources.silver_reserve or 0) > 0 then
+                silverOut = math.min(silverOut, region.resources.silver_reserve)
+                region.resources.silver_reserve = region.resources.silver_reserve - silverOut
                 state.silver = (state.silver or 0) + silverOut
                 report.silver_mined = report.silver_mined + silverOut
             end
+        end
+    end
+
+    -- ============================
+    -- 1.5 煤炭采集（工业区）
+    -- ============================
+    report.coal_mined = 0
+    for _, r in ipairs(state.regions) do
+        if r.type == "industrial" and (r.resources.coal_reserve or 0) > 0 then
+            local coalOut = math.floor(BM.base_coal_output * (1 + (r.development - 1) * 0.15))
+            coalOut = math.min(coalOut, r.resources.coal_reserve)
+            r.resources.coal_reserve = r.resources.coal_reserve - coalOut
+            state.coal = (state.coal or 0) + coalOut
+            report.coal_mined = report.coal_mined + coalOut
         end
     end
 
@@ -93,6 +109,16 @@ function Economy.Settle(state)
             if priceModifier > 0 then
                 price = price * (1 + priceModifier * 0.5)
             end
+            -- 科技金价加成
+            local goldPriceBonus = state.gold_price_bonus or 0
+            if goldPriceBonus > 0 then
+                price = price * (1 + goldPriceBonus)
+            end
+            -- 事件独立金价修正
+            local goldPriceMod = GameState.GetModifierValue(state, "gold_price_mod")
+            if goldPriceMod ~= 0 then
+                price = price * (1 + goldPriceMod)
+            end
             price = math.floor(price)
             report.gold_sold = sellable
             report.gold_income = sellable * price
@@ -106,7 +132,9 @@ function Economy.Settle(state)
     -- ============================
     local silverStock = state.silver or 0
     if silverStock > 0 then
-        local silverPrice = math.floor(BM.silver_price * inflation)
+        local silverPriceMod = GameState.GetModifierValue(state, "silver_price_mod")
+        local silverPrice = math.floor(BM.silver_price * inflation * (1 + silverPriceMod))
+        silverPrice = math.max(1, silverPrice)
         report.silver_sold = silverStock
         report.silver_income = silverStock * silverPrice
         state.silver = 0
@@ -114,9 +142,28 @@ function Economy.Settle(state)
     end
 
     -- ============================
+    -- 2.6 煤炭出售（全量出售）
+    -- ============================
+    report.coal_sold = 0
+    report.coal_income = 0
+    local coalStock = state.coal or 0
+    if coalStock > 0 then
+        local coalPriceMod = GameState.GetModifierValue(state, "coal_price_mod")
+        local coalPrice = math.floor(BM.coal_price * inflation * (1 + coalPriceMod))
+        coalPrice = math.max(1, coalPrice)
+        report.coal_sold = coalStock
+        report.coal_income = coalStock * coalPrice
+        state.coal = 0
+        state.cash = state.cash + report.coal_income
+    end
+
+    -- ============================
     -- 3. 工资支出（通胀作用于所有人力成本）
     -- ============================
-    report.worker_expense = math.floor(state.workers.hired * state.workers.wage * laborCostFactor)
+    -- 工人雇佣成本（科技折扣）
+    local hireCostMul = 1.0 + (state.hire_cost_discount or 0)  -- discount 为负值
+    hireCostMul = math.max(0.5, hireCostMul)  -- 最低 50% 成本
+    report.worker_expense = math.floor(state.workers.hired * state.workers.wage * laborCostFactor * hireCostMul)
     report.military_expense = math.floor(state.military.guards * state.military.wage * inflation)
     local supplyDiscount = 1.0 - (state.finance_supply_discount or 0)
     report.supply_expense = math.floor(state.military.guards * BMI.supply_per_guard
@@ -126,6 +173,12 @@ function Economy.Settle(state)
     report.finance_income = state.finance_passive_income or 0
     if report.finance_income > 0 then
         state.cash = state.cash + report.finance_income
+    end
+
+    -- 贸易被动收入（科技"贸易路线"等）
+    report.trade_income = state.trade_passive_income or 0
+    if report.trade_income > 0 then
+        state.cash = state.cash + report.trade_income
     end
 
     -- 被动地区影响力增益（科技"印刷宣传"等）
@@ -224,8 +277,8 @@ function Economy.Settle(state)
     -- 5. 汇总并扣款
     -- ============================
     -- 注意：gold_income / silver_income / region_income 已在步骤 2-3.5 加到 state.cash，此处只减支出
-    report.total_income = report.gold_income + report.silver_income + report.region_income
-        + report.finance_income + report.shadow_income
+    report.total_income = report.gold_income + report.silver_income + (report.coal_income or 0)
+        + report.region_income + report.finance_income + (report.trade_income or 0) + report.shadow_income
     report.total_expense = report.worker_expense + report.military_expense
         + report.supply_expense + report.tax + report.ai_penalty + report.transport_penalty
     report.net = report.total_income - report.total_expense
@@ -272,12 +325,18 @@ function Economy._CalcMineOutput(state, mine)
     local levelMul = 1.0 + (mine.level - 1) * BM.level_output_bonus
     -- 矿业总监岗位加成
     local posBonus = GameState.GetPositionBonus(state, "mine_director")
-    -- 工人加成
-    local workerBonus = math.floor(state.workers.hired / BW.workers_per_unit)
+    -- 工人加成（含工人效率科技加成）
+    local efficiencyMul = 1.0 + (state.worker_efficiency_bonus or 0)
+    local workerBonus = math.floor(state.workers.hired / BW.workers_per_unit * efficiencyMul)
     -- 事件修正
     local outputMod = GameState.GetModifierValue(state, "mine_output")
 
     local total = (base + outputMod) * levelMul * (1 + posBonus) + workerBonus
+    -- 科技乘法加成（mine_output_mult）
+    local multBonus = state.mine_output_mult_bonus or 0
+    if multBonus > 0 then
+        total = total * (1 + multBonus)
+    end
     return math.max(0, math.floor(total))
 end
 
@@ -292,8 +351,10 @@ function Economy.GetEstimate(state)
         gold_potential_income = 0,
         gold_auto_income = 0,
         silver_income = 0,
+        coal_income = 0,
         region_income = 0,
         finance_income = state.finance_passive_income or 0,
+        trade_income = state.trade_passive_income or 0,
         shadow_income = 0,
         transport_penalty = 0,
         tax = 0,
@@ -314,6 +375,17 @@ function Economy.GetEstimate(state)
         end
     end
 
+    -- 煤炭预估
+    local coalPriceMod = GameState.GetModifierValue(state, "coal_price_mod")
+    local estCoalPrice = math.max(1, math.floor(BM.coal_price * inflation * (1 + coalPriceMod)))
+    for _, r in ipairs(state.regions) do
+        if r.type == "industrial" and (r.resources.coal_reserve or 0) > 0 then
+            local coalOut = math.floor(BM.base_coal_output * (1 + (r.development - 1) * 0.15))
+            coalOut = math.min(coalOut, r.resources.coal_reserve)
+            details.coal_income = details.coal_income + coalOut * estCoalPrice
+        end
+    end
+
     local civilianDemand = GameState.GetModifierValue(state, "civilian_consumption")
     local transportRisk = math.max(0, GameState.GetModifierValue(state, "transport_risk"))
     for _, r in ipairs(state.regions) do
@@ -329,8 +401,8 @@ function Economy.GetEstimate(state)
         details.shadow_income = math.floor(shadowIncome * inflation)
     end
 
-    income = details.gold_auto_income + details.silver_income + details.region_income
-        + details.finance_income + details.shadow_income
+    income = details.gold_auto_income + details.silver_income + details.coal_income
+        + details.region_income + details.finance_income + details.trade_income + details.shadow_income
 
     if transportRisk > 0 then
         details.transport_penalty = math.floor(income * math.min(0.30, transportRisk * 0.25))

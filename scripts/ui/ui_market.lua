@@ -218,7 +218,7 @@ function MarketPage._LoansTabContent(state, accent)
                         leveragePct .. "%", leverageColor),
                 },
             },
-            -- 破产风险提示
+            -- 破产风险提示（渐进式：清算→警告→破产）
             (state.loan_consecutive_defaults or 0) >= 2 and UI.Panel {
                 width = "100%",
                 padding = 6,
@@ -226,14 +226,19 @@ function MarketPage._LoansTabContent(state, accent)
                 borderRadius = S.radius_btn,
                 borderWidth = 1,
                 borderColor = C.accent_red,
-                justifyContent = "center", alignItems = "center",
+                gap = 2,
                 children = {
                     UI.Label {
-                        text = string.format("⚠ 已连续违约 %d 季，达 %d 季将破产！",
+                        text = string.format("⚠ 已连续违约 %d 季（强制清算后仍无法偿付），达 %d 季将破产！",
                             state.loan_consecutive_defaults,
-                            (Balance.LOAN.bankruptcy or {}).consecutive_defaults or 3),
+                            (Balance.LOAN.bankruptcy or {}).consecutive_defaults or 4),
                         fontSize = F.body_minor,
                         fontColor = C.accent_red,
+                    },
+                    UI.Label {
+                        text = "提示：违约时系统会自动变卖黄金、降级矿山来偿付，仍不足才计入违约",
+                        fontSize = F.label,
+                        fontColor = C.text_tertiary,
                     },
                 },
             } or nil,
@@ -434,9 +439,9 @@ function MarketPage._LoanOptionsGrid(state, accent)
             pointerEvents = "auto",
             opacity = canTake and 1.0 or 0.45,
             onPointerUp = (function(option, amount, rate)
-                return function(self)
+                return Config.TapGuard(function(self)
                     MarketPage._OnTakeLoan(state, option, amount, rate)
-                end
+                end)
             end)(opt, calcAmount, effectiveRate),
             children = {
                 UI.Label {
@@ -842,9 +847,9 @@ function MarketPage._StockRow(state, stock, index, accent)
         flexDirection = "row",
         alignItems = "center",
         pointerEvents = "auto",
-        onPointerUp = function(self)
+        onPointerUp = Config.TapGuard(function(self)
             MarketPage._OpenTradeModal(state, stock, accent)
-        end,
+        end),
         children = {
             UI.Panel {
                 flexGrow = 1, flexShrink = 1,
@@ -945,12 +950,12 @@ function MarketPage._TabUnderline(label, active, accent, tabId)
         borderBottomWidth = active and 2 or 0,
         borderBottomColor = accent,
         pointerEvents = "auto",
-        onPointerUp = function(self)
+        onPointerUp = Config.TapGuard(function(self)
             if tabId and activeTab_ ~= tabId then
                 activeTab_ = tabId
                 if onStateChanged_ then onStateChanged_() end
             end
-        end,
+        end),
         children = {
             UI.Label {
                 text = label,
@@ -1124,7 +1129,7 @@ function MarketPage._QtyBtn(label, onClick)
         borderWidth = 1, borderColor = C.paper_light,
         justifyContent = "center", alignItems = "center",
         pointerEvents = "auto",
-        onPointerUp = function(self) onClick() end,
+        onPointerUp = Config.TapGuard(function(self) onClick() end),
         children = {
             UI.Label {
                 text = label,
@@ -1144,7 +1149,7 @@ function MarketPage._ActionBtn(label, bg, onClick)
         backgroundColor = bg,
         justifyContent = "center", alignItems = "center",
         pointerEvents = "auto",
-        onPointerUp = function(self) onClick() end,
+        onPointerUp = Config.TapGuard(function(self) onClick() end),
         children = {
             UI.Label {
                 text = label,

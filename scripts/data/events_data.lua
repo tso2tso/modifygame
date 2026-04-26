@@ -231,6 +231,8 @@ function EventsData.GetFixedEvents()
                         modifiers = {
                             { target = "supply_reserve", value = 20, duration = 0 },
                             { target = "transport_risk", value = -0.05, duration = 4 },
+                            { target = "gold_price_mod", value = 0.15, duration = 4 },   -- 战争避险推高金价
+                            { target = "coal_price_mod", value = 0.25, duration = 4 },   -- 军工耗煤大涨
                         },
                     },
                 },
@@ -245,6 +247,9 @@ function EventsData.GetFixedEvents()
                         modifiers = {
                             { target = "military_relation", value = 15, duration = 0 },
                             { target = "military_industry_profit", value = 0.15, duration = 4 },
+                            { target = "gold_price_mod", value = 0.10, duration = 4 },
+                            { target = "silver_price_mod", value = 0.08, duration = 4 },
+                            { target = "coal_price_mod", value = 0.30, duration = 4 },
                         },
                     },
                 },
@@ -277,6 +282,8 @@ function EventsData.GetFixedEvents()
                             { target = "military_industry_profit", value = 0.25, duration = 8 },
                             { target = "civilian_consumption", value = -0.12, duration = 8 },
                             { target = "worker_cost_multiplier", value = 0.08, duration = 8 },
+                            { target = "gold_price_mod", value = 0.20, duration = 8 },
+                            { target = "coal_price_mod", value = 0.45, duration = 8 },   -- 战时煤炭紧缺
                         },
                     },
                 },
@@ -332,6 +339,9 @@ function EventsData.GetFixedEvents()
                             { target = "worker_wage", value = 1, duration = 0 },
                             { target = "worker_morale", value = 18, duration = 0 },
                             { target = "public_support", value = 8, duration = 0 },
+                            { target = "gold_price_mod", value = 0.25, duration = 6 },   -- 避险金价
+                            { target = "coal_price_mod", value = 0.60, duration = 6 },   -- 煤炭极度短缺
+                            { target = "silver_price_mod", value = 0.12, duration = 4 },
                         },
                     },
                 },
@@ -392,6 +402,9 @@ function EventsData.GetFixedEvents()
                         modifiers = {
                             { target = "expansion_freeze", value = 1, duration = 4 },
                             { target = "risk", value = -10, duration = 0 },
+                            { target = "gold_price_mod", value = 0.30, duration = 8 },   -- 战争恐慌金价飙升
+                            { target = "silver_price_mod", value = 0.10, duration = 6 },
+                            { target = "coal_price_mod", value = 0.40, duration = 8 },   -- 军工煤需猛增
                         },
                     },
                 },
@@ -410,6 +423,9 @@ function EventsData.GetFixedEvents()
                             { target = "military_relation", value = 15, duration = 0 },
                             { target = "public_support", value = -5, duration = 0 },
                             { target = "military_industry_profit", value = 0.40, duration = 16 },
+                            { target = "gold_price_mod", value = 0.25, duration = 12 },
+                            { target = "silver_price_mod", value = 0.15, duration = 8 },
+                            { target = "coal_price_mod", value = 0.50, duration = 12 },  -- 军需大量耗煤
                         },
                     },
                 },
@@ -522,6 +538,9 @@ function EventsData.GetFixedEvents()
                         modifiers = {
                             { target = "risk", value = -12, duration = 8 },
                             { target = "civilian_consumption", value = -0.15, duration = 8 },
+                            { target = "gold_price_mod", value = 0.35, duration = 8 },    -- 避险金价飙升
+                            { target = "silver_price_mod", value = -0.20, duration = 6 }, -- 工业需求萎缩
+                            { target = "coal_price_mod", value = -0.25, duration = 8 },   -- 经济冷却煤价暴跌
                         },
                     },
                 },
@@ -578,6 +597,9 @@ function EventsData.GetFixedEvents()
                         modifiers = {
                             { target = "mine_output", value = -1, duration = 6 },
                             { target = "total_assets", value = 700, duration = 0 },
+                            { target = "gold_price_mod", value = 0.35, duration = 10 },  -- 战争避险
+                            { target = "coal_price_mod", value = 0.55, duration = 10 },  -- 军工耗煤
+                            { target = "silver_price_mod", value = 0.10, duration = 6 },
                         },
                     },
                 },
@@ -790,6 +812,9 @@ function EventsData.GetFixedEvents()
                         modifiers = {
                             { target = "military_industry_profit", value = 0.35, duration = 12 },
                             { target = "public_support", value = -8, duration = 0 },
+                            { target = "gold_price_mod", value = 0.40, duration = 12 },  -- 90年代战争金价飙升
+                            { target = "coal_price_mod", value = 0.70, duration = 10 },  -- 围城煤炭极度紧缺
+                            { target = "silver_price_mod", value = 0.15, duration = 8 },
                         },
                     },
                 },
@@ -900,6 +925,9 @@ function EventsData.GetFixedEvents()
                         modifiers = {
                             { target = "total_assets", value = 1200, duration = 0 },
                             { target = "civilian_consumption", value = 0.18, duration = 10 },
+                            { target = "gold_price_mod", value = -0.15, duration = 8 },   -- 和平回归金价回落
+                            { target = "coal_price_mod", value = 0.20, duration = 10 },   -- 重建基建需煤
+                            { target = "silver_price_mod", value = 0.10, duration = 6 },  -- 工业复苏
                         },
                     },
                 },
@@ -968,6 +996,9 @@ function EventsData.GetFixedEvents()
                         modifiers = {
                             { target = "total_assets", value = 1500, duration = 0 },
                             { target = "foreign_control", value = 8, duration = 0 },
+                            { target = "gold_price_mod", value = 0.30, duration = 6 },    -- 金融恐慌推高金价
+                            { target = "silver_price_mod", value = -0.15, duration = 6 }, -- 工业金属需求萎缩
+                            { target = "coal_price_mod", value = -0.20, duration = 6 },   -- 经济衰退煤价跌
                         },
                     },
                 },

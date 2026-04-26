@@ -216,8 +216,8 @@ Config.SIZE = {
     focus_img_height  = 120,  -- §4.4
 
     -- 按钮
-    btn_height        = 40,   -- §4.4 操作按钮高度
-    btn_small_height  = 32,   -- §4.3 处理按钮
+    btn_height        = 44,   -- §4.4 操作按钮高度（≥44px 触控友好）
+    btn_small_height  = 36,   -- §4.3 处理按钮（≥36px 最低可点击）
 
     -- Drawer
     drawer_width_pct  = 58,   -- §4.8 右侧 Drawer 约 58% 屏宽
@@ -346,5 +346,47 @@ Config.ATTR_NAMES = {
 -- 季度中文
 -- ============================================================================
 Config.QUARTER_NAMES = { "春", "夏", "秋", "冬" }
+
+-- ============================================================================
+-- 触控防抖 + 滑动误触过滤
+-- 1. 手机端 touch + 合成 mouse 会双触发 onPointerUp → 300ms 时间防抖
+-- 2. 滑动松开不应触发点击 → 比较按下/松开位置的移动距离
+-- ============================================================================
+local lastTapTime_ = 0
+local TAP_GUARD_MS = 0.30          -- 300ms 防抖间隔（秒）
+local TAP_MOVE_THRESHOLD = 30      -- 移动超过 30 物理像素视为滑动（约 10 逻辑像素 @3x）
+
+--- 全局按下位置（由 main.lua 中的 MouseButtonDown/TouchBegin 事件更新）
+Config._tapDownX = 0
+Config._tapDownY = 0
+
+--- 记录手指/鼠标按下位置（在 main.lua Start() 中订阅全局事件调用）
+function Config.TapDown()
+    local pos = input.mousePosition
+    Config._tapDownX = pos.x
+    Config._tapDownY = pos.y
+end
+
+--- 包裹 onPointerUp 回调，防止手机端双触发 + 滑动误触
+---@param fn function 原始回调 function(self)
+---@return function 防抖后的回调
+function Config.TapGuard(fn)
+    return function(self)
+        local now = time.elapsedTime
+        -- 时间防抖：过快的重复触发
+        if now - lastTapTime_ < TAP_GUARD_MS then
+            return
+        end
+        -- 距离检测：滑动松开不算点击
+        local pos = input.mousePosition
+        local dx = math.abs(pos.x - Config._tapDownX)
+        local dy = math.abs(pos.y - Config._tapDownY)
+        if dx > TAP_MOVE_THRESHOLD or dy > TAP_MOVE_THRESHOLD then
+            return  -- 手指移动过远，是滑动不是点击
+        end
+        lastTapTime_ = now
+        fn(self)
+    end
+end
 
 return Config

@@ -465,7 +465,7 @@ function WorldPage._CreateNodeDrawer(state, region)
                             },
                             UI.Label {
                                 text = "控制度",
-                                fontSize = 9,
+                                fontSize = F.label,
                                 fontColor = C.text_muted,
                             },
                         },
@@ -924,7 +924,7 @@ function WorldPage._CreateFactionDetailCard(state, faction)
                             },
                             UI.Label {
                                 text = "势力值",
-                                fontSize = 9,
+                                fontSize = F.label,
                                 fontColor = C.text_muted,
                             },
                         },
@@ -1275,7 +1275,7 @@ function WorldPage._MetricCell(label, value, color)
             },
             UI.Label {
                 text = label,
-                fontSize = 9,
+                fontSize = F.label,
                 fontColor = C.text_muted,
             },
         },

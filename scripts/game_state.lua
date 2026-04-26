@@ -40,6 +40,7 @@ function GameState.CreateNew()
         cash = BS.cash,
         gold = BS.gold,
         silver = 0,     -- 白银库存（副产品，每季可售卖）
+        coal   = 0,     -- 煤炭库存（工业区开采，每季可售卖）
         gold_auto_sell = false,  -- 黄金自动出售开关（默认关闭，玩家手动在产业页出售）
 
         -- ============================
@@ -188,6 +189,7 @@ function GameState.CreateNew()
         -- ============================
         event_queue = {},       -- 当前季度待处理事件
         events_fired = {},      -- 已触发事件 id 集合（防重复）
+        turn_messages = {},     -- 本季动态通知 { {text, type} }
         random_cooldowns = {},  -- 随机事件冷却 { [event_id] = remaining_quarters }
 
         -- ============================
@@ -437,8 +439,9 @@ function GameState.GetEndingInfo(state)
         ending.resultLabel = "失败"
         ending.variant = "failure"
         ending.icon = "💀"
-        if (state.loan_consecutive_defaults or 0) >= (Balance.LOAN.bankruptcy.consecutive_defaults or 3) then
-            ending.description = string.format("连续 %d 季贷款违约，债权人接管了家族资产。",
+        if (state.loan_consecutive_defaults or 0) >= (Balance.LOAN.bankruptcy.consecutive_defaults or 4) then
+            ending.description = string.format(
+                "连续 %d 季贷款违约——黄金被强制变卖、矿山被逐级降级，仍无力偿还。债权人接管了家族全部资产。",
                 state.loan_consecutive_defaults or 0)
         elseif (state.negative_net_worth_turns or 0) >= (Balance.LOAN.bankruptcy.negative_net_worth_turns or 4) then
             ending.description = string.format("净资产连续 %d 季为负，黄金王朝轰然倒塌。",
@@ -499,13 +502,17 @@ function GameState.CalcMaxAP(state)
         ap = ap + BA.vacant_penalty
     end
 
-    -- 科技加成：遍历已研究科技，累加 ap_bonus
+    -- 科技加成：遍历已研究科技的 effects 数组，累加 ap_bonus
     if state.tech and state.tech.researched then
         local TechData = require("data.tech_data")
         local allTechs = TechData.GetAll()
         for _, t in ipairs(allTechs) do
-            if state.tech.researched[t.id] and t.effects and t.effects.kind == "ap_bonus" then
-                ap = ap + (t.effects.value or 0)
+            if state.tech.researched[t.id] and t.effects then
+                for _, eff in ipairs(t.effects) do
+                    if eff.kind == "ap_bonus" then
+                        ap = ap + (eff.value or 0)
+                    end
+                end
             end
         end
     end
