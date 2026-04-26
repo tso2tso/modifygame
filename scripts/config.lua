@@ -187,10 +187,10 @@ Config.SIZE = {
     season_bar_height = 64,   -- §4.6 Season Overview Bar
 
     -- 间距
-    page_padding      = 16,   -- §8.1 全局水平内边距
-    card_padding      = 16,   -- §4.3 内边距
-    card_gap          = 12,   -- §4.3 卡片间距
-    section_gap       = 16,   -- 区块间距
+    page_padding      = 12,   -- §8.1 全局水平内边距（16→12 瘦身）
+    card_padding      = 14,   -- §4.3 内边距（16→14 瘦身）
+    card_gap          = 10,   -- §4.3 卡片间距（12→10 瘦身）
+    section_gap       = 8,    -- 区块间距（10→8 瘦身）
 
     -- 圆角（§1.3 禁止 > 8px 大卡片圆角）
     radius_card       = 6,    -- 卡片圆角
@@ -207,17 +207,17 @@ Config.SIZE = {
     ap_dot_gap        = 8,    -- §4.2
 
     -- 快速操作
-    quick_action_size = 80,   -- §4.5 约 80×80
+    quick_action_size = 54,   -- §4.5 紧凑化（60→54 瘦身）
 
     -- 事件卡图片
     event_img_size    = 64,   -- §4.3
 
     -- 焦点卡片
-    focus_img_height  = 120,  -- §4.4
+    focus_img_height  = 100,  -- §4.4（120→100 瘦身，缩小15%）
 
     -- 按钮
-    btn_height        = 44,   -- §4.4 操作按钮高度（≥44px 触控友好）
-    btn_small_height  = 36,   -- §4.3 处理按钮（≥36px 最低可点击）
+    btn_height        = 38,   -- §4.4 操作按钮高度（44→38 瘦身）
+    btn_small_height  = 34,   -- §4.3 处理按钮（36→34 瘦身）
 
     -- Drawer
     drawer_width_pct  = 58,   -- §4.8 右侧 Drawer 约 58% 屏宽
@@ -247,9 +247,10 @@ Config.SIZE = {
 -- 进度条颜色规则（§4.4）
 -- ============================================================================
 function Config.GetUtilColor(pct)
-    if pct >= 80 then return C.accent_green end
-    if pct >= 50 then return C.accent_amber end
-    return C.accent_red
+    if pct > 120 then return C.accent_amber end   -- 超编过多，浪费工资
+    if pct >= 80 then return C.accent_green end    -- 正常区间
+    if pct >= 50 then return C.accent_amber end    -- 人手不足
+    return C.accent_red                            -- 严重不足
 end
 
 -- ============================================================================
@@ -309,12 +310,11 @@ Config.TABS = {
 }
 
 -- ============================================================================
--- 快速操作定义（§4.5 — 6 项，3列×2行）
+-- 快速操作定义（§4.5 — 4 项，2列×2行）
+-- "人事管理"和"金融操作"已移除：它们仅跳转底部 Tab，与导航栏重复
 -- ============================================================================
 -- ap_cost 为"典型"消耗（仅展示用；不同操作实际消耗见 data/balance.lua）
 Config.QUICK_ACTIONS = {
-    { id = "personnel",   label = "人事管理", icon = "👥", ap_cost = 0 },
-    { id = "finance",     label = "金融操作", icon = "📈", ap_cost = 0 },
     { id = "technology",  label = "科技研发", icon = "🔬", ap_cost = 2 },
     { id = "intelligence",label = "情报行动", icon = "👁️", ap_cost = 1 },
     { id = "diplomacy",   label = "政治外交", icon = "🤝", ap_cost = 1 },
@@ -348,34 +348,41 @@ Config.ATTR_NAMES = {
 Config.QUARTER_NAMES = { "春", "夏", "秋", "冬" }
 
 -- ============================================================================
--- 触控防抖 + 滑动误触过滤
--- 1. 手机端 touch + 合成 mouse 会双触发 onPointerUp → 300ms 时间防抖
--- 2. 滑动松开不应触发点击 → 比较按下/松开位置的移动距离
+-- 触控防抖 + 滑动误触过滤（v2 — 按下计数器方案）
+-- 问题1: 手机端 touch + 合成 mouse 会双触发 onPointerUp → 计数器防抖
+-- 问题2: 滑动松开不应触发点击 → 比较按下/松开位置的移动距离
 -- ============================================================================
-local lastTapTime_ = 0
-local TAP_GUARD_MS = 0.30          -- 300ms 防抖间隔（秒）
-local TAP_MOVE_THRESHOLD = 30      -- 移动超过 30 物理像素视为滑动（约 10 逻辑像素 @3x）
+local tapDownCounter_ = 0          -- 每次 TapDown 自增的全局计数器
+local lastTapCounter_ = 0          -- 上次成功触发时的计数器值
+local TAP_MOVE_THRESHOLD = 20      -- 移动超过 20 物理像素视为滑动（约 7 逻辑像素 @3x）
 
 --- 全局按下位置（由 main.lua 中的 MouseButtonDown/TouchBegin 事件更新）
 Config._tapDownX = 0
 Config._tapDownY = 0
+Config._tapDownCounter = 0         -- 暴露给外部读取
 
 --- 记录手指/鼠标按下位置（在 main.lua Start() 中订阅全局事件调用）
+--- 注意：手机端 TouchBegin 和合成 MouseButtonDown 都会调用此函数，
+--- 但因为坐标相同、计数器只影响去重，不影响正确性。
 function Config.TapDown()
     local pos = input.mousePosition
     Config._tapDownX = pos.x
     Config._tapDownY = pos.y
+    tapDownCounter_ = tapDownCounter_ + 1
+    Config._tapDownCounter = tapDownCounter_
 end
 
 --- 包裹 onPointerUp 回调，防止手机端双触发 + 滑动误触
+--- 防双触发机制：每次 TapDown 生成新计数器值，onPointerUp 仅在计数器
+--- 未被消费时放行第一次回调，后续同一按下周期的重复事件被过滤。
 ---@param fn function 原始回调 function(self)
 ---@return function 防抖后的回调
 function Config.TapGuard(fn)
     return function(self)
-        local now = time.elapsedTime
-        -- 时间防抖：过快的重复触发
-        if now - lastTapTime_ < TAP_GUARD_MS then
-            return
+        -- 计数器去重：同一次按下只允许一次 pointerUp 通过
+        local counter = tapDownCounter_
+        if counter == lastTapCounter_ then
+            return  -- 已消费过此次按下，阻止重复触发
         end
         -- 距离检测：滑动松开不算点击
         local pos = input.mousePosition
@@ -384,7 +391,7 @@ function Config.TapGuard(fn)
         if dx > TAP_MOVE_THRESHOLD or dy > TAP_MOVE_THRESHOLD then
             return  -- 手指移动过远，是滑动不是点击
         end
-        lastTapTime_ = now
+        lastTapCounter_ = counter
         fn(self)
     end
 end

@@ -332,7 +332,7 @@ Balance.DIPLOMACY = {
 -- 资产交易
 -- ============================================================================
 Balance.TRADE = {
-    new_mine = { ap = 2, cash = 1200, base_reserve = 600, max_mines = 8 },
+    new_mine = { ap = 2, cash = 1200, base_reserve = 1500, max_mines = 8 },  -- 600→1500
     sell_mine = { ap = 2, cash_per_level = 500 },
     raid_ai = { ap = 2, cash = 400, ai_cash_loss = 200, power_loss = 8 },
 }
@@ -368,6 +368,26 @@ Balance.FAMILY = {
     position_penalty    = -0.1,   -- 差配惩罚
     -- 空缺惩罚
     vacant_efficiency_penalty = -0.30,  -- 空缺方向效率 -30%
+}
+
+-- ============================================================================
+-- 幸运事件（看广告触发）
+-- 基础金额 666~2000，随通胀浮动，概率递减
+-- ============================================================================
+Balance.LUCKY_EVENT = {
+    -- 奖励档位：base = 基础金额，weight = 初始权重（越大越容易抽到）
+    tiers = {
+        { base = 666,  label = "小额意外之财",   weight = 50 },   -- 最常见
+        { base = 888,  label = "商队赠礼",       weight = 30 },
+        { base = 1200, label = "矿脉意外发现",   weight = 12 },
+        { base = 1600, label = "贵族赞助",       weight = 5 },
+        { base = 2000, label = "中了头彩！",     weight = 3 },    -- 最稀有
+    },
+    -- 概率递减：每次看广告后，下次各档权重 × decay_factor
+    decay_factor   = 0.7,     -- 每次衰减 30%
+    decay_min      = 0.15,    -- 最低衰减到原始权重的 15%
+    -- 冷却：同一季度内最多看 N 次广告
+    max_per_season = 3,
 }
 
 return Balance

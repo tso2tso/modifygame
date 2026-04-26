@@ -100,7 +100,7 @@ function Economy.Settle(state)
     -- 2. 黄金出售（仅在玩家开启自动出售时执行；默认关闭，由玩家在产业页手动操作）
     -- ============================
     if state.gold_auto_sell then
-        local reserveGold = 10
+        local reserveGold = math.floor(state.gold * 0.1 + 0.5)  -- 保留10%（四舍五入）
         local sellable = math.max(0, state.gold - reserveGold)
         if sellable > 0 then
             local price = BM.gold_price * inflation
@@ -366,7 +366,9 @@ function Economy.GetEstimate(state)
             local goldPrice = math.floor(BM.gold_price * inflation)
             details.gold_potential_income = details.gold_potential_income + goldOut * goldPrice
             if state.gold_auto_sell then
-                local sellable = math.max(0, (state.gold or 0) + goldOut - 10)
+                local totalGold = (state.gold or 0) + goldOut
+                local reserve = math.floor(totalGold * 0.1 + 0.5)
+                local sellable = math.max(0, totalGold - reserve)
                 details.gold_auto_income = sellable * goldPrice
             end
             local silverOut = math.floor(BM.base_silver_output

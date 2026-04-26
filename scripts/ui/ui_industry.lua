@@ -9,6 +9,7 @@ local GameState = require("game_state")
 local Balance = require("data.balance")
 local RegionsData = require("data.regions_data")
 local Economy = require("systems.economy")
+local Actions = require("systems.actions")
 
 local C = Config.COLORS
 local F = Config.FONT
@@ -311,7 +312,7 @@ function IndustryPage._CreateMineCard(state, mine)
                         fontColor = canUpgrade and C.bg_base or C.text_muted,
                         borderRadius = S.radius_btn,
                         onClick = function(self)
-                            IndustryPage._OnUpgradeMine(mine.id)
+                            Actions.UpgradeMine(stateRef_, mine, onStateChanged_)
                         end,
                     },
                 },
@@ -419,7 +420,7 @@ function IndustryPage._CreateWorkerCard(state)
                         disabled = state.cash < hireCost * 5 or state.ap.current < 1,
                         borderRadius = S.radius_btn,
                         onClick = function(self)
-                            IndustryPage._OnHireWorkers(5)
+                            Actions.HireWorkers(stateRef_, 5, onStateChanged_)
                         end,
                     },
                     UI.Button {
@@ -566,7 +567,7 @@ function IndustryPage._CreateActionCard(state)
                                 fontColor = C.text_secondary,
                             },
                             UI.Label {
-                                text = "每季结算时自动售出超过10单位的黄金",
+                                text = "每季结算时自动售出，保留10%库存",
                                 fontSize = 10,
                                 fontColor = C.text_muted,
                             },
@@ -705,74 +706,6 @@ end
 -- ============================================================================
 -- 操作回调
 -- ============================================================================
-
---- 升级矿山
-function IndustryPage._OnUpgradeMine(mineId)
-    if not stateRef_ then return end
-
-    for _, mine in ipairs(stateRef_.mines) do
-        if mine.id == mineId then
-            if mine.level >= BM.max_level then
-                UI.Toast.Show("矿山已达最高等级", { variant = "warning", duration = 1.5 })
-                return
-            end
-
-            -- 检查矿区储量是否已耗尽
-            local region = GameState.GetRegion(stateRef_, mine.region_id)
-            if region then
-                local goldRes = region.resources.gold_reserve or 0
-                local silverRes = region.resources.silver_reserve or 0
-                if goldRes <= 0 and silverRes <= 0 then
-                    UI.Toast.Show("矿区资源已耗尽，无法升级", { variant = "error", duration = 2 })
-                    return
-                end
-            end
-
-            local cost = math.floor(BM.upgrade_cost * mine.level * GameState.GetAssetPriceFactor(stateRef_))
-            if stateRef_.cash < cost then
-                UI.Toast.Show("资金不足", { variant = "error", duration = 1.5 })
-                return
-            end
-            if not GameState.SpendAP(stateRef_, 1) then
-                UI.Toast.Show("行动点不足", { variant = "error", duration = 1.5 })
-                return
-            end
-
-            stateRef_.cash = stateRef_.cash - cost
-            mine.level = mine.level + 1
-            GameState.AddLog(stateRef_, string.format(
-                "%s 升级到 %d 级，花费 %d", mine.name, mine.level, cost))
-            UI.Toast.Show(string.format("%s → Lv.%d", mine.name, mine.level),
-                { variant = "success", duration = 1.5 })
-
-            if onStateChanged_ then onStateChanged_() end
-            break
-        end
-    end
-end
-
---- 招募工人
-function IndustryPage._OnHireWorkers(count)
-    if not stateRef_ then return end
-
-    local totalCost = math.floor(BW.hire_cost * GameState.GetLaborCostFactor(stateRef_)
-        * (1 - GameState.GetInfluenceRecruitDiscount(stateRef_))) * count
-    if stateRef_.cash < totalCost then
-        UI.Toast.Show("资金不足", { variant = "error", duration = 1.5 })
-        return
-    end
-    if not GameState.SpendAP(stateRef_, 1) then
-        UI.Toast.Show("行动点不足", { variant = "error", duration = 1.5 })
-        return
-    end
-
-    stateRef_.cash = stateRef_.cash - totalCost
-    stateRef_.workers.hired = stateRef_.workers.hired + count
-    GameState.AddLog(stateRef_, string.format("招募了 %d 名工人，花费 %d", count, totalCost))
-    UI.Toast.Show(string.format("招募 +%d 工人", count), { variant = "success", duration = 1.5 })
-
-    if onStateChanged_ then onStateChanged_() end
-end
 
 --- 解雇工人
 function IndustryPage._OnFireWorkers(count)

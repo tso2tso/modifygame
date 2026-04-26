@@ -86,6 +86,12 @@ function GameState.CreateNew()
         bankrupt = false,                -- 是否已破产（游戏结束条件）
 
         -- ============================
+        -- 广告幸运事件
+        -- ============================
+        lucky_ad_watched = 0,            -- 本季已看广告次数
+        lucky_ad_decay = 1.0,            -- 累计概率衰减系数
+
+        -- ============================
         -- 科技
         -- ============================
         tech = {
@@ -253,6 +259,8 @@ function GameState.AdvanceQuarter(state)
     state.ap.current = state.ap.max
     state.ap.temp = 0
     state.ap.bonus_used = 0
+    -- 重置本季广告次数
+    state.lucky_ad_watched = 0
 end
 
 --- 计算玩家地区总控制度

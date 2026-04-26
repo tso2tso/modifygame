@@ -648,7 +648,7 @@ function MarketPage._GoodsTabContent(state, accent)
                         fontColor = C.text_secondary,
                     },
                     UI.Label {
-                        text = "每季度结算时，系统自动以当前市价出售黄金（保留10单位战略储备）和全部白银。通胀率越高，售价越高，但同时也意味着工资和补给成本上涨。",
+                        text = "每季度结算时，系统自动以当前市价出售黄金（保留10%库存）和全部白银。通胀率越高，售价越高，但同时也意味着工资和补给成本上涨。",
                         fontSize = F.body_minor,
                         fontColor = C.text_muted,
                         whiteSpace = "normal",

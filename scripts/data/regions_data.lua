@@ -16,8 +16,8 @@ function RegionsData.CreateInitialRegions()
             desc = "波黑中部山区的金银矿脉，家族起家之地。矿脉品质优良但交通不便，需要稳定的劳工和护矿力量。",
             -- 资源与产能
             resources = {
-                gold_reserve  = 200,   -- 黄金储量（单位）
-                silver_reserve = 500,  -- 白银储量
+                gold_reserve  = 500,   -- 黄金储量（单位）  200→500：Lv3+30工人约可采80季(20年)
+                silver_reserve = 1200, -- 白银储量          500→1200
                 base_output   = 2,     -- 基础每季产金量
             },
             -- 地区属性
@@ -42,7 +42,7 @@ function RegionsData.CreateInitialRegions()
             type = "industrial",
             desc = "波黑重要的工业重镇，有冶炼设施和铁路连接。适合发展加工业和军需生产，但竞争激烈。",
             resources = {
-                coal_reserve   = 1000,
+                coal_reserve   = 2500,  -- 1000→2500
                 steel_capacity = 0,    -- 初始无钢铁产能，需投资建设
                 base_output    = 0,
             },

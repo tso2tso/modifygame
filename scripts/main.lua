@@ -11,6 +11,7 @@ local SaveLoad = require("utils.save_load")
 local TurnEngine = require("systems.turn_engine")
 local Events = require("systems.events")
 local EventModal = require("ui.ui_event_modal")
+local Balance = require("data.balance")
 
 -- ============================================================================
 -- 全局变量
@@ -31,6 +32,19 @@ function Start()
 
     -- 1. 初始化 UI 系统
     UIManager.InitUI()
+
+    -- 1.1 移动端去重：抑制引擎模拟的鼠标事件，避免 Widget 内置 OnClick 双触发
+    --     在移动端，引擎对同一次触摸同时发送 Touch* 和 Mouse* 事件，
+    --     UI 框架两组都订阅，导致 Dropdown 等组件的 OnClick 被调用两次（开→关）。
+    --     此处将 UI 的鼠标处理函数替换为空操作，只保留触摸路径。
+    local plat = GetPlatform and GetPlatform() or ""
+    if plat == "Android" or plat == "iOS" or plat == "Web" then
+        local noop = function() end
+        UI.HandleMouseDown = noop
+        UI.HandleMouseUp   = noop
+        UI.HandleMouseMove = noop
+        print("[Touch] 移动端：已抑制模拟鼠标事件，使用纯触摸路径")
+    end
 
     -- 2. 尝试读取存档，否则新建游戏
     local loaded = SaveLoad.Load()
@@ -277,6 +291,48 @@ function FinalizeEndTurn()
         UI.Toast.Show("💀 家族破产！债台高筑，黄金王朝轰然倒塌…",
             { variant = "error", duration = 5 })
         return
+    end
+
+    -- 强制清算醒目提示（变卖黄金/矿山降级）
+    -- Toast 固定 320×56 单行，精简文案避免右侧截断
+    if report.forced_liquidation and #report.forced_liquidation > 0 then
+        for _, msg in ipairs(report.forced_liquidation) do
+            local short = msg
+                :gsub("^强制清算：变卖 (%d+) 单位黄金（回收 (%d+) 克朗）",
+                      "清算：卖出%1黄金 回收%2")
+                :gsub("^强制清算：矿山%[(.-)%]降级 (%d+) 级（回收 (%d+) 克朗），当前等级 (%d+)",
+                      "清算：%1降%2级(Lv%4) 回收%3")
+                :gsub("^强制清算：", "清算：")
+            UI.Toast.Show(short, { variant = "error", duration = 5 })
+        end
+    end
+
+    -- 贷款违约醒目警告（独立 Toast，确保用户注意到）
+    local defaults = state_.loan_consecutive_defaults or 0
+    if defaults >= 1 then
+        local bkDefaults = (Balance.LOAN.bankruptcy or {}).consecutive_defaults or 4
+        local remaining = bkDefaults - defaults
+        if remaining > 0 then
+            UI.Toast.Show(
+                string.format("⚠ 贷款违约！已连续 %d 季，再违约 %d 季将破产！", defaults, remaining),
+                { variant = "error", duration = 4 })
+        end
+    end
+
+    -- 净资产为负时醒目警告
+    local totalAssets = GameState.CalcTotalAssets(state_)
+    local totalDebt = GameState.CalcTotalDebt(state_)
+    local netWorth = totalAssets - totalDebt
+    if netWorth < 0 then
+        local negTurns = state_.negative_net_worth_turns or 0
+        local bkNegTurns = (Balance.LOAN.bankruptcy or {}).negative_net_worth_turns or 4
+        local remaining = bkNegTurns - negTurns
+        if remaining > 0 then
+            UI.Toast.Show(
+                string.format("净资产为负（%s）！已持续 %d 季，再持续 %d 季将破产！",
+                    Config.FormatNumber(netWorth), negTurns, remaining),
+                { variant = "error", duration = 4 })
+        end
     end
 
     -- Toast 提示

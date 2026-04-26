@@ -137,9 +137,39 @@ function TopBar._CreateInfoRow(state, era)
             UI.Panel { flexGrow = 1 },
 
             -- §4.1 中部核心资源4格（图标+数字+标签，竖线分隔）
-            -- 💰现金 / 🟡黄金(吨) / ⛏产能 / ⭐声望
-            TopBar._ResourceCell("cashCell", "💰",
-                Config.FormatNumber(state.cash), era.accent, "现金"),
+            -- 💰现金(+🎰广告) / 🟡黄金(吨) / ⛏产能 / ⭐声望
+            UI.Panel {
+                flexDirection = "row",
+                alignItems = "center",
+                gap = 2,
+                children = {
+                    TopBar._ResourceCell("cashCell", "💰",
+                        Config.FormatNumber(state.cash), era.accent, "现金"),
+                    -- 🎰 看广告按钮（小圆角按钮，紧贴现金格右侧）
+                    UI.Panel {
+                        id = "luckyAdBtn",
+                        width = 26, height = 26,
+                        borderRadius = 13,
+                        backgroundColor = { 255, 215, 0, 40 },  -- 淡金色底
+                        borderWidth = 1,
+                        borderColor = { 255, 215, 0, 120 },
+                        justifyContent = "center",
+                        alignItems = "center",
+                        pointerEvents = "auto",
+                        onPointerUp = Config.TapGuard(function(self)
+                            TopBar._OnWatchAd()
+                        end),
+                        children = {
+                            UI.Label {
+                                text = "🎰",
+                                fontSize = 14,
+                                textAlign = "center",
+                                pointerEvents = "none",
+                            },
+                        },
+                    },
+                },
+            },
             TopBar._VerticalDivider(),
             TopBar._ResourceCell("goldCell", "🟡",
                 tostring(state.gold), C.text_primary, "黄金(吨)"),
@@ -150,34 +180,16 @@ function TopBar._CreateInfoRow(state, era)
             TopBar._ResourceCell("repCell", "⭐",
                 tostring(reputation), C.text_primary, "声望"),
 
-            -- §4.1 右侧：⚙设置图标 24px + "设置"标签（触控区≥44px）
-            UI.Panel {
-                width = 44,
-                height = 44,
-                marginLeft = S.spacing_sm,
-                justifyContent = "center",
-                alignItems = "center",
-                gap = 1,
-                pointerEvents = "auto",
-                onPointerUp = Config.TapGuard(function(self)
-                    if onSettings_ then onSettings_() end
-                end),
-                children = {
-                    UI.Label {
-                        text = "⚙️",
-                        fontSize = S.icon_size,
-                        textAlign = "center",
-                        pointerEvents = "none",
-                    },
-                    UI.Label {
-                        text = "设置",
-                        fontSize = 10,
-                        fontColor = C.text_muted,
-                        textAlign = "center",
-                        pointerEvents = "none",
-                    },
-                },
-            },
+            -- 右侧：净资产显示（替代设置图标）
+            TopBar._VerticalDivider(),
+            (function()
+                local totalAssets = GameState.CalcTotalAssets(state)
+                local totalDebt = GameState.CalcTotalDebt(state)
+                local netWorth = totalAssets - totalDebt
+                local nwColor = netWorth < 0 and C.accent_red or C.accent_green
+                return TopBar._ResourceCell("netWorthCell", "🏦",
+                    Config.FormatNumber(netWorth), nwColor, "净资产")
+            end)(),
         },
     }
 end
@@ -463,6 +475,18 @@ function TopBar.Refresh(root, state)
     local repVal = root:FindById("repCell_val")
     if repVal then repVal:SetText(tostring(reputation)) end
 
+    -- 净资产刷新
+    local totalAssets = GameState.CalcTotalAssets(state)
+    local totalDebt = GameState.CalcTotalDebt(state)
+    local netWorth = totalAssets - totalDebt
+    local nwVal = root:FindById("netWorthCell_val")
+    if nwVal then
+        nwVal:SetText(Config.FormatNumber(netWorth))
+        if nwVal.SetFontColor then
+            nwVal:SetFontColor(netWorth < 0 and C.accent_red or C.accent_green)
+        end
+    end
+
     local apLabel = root:FindById("apCountLabel")
     local totalAvail = state.ap.current + (state.ap.temp or 0)
     if apLabel then
@@ -523,6 +547,78 @@ function TopBar._OnBuyAP()
     GameState.AddLog(stateRef_, string.format("购买 1 AP（花费 %d）", cfg.cost_per_ap))
     UI.Toast.Show("+1 AP", { variant = "success", duration = 1.2 })
     if onStateChanged_ then onStateChanged_() end
+end
+
+-- ============================================================================
+-- 看广告 → 幸运事件
+-- ============================================================================
+function TopBar._OnWatchAd()
+    if not stateRef_ then return end
+    local lucky = Balance.LUCKY_EVENT
+    -- 本季次数限制
+    local watched = stateRef_.lucky_ad_watched or 0
+    if watched >= lucky.max_per_season then
+        UI.Toast.Show("本季运气已用尽（最多 " .. lucky.max_per_season .. " 次）",
+            { variant = "warning", duration = 1.5 })
+        return
+    end
+
+    -- 调用 SDK 激励视频广告
+    ---@diagnostic disable-next-line: undefined-global
+    sdk:ShowRewardVideoAd(function(result)
+        if not result.success then
+            if result.msg == "embed manual close" then
+                UI.Toast.Show("需完整观看广告才能获得奖励",
+                    { variant = "warning", duration = 1.5 })
+            else
+                UI.Toast.Show("广告播放失败: " .. (result.msg or "未知错误"),
+                    { variant = "error", duration = 1.5 })
+            end
+            return
+        end
+
+        -- 广告成功，发放幸运奖励
+        stateRef_.lucky_ad_watched = (stateRef_.lucky_ad_watched or 0) + 1
+        local decay = stateRef_.lucky_ad_decay or 1.0
+
+        -- 加权随机抽档
+        local totalWeight = 0
+        for _, tier in ipairs(lucky.tiers) do
+            totalWeight = totalWeight + tier.weight * decay
+        end
+        local roll = math.random() * totalWeight
+        local chosen = lucky.tiers[1]  -- 兜底
+        local acc = 0
+        for _, tier in ipairs(lucky.tiers) do
+            acc = acc + tier.weight * decay
+            if roll <= acc then
+                chosen = tier
+                break
+            end
+        end
+
+        -- 通胀浮动金额
+        local inflation = GameState.GetInflationFactor(stateRef_)
+        local amount = math.floor(chosen.base * inflation)
+
+        -- 发放奖励
+        stateRef_.cash = stateRef_.cash + amount
+        stateRef_.total_income = (stateRef_.total_income or 0) + amount
+
+        -- 衰减概率（下次更难抽到高额）
+        stateRef_.lucky_ad_decay = math.max(lucky.decay_min,
+            decay * lucky.decay_factor)
+
+        -- 日志 & 提示
+        GameState.AddLog(stateRef_, string.format(
+            "🎰 %s：获得 %s 克朗", chosen.label, Config.FormatNumber(amount)))
+        UI.Toast.Show(string.format("🎰 %s\n+%s 克朗！",
+            chosen.label, Config.FormatNumber(amount)),
+            { variant = "success", duration = 2.5 })
+
+        -- 刷新 UI
+        if onStateChanged_ then onStateChanged_() end
+    end)
 end
 
 return TopBar

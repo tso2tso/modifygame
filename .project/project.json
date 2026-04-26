@@ -5,20 +5,29 @@
     "id": "977458462"
   },
   "entry": "main.lua",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "taptap_publish": {
-    "title": "<game title, required>",
-    "description": "<game description>",
-    "category": "<game category: rpg, casual, action, strategy, simulation, trivia, arcade, adventure, card, sports, racing, puzzle, educational, music, word, board>",
-    "screen_orientation": "landscape",
+    "title": "百年萨拉热窝：黄金家族",
+    "description": "1904-2014，横跨百年的历史策略经营游戏。经营矿山、投资股市、扩张势力，在巴尔干风云中书写家族传奇。",
+    "category": "strategy",
+    "screen_orientation": "portrait",
     "collection_type": "sce",
-    "trial_note": "<developer's note>",
+    "trial_note": "历史策略经营游戏，竖屏操作",
     "app_platforms": "1,2",
-    "developer_id": 395178
+    "developer_id": 395178,
+    "app_id": 848940,
+    "miniapp_id": "tapmcxw9rwffmgvboe"
   },
   "assets": {
     "icon": "",
     "screenshots": [],
     "promotional_image": ""
+  },
+  "test_qrcode": {
+    "url": "https://tapcode-sce.spark.xd.com/qrcode/p_nknd_1777171164764.png",
+    "generated_at": "2026-04-26T02:39:24.924Z"
+  },
+  "metadata": {
+    "updated_at": "2026-04-26T02:39:24.924Z"
   }
 }

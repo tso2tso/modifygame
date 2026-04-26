@@ -246,6 +246,10 @@ function SaveLoad._SerializeState(state)
     -- 被动加成（印刷宣传等）
     data.passive_influence = state.passive_influence or 0
 
+    -- 广告幸运事件
+    data.lucky_ad_watched = state.lucky_ad_watched or 0
+    data.lucky_ad_decay = state.lucky_ad_decay or 1.0
+
     -- 工人/军事
     data.workers = {
         hired = state.workers.hired,
@@ -321,6 +325,10 @@ function SaveLoad._DeserializeState(data)
     data.portfolio = data.portfolio or { holdings = {} }
     data.portfolio.holdings = data.portfolio.holdings or {}
     data.passive_influence = data.passive_influence or 0
+
+    -- 广告幸运事件兼容
+    data.lucky_ad_watched = data.lucky_ad_watched or 0
+    data.lucky_ad_decay = data.lucky_ad_decay or 1.0
 
     if not data.stocks or #data.stocks == 0 then
         local Balance = require("data.balance")

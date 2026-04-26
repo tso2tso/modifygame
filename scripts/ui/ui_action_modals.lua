@@ -186,6 +186,10 @@ local function buildTechTreeNodes(state)
 end
 
 local detailModal_ = nil
+--- 模块级引用：科技树 detail 容器和滚动内容面板
+local techDetailContainer_ = nil
+local techScrollContent_ = nil
+local techSelectedId_ = nil
 --- 显示科技详情弹窗
 ---@param state table
 ---@param tech table 科技数据
@@ -572,10 +576,9 @@ local function createTechStatusBar(state, accent)
     }
 end
 
-local function createTechNodeButton(state, accent, tech, selectedTechId)
+local function createTechNodeButton(state, accent, tech)
     local st = getTechState(state, tech)
-    local selected = selectedTechId == tech.id
-    local borderColor = selected and accent or (st.canStart and C.accent_gold or C.border_card)
+    local borderColor = st.canStart and C.accent_gold or C.border_card
     local bg = st.isDone and { C.accent_green[1], C.accent_green[2], C.accent_green[3], 50 }
         or st.isProgress and { C.accent_blue[1], C.accent_blue[2], C.accent_blue[3], 50 }
         or st.canStart and { C.accent_gold[1], C.accent_gold[2], C.accent_gold[3], 42 }
@@ -587,13 +590,14 @@ local function createTechNodeButton(state, accent, tech, selectedTechId)
         padding = 8,
         backgroundColor = bg,
         borderRadius = S.radius_card,
-        borderWidth = selected and 2 or 1,
+        borderWidth = 1,
         borderColor = borderColor,
         flexDirection = "column",
         justifyContent = "space-between",
         gap = 4,
+        pointerEvents = "auto",
         onPointerUp = Config.TapGuard(function()
-            ActionModals.ShowTechnology(state, accent, tech.id)
+            ActionModals._UpdateTechDetail(state, accent, tech.id)
         end),
         children = {
             UI.Label {
@@ -614,11 +618,11 @@ local function createTechNodeButton(state, accent, tech, selectedTechId)
     }
 end
 
-local function createTechLane(state, accent, lane, selectedTechId)
+local function createTechLane(state, accent, lane)
     local nodes = {}
     for _, tech in ipairs(TechData.GetAll()) do
         if string.sub(tech.id, 1, 1) == lane.id then
-            table.insert(nodes, createTechNodeButton(state, accent, tech, selectedTechId))
+            table.insert(nodes, createTechNodeButton(state, accent, tech))
         end
     end
 
@@ -820,11 +824,9 @@ local function createTechDetailPanel(state, accent, techId)
     }
 end
 
-function ActionModals.ShowTechnology(state, accent, selectedTechId)
-    closeModal()
-
+--- 构建科技研发的滚动内容
+local function buildTechContent(state, accent, selectedTechId)
     local rows = {}
-    selectedTechId = selectedTechId or findDefaultTechId(state)
 
     table.insert(rows, createTechStatusBar(state, accent))
 
@@ -842,20 +844,85 @@ function ActionModals.ShowTechnology(state, accent, selectedTechId)
     })
 
     for _, lane in ipairs(TECH_LANES) do
-        table.insert(rows, createTechLane(state, accent, lane, selectedTechId))
+        table.insert(rows, createTechLane(state, accent, lane))
     end
 
-    table.insert(rows, createTechDetailPanel(state, accent, selectedTechId))
+    -- detail 面板放入一个容器，便于后续局部替换
+    techDetailContainer_ = UI.Panel {
+        width = "100%",
+        flexDirection = "column",
+        children = {
+            createTechDetailPanel(state, accent, selectedTechId),
+        },
+    }
+    table.insert(rows, techDetailContainer_)
 
     table.insert(rows, UI.Label {
-        text = "点击科技节点会在下方更新详情。四条线互相独立，但同一时间只能研发一项科技。",
+        text = "点击科技节点查看详情，四条线独立，同时只能研发一项。",
         fontSize = F.label,
         fontColor = C.text_muted,
         textAlign = "center",
         width = "100%",
     })
 
-    ActionModals._ShowList("🔬 科技研发", rows)
+    return UI.ScrollView {
+        width = "100%",
+        maxHeight = 480,
+        flexShrink = 1,
+        children = {
+            UI.Panel {
+                width = "100%",
+                flexDirection = "column",
+                gap = 8,
+                children = rows,
+            },
+        },
+    }
+end
+
+--- 仅更新 detail 面板（不重建 ScrollView，保留滚动位置）
+function ActionModals._UpdateTechDetail(state, accent, techId)
+    techSelectedId_ = techId
+    if techDetailContainer_ then
+        techDetailContainer_:ClearChildren()
+        techDetailContainer_:AddChild(createTechDetailPanel(state, accent, techId))
+    end
+end
+
+function ActionModals.ShowTechnology(state, accent, selectedTechId)
+    selectedTechId = selectedTechId or findDefaultTechId(state)
+    techSelectedId_ = selectedTechId
+
+    -- 如果科技弹窗已打开，只替换 detail 面板
+    if currentModal_ and currentModal_._isTechModal then
+        ActionModals._UpdateTechDetail(state, accent, selectedTechId)
+        return
+    end
+
+    closeModal()
+    techDetailContainer_ = nil
+
+    currentModal_ = UI.Modal {
+        title = "🔬 科技研发",
+        size = "md",
+        closeOnOverlay = true,
+        closeOnEscape = true,
+        showCloseButton = true,
+        onClose = function(self)
+            currentModal_ = nil
+            techDetailContainer_ = nil
+            techSelectedId_ = nil
+            self:Destroy()
+        end,
+    }
+    currentModal_._isTechModal = true
+
+    currentModal_:AddContent(buildTechContent(state, accent, selectedTechId))
+
+    if uiRoot_ then
+        uiRoot_:AddChild(currentModal_)
+    end
+    currentModal_:Open()
 end
 
 --- 科技树图例项
