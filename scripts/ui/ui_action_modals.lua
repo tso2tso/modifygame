@@ -434,111 +434,428 @@ local function showTechDetail(state, tech, accent)
     detailModal_:Open()
 end
 
-function ActionModals.ShowTechnology(state, accent)
-    closeModal()
+local TECH_LANES = {
+    { id = "a", title = "A · 采矿", desc = "产出 / 安全 / 工人效率" },
+    { id = "b", title = "B · 经济", desc = "税率 / 贸易 / 金融 AP" },
+    { id = "c", title = "C · 军事", desc = "装备 / 补给 / 战力" },
+    { id = "d", title = "D · 文化", desc = "影响力 / 士气 / 研发速度" },
+}
 
-    local rows = {}
+local function getTechState(state, tech)
+    local researched = state.tech and state.tech.researched or {}
+    local inProgress = state.tech and state.tech.in_progress
+    local reqMet = (not tech.requires) or researched[tech.requires]
+    local isDone = researched[tech.id] == true
+    local isProgress = inProgress and inProgress.id == tech.id
+    local hasOtherProgress = inProgress and inProgress.id ~= tech.id
+    local canAfford = state.cash >= tech.cost
+    local hasAP = (state.ap.current + (state.ap.temp or 0)) >= Balance.TECH.base_research_ap
+    local canStart = (not isDone) and (not isProgress) and reqMet and canAfford and hasAP and not hasOtherProgress
 
-    -- 研发中进度条
-    if state.tech and state.tech.in_progress then
-        local ip = state.tech.in_progress
-        local t = TechData.GetById(ip.id)
-        table.insert(rows, UI.Panel {
+    local label = "未解锁"
+    local color = C.paper_mid
+    if isDone then
+        label = "已研发"
+        color = C.accent_green
+    elseif isProgress then
+        label = "研发中"
+        color = C.accent_blue
+    elseif canStart then
+        label = "可研发"
+        color = C.accent_gold
+    elseif reqMet then
+        label = hasOtherProgress and "等待" or "资源不足"
+        color = C.text_muted
+    end
+
+    return {
+        label = label,
+        color = color,
+        reqMet = reqMet,
+        isDone = isDone,
+        isProgress = isProgress,
+        hasOtherProgress = hasOtherProgress,
+        canAfford = canAfford,
+        hasAP = hasAP,
+        canStart = canStart,
+    }
+end
+
+local function findDefaultTechId(state)
+    local inProgress = state.tech and state.tech.in_progress
+    if inProgress then return inProgress.id end
+    for _, tech in ipairs(TechData.GetAll()) do
+        if getTechState(state, tech).canStart then return tech.id end
+    end
+    local allTechs = TechData.GetAll()
+    return allTechs[1] and allTechs[1].id or nil
+end
+
+local function createInlineDivider()
+    return UI.Panel {
+        width = "100%",
+        height = 1,
+        backgroundColor = C.divider,
+    }
+end
+
+local function createTechStatusBar(state, accent)
+    local inProgress = state.tech and state.tech.in_progress
+    local tech = inProgress and TechData.GetById(inProgress.id) or nil
+
+    if not inProgress or not tech then
+        return UI.Panel {
             width = "100%",
             padding = 10,
             backgroundColor = C.paper_dark,
             borderRadius = S.radius_card,
-            borderLeftWidth = 2,
-            borderLeftColor = accent,
+            borderWidth = 1,
+            borderColor = C.border_card,
             flexDirection = "column",
             gap = 4,
             children = {
                 UI.Label {
-                    text = "⏳ 研发中：" .. (t and t.name or ip.id),
-                    fontSize = F.body,
+                    text = "当前无研发项目",
+                    fontSize = F.subtitle,
                     fontWeight = "bold",
-                    fontColor = accent,
-                },
-                UI.ProgressBar {
-                    value = ip.progress / math.max(1, ip.total),
-                    width = "100%", height = 6,
-                    borderRadius = 3,
-                    trackColor = C.bg_surface,
-                    fillColor = accent,
+                    fontColor = C.text_primary,
                 },
                 UI.Label {
-                    text = string.format("进度 %d / %d 季", ip.progress, ip.total),
+                    text = "选择一个可研发科技开始推进。建议优先完成每条线的前置节点。",
                     fontSize = F.label,
+                    fontColor = C.text_secondary,
+                    whiteSpace = "normal",
+                },
+            },
+        }
+    end
+
+    local progress = inProgress.progress / math.max(1, inProgress.total)
+    return UI.Panel {
+        width = "100%",
+        padding = 10,
+        backgroundColor = C.paper_dark,
+        borderRadius = S.radius_card,
+        borderLeftWidth = 3,
+        borderLeftColor = accent,
+        flexDirection = "column",
+        gap = 6,
+        children = {
+            UI.Panel {
+                width = "100%",
+                flexDirection = "row",
+                justifyContent = "space-between",
+                alignItems = "center",
+                children = {
+                    UI.Label {
+                        text = "研发中：" .. tech.name,
+                        fontSize = F.subtitle,
+                        fontWeight = "bold",
+                        fontColor = accent,
+                    },
+                    UI.Label {
+                        text = string.format("%d/%d 季", inProgress.progress, inProgress.total),
+                        fontSize = F.label,
+                        fontColor = C.text_secondary,
+                    },
+                },
+            },
+            UI.ProgressBar {
+                value = progress,
+                width = "100%",
+                height = 7,
+                borderRadius = 4,
+                trackColor = C.bg_surface,
+                fillColor = accent,
+            },
+        },
+    }
+end
+
+local function createTechNodeButton(state, accent, tech, selectedTechId)
+    local st = getTechState(state, tech)
+    local selected = selectedTechId == tech.id
+    local borderColor = selected and accent or (st.canStart and C.accent_gold or C.border_card)
+    local bg = st.isDone and { C.accent_green[1], C.accent_green[2], C.accent_green[3], 50 }
+        or st.isProgress and { C.accent_blue[1], C.accent_blue[2], C.accent_blue[3], 50 }
+        or st.canStart and { C.accent_gold[1], C.accent_gold[2], C.accent_gold[3], 42 }
+        or C.bg_elevated
+
+    return UI.Panel {
+        width = 128,
+        minHeight = 68,
+        padding = 8,
+        backgroundColor = bg,
+        borderRadius = S.radius_card,
+        borderWidth = selected and 2 or 1,
+        borderColor = borderColor,
+        flexDirection = "column",
+        justifyContent = "space-between",
+        gap = 4,
+        onPointerUp = Config.TapGuard(function()
+            ActionModals.ShowTechnology(state, accent, tech.id)
+        end),
+        children = {
+            UI.Label {
+                text = tech.icon .. " " .. tech.name,
+                fontSize = F.body_minor,
+                fontWeight = st.canStart and "bold" or "medium",
+                fontColor = st.reqMet and C.text_primary or C.text_muted,
+                whiteSpace = "normal",
+                pointerEvents = "none",
+            },
+            UI.Label {
+                text = st.label,
+                fontSize = F.label,
+                fontColor = st.color,
+                pointerEvents = "none",
+            },
+        },
+    }
+end
+
+local function createTechLane(state, accent, lane, selectedTechId)
+    local nodes = {}
+    for _, tech in ipairs(TechData.GetAll()) do
+        if string.sub(tech.id, 1, 1) == lane.id then
+            table.insert(nodes, createTechNodeButton(state, accent, tech, selectedTechId))
+        end
+    end
+
+    return UI.Panel {
+        width = "100%",
+        padding = 10,
+        backgroundColor = C.paper_dark,
+        borderRadius = S.radius_card,
+        borderWidth = 1,
+        borderColor = C.border_card,
+        flexDirection = "column",
+        gap = 8,
+        children = {
+            UI.Panel {
+                width = "100%",
+                flexDirection = "row",
+                justifyContent = "space-between",
+                alignItems = "center",
+                children = {
+                    UI.Label {
+                        text = lane.title,
+                        fontSize = F.subtitle,
+                        fontWeight = "bold",
+                        fontColor = C.text_primary,
+                    },
+                    UI.Label {
+                        text = lane.desc,
+                        fontSize = F.label,
+                        fontColor = C.text_secondary,
+                    },
+                },
+            },
+            UI.Panel {
+                width = "100%",
+                flexDirection = "row",
+                flexWrap = "wrap",
+                gap = 8,
+                children = nodes,
+            },
+        },
+    }
+end
+
+local function createTechDetailPanel(state, accent, techId)
+    local tech = techId and TechData.GetById(techId) or nil
+    if not tech then
+        return UI.Panel {
+            width = "100%",
+            padding = 10,
+            backgroundColor = C.paper_dark,
+            borderRadius = S.radius_card,
+            children = {
+                UI.Label {
+                    text = "选择一个科技查看详情",
+                    fontSize = F.body,
                     fontColor = C.text_secondary,
                 },
             },
+        }
+    end
+
+    local st = getTechState(state, tech)
+    local effectRows = {}
+    for _, eff in ipairs(tech.effects or {}) do
+        local formatter = EFFECT_LABELS[eff.kind]
+        local label = formatter and formatter(eff.value) or (eff.kind .. " " .. tostring(eff.value or ""))
+        table.insert(effectRows, UI.Label {
+            text = "• " .. label,
+            fontSize = F.body_minor,
+            fontColor = C.text_primary,
+            whiteSpace = "normal",
         })
     end
 
-    -- 科技树
-    local treeNodes, nodeSize = buildTechTreeNodes(state)
+    local reqText = "无"
+    if tech.requires then
+        local req = TechData.GetById(tech.requires)
+        local reqDone = req and state.tech and state.tech.researched[req.id]
+        reqText = (req and req.name or tech.requires) .. (reqDone and " ✓" or " ✗")
+    end
 
-    -- 颜色定义
-    local COL_DONE       = { 75, 175, 95, 255 }
-    local COL_LOCKED     = { 70, 68, 80, 255 }
-    local COL_AVAILABLE  = { 235, 190, 55, 255 }
+    local btnLabel = st.isDone and "已完成"
+        or st.isProgress and "研发进行中"
+        or (not st.reqMet) and "需要前置科技"
+        or st.hasOtherProgress and "已有研发项目"
+        or (not st.canAfford) and "资金不足"
+        or (not st.hasAP) and "行动点不足"
+        or "开始研发"
 
-    ---@type SkillTree
-    local skillTree = UI.SkillTree {
-        width = "100%",
-        height = 620,
-        nodes = treeNodes,
-        nodeSize = nodeSize,
-        nodeShape = "rounded",
-        lineWidth = 3,
-        minZoom = 0.35,
-        maxZoom = 2.0,
-        colors = {
-            unlocked    = COL_DONE,
-            locked      = COL_LOCKED,
-            unlockable  = COL_AVAILABLE,
-            line_unlocked = { COL_DONE[1], COL_DONE[2], COL_DONE[3], 200 },
-            line_locked   = { 40, 40, 50, 150 },
-            background  = { 18, 18, 24, 255 },
-            node_border = { 180, 180, 190, 100 },
-            text        = { 240, 240, 240, 255 },
+    local children = {
+        UI.Panel {
+            width = "100%",
+            flexDirection = "row",
+            justifyContent = "space-between",
+            alignItems = "center",
+            children = {
+                UI.Label {
+                    text = tech.icon .. " " .. tech.name,
+                    fontSize = F.subtitle,
+                    fontWeight = "bold",
+                    fontColor = C.text_primary,
+                },
+                UI.Label {
+                    text = st.label,
+                    fontSize = F.label,
+                    fontWeight = "bold",
+                    fontColor = st.color,
+                },
+            },
         },
-        onNodeUnlock = function(node)
-            node.unlocked = (state.tech.researched[node.id] == true)
-        end,
-        onNodeClick = function(node)
-            local t = node.techData
-            if not t then return end
-            showTechDetail(state, t, accent)
-        end,
+        UI.Label {
+            text = tech.desc,
+            fontSize = F.body_minor,
+            fontColor = C.text_secondary,
+            whiteSpace = "normal",
+        },
+        createInlineDivider(),
+        UI.Panel {
+            width = "100%",
+            flexDirection = "row",
+            flexWrap = "wrap",
+            gap = 12,
+            children = {
+                UI.Label {
+                    text = "费用 " .. tech.cost,
+                    fontSize = F.body_minor,
+                    fontColor = st.canAfford and C.text_primary or C.accent_red,
+                },
+                UI.Label {
+                    text = "周期 " .. tech.turns .. " 季",
+                    fontSize = F.body_minor,
+                    fontColor = C.text_primary,
+                },
+                UI.Label {
+                    text = "AP " .. Balance.TECH.base_research_ap,
+                    fontSize = F.body_minor,
+                    fontColor = st.hasAP and C.text_primary or C.accent_red,
+                },
+                UI.Label {
+                    text = "前置 " .. reqText,
+                    fontSize = F.body_minor,
+                    fontColor = C.text_secondary,
+                },
+            },
+        },
+        UI.Label {
+            text = "效果",
+            fontSize = F.body_minor,
+            fontWeight = "bold",
+            fontColor = accent,
+        },
     }
+    for _, row in ipairs(effectRows) do
+        table.insert(children, row)
+    end
+    table.insert(children, UI.Panel {
+        width = "100%",
+        height = 34,
+        marginTop = 4,
+        borderRadius = S.radius_btn,
+        backgroundColor = st.canStart and accent or C.paper_mid,
+        justifyContent = "center",
+        alignItems = "center",
+        opacity = st.canStart and 1.0 or 0.55,
+        pointerEvents = st.canStart and "auto" or "none",
+        onPointerUp = Config.TapGuard(function()
+            if not st.canStart then return end
+            local ok, msg = Tech.Start(state, tech.id)
+            UI.Toast.Show(msg, {
+                variant = ok and "success" or "error",
+                duration = 1.5,
+            })
+            if ok then
+                closeModal()
+                notifyChanged()
+            end
+        end),
+        children = {
+            UI.Label {
+                text = btnLabel,
+                fontSize = F.body,
+                fontWeight = "bold",
+                fontColor = { 255, 255, 255, 255 },
+                pointerEvents = "none",
+            },
+        },
+    })
 
-    table.insert(rows, skillTree)
+    return UI.Panel {
+        width = "100%",
+        padding = 10,
+        backgroundColor = C.paper_dark,
+        borderRadius = S.radius_card,
+        borderWidth = 1,
+        borderColor = accent,
+        flexDirection = "column",
+        gap = 8,
+        children = children,
+    }
+end
 
-    -- 图例
+function ActionModals.ShowTechnology(state, accent, selectedTechId)
+    closeModal()
+
+    local rows = {}
+    selectedTechId = selectedTechId or findDefaultTechId(state)
+
+    table.insert(rows, createTechStatusBar(state, accent))
+
     table.insert(rows, UI.Panel {
         width = "100%",
         flexDirection = "row",
         justifyContent = "center",
-        gap = 16,
-        marginTop = 4,
+        gap = 14,
         children = {
-            ActionModals._TechLegendItem(COL_DONE, "已研发"),
-            ActionModals._TechLegendItem(COL_AVAILABLE, "可研发"),
-            ActionModals._TechLegendItem(COL_LOCKED, "未解锁"),
+            ActionModals._TechLegendItem(C.accent_green, "已研发"),
+            ActionModals._TechLegendItem(C.accent_gold, "可研发"),
+            ActionModals._TechLegendItem(C.accent_blue, "研发中"),
+            ActionModals._TechLegendItem(C.paper_mid, "未解锁"),
         },
     })
 
-    -- 提示
+    for _, lane in ipairs(TECH_LANES) do
+        table.insert(rows, createTechLane(state, accent, lane, selectedTechId))
+    end
+
+    table.insert(rows, createTechDetailPanel(state, accent, selectedTechId))
+
     table.insert(rows, UI.Label {
-        text = "点击节点查看详情与研发 · 每次消耗 " .. Balance.TECH.base_research_ap .. " AP · 拖拽平移 · 缩放查看",
+        text = "点击科技节点会在下方更新详情。四条线互相独立，但同一时间只能研发一项科技。",
         fontSize = F.label,
         fontColor = C.text_muted,
         textAlign = "center",
         width = "100%",
     })
 
-    ActionModals._ShowList("🔬 科技树", rows)
+    ActionModals._ShowList("🔬 科技研发", rows)
 end
 
 --- 科技树图例项
