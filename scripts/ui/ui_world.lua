@@ -176,6 +176,7 @@ function WorldPage._BuildMapTab(state)
     }
     mapWidget_:SetRegions(state.regions)
     mapWidget_:SetSelected(selectedNodeId_)
+    mapWidget_:UpdateUnlocks(state)
 
     -- 设置时代
     local era = Config.GetEraByYear(state.year)
@@ -997,23 +998,23 @@ function WorldPage._CreateSeasonSummary(state)
                 },
             },
             UI.Divider { color = C.divider },
-            -- 关键指标网格（5列）
+            -- 关键指标网格（4列）
             UI.Panel {
                 width = "100%",
                 flexDirection = "row",
                 gap = 4,
                 children = {
                     WorldPage._MetricCell("现金",
-                        Config.FormatNumber(state.resources and state.resources.cash or 0),
+                        Config.FormatNumber(state.cash or 0),
                         C.accent_gold),
-                    WorldPage._MetricCell("声望",
-                        tostring(state.dynasty and state.dynasty.prestige or 0),
+                    WorldPage._MetricCell("黄金",
+                        tostring(state.gold or 0),
                         C.accent_amber),
                     WorldPage._MetricCell("影响力",
-                        tostring(state.flags and state.flags.total_influence or 0),
+                        tostring(GameState.CalcTotalInfluence(state)),
                         C.accent_blue),
                     WorldPage._MetricCell("武装",
-                        tostring(state.resources and state.resources.guards or 0),
+                        tostring(state.military and state.military.guards or 0),
                         C.accent_red),
                 },
             },
@@ -1313,6 +1314,7 @@ function WorldPage.Refresh(root, state)
     stateRef_ = state
     if mapWidget_ then
         mapWidget_:SetRegions(state.regions)
+        mapWidget_:UpdateUnlocks(state)
         local era = Config.GetEraByYear(state.year)
         if era then mapWidget_:SetEra(era.id) end
     end

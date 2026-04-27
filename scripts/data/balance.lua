@@ -173,6 +173,7 @@ Balance.AI = {
         growth_rate      = 0.05,  -- 每季资产增长率
         aggression       = 0.3,   -- 攻击倾向
         expand_threshold = 600,   -- 资产超过此值开始扩张
+        cash_cap         = 8000,  -- 现金上限（防止复利爆炸）
     },
     -- 外国资本
     foreign_capital = {
@@ -181,6 +182,39 @@ Balance.AI = {
         aggression       = 0.1,
         expand_threshold = 1000,
         war_flee_threshold = 0.6, -- 战争风险 > 0.6 时撤资
+        cash_cap         = 12000, -- 现金上限（外资更富裕但也有上限）
+    },
+    -- AI 主动花费行为（每季检查一次）
+    spending = {
+        -- 雇佣兵：AI 花钱提升 power
+        mercenary_cost    = 500,   -- 每次花费
+        mercenary_power   = 5,     -- 每次增加 power
+        mercenary_chance  = 0.25,  -- 触发概率（cash > expand_threshold 时）
+        -- 地区压制：AI 花钱降低玩家控制度
+        suppress_cost     = 400,
+        suppress_control  = -3,    -- 降低玩家控制度
+        suppress_chance   = 0.20,  -- 触发概率（attitude < -30 时）
+        -- 经济制裁：AI 花钱对玩家施加负面修正器
+        sanction_cost     = 600,
+        sanction_chance   = 0.15,  -- 触发概率（foreign_capital 且 attitude < -40 时）
+        -- 通胀操纵：外资推高通胀系数（仅 foreign_capital）
+        inflate_cost      = 800,
+        inflate_drift     = 0.012, -- 额外通胀漂移
+        inflate_duration  = 4,     -- 持续季度
+        inflate_chance    = 0.12,  -- 触发概率（attitude < -50 时）
+        -- 矿价波动：外资压低金银价格（仅 foreign_capital）
+        mine_price_cost   = 700,
+        mine_price_mod    = -0.15, -- 矿产品价格 -15%
+        mine_price_duration = 3,
+        mine_price_chance = 0.15,  -- 触发概率（attitude < -35 时）
+    },
+    -- 正向态度触发器（每季检查，使态度不至于单调下降）
+    positive_triggers = {
+        player_weak_cash    = 500,   -- 玩家现金低于此值 → 态度 +2（不再是威胁）
+        player_few_mines    = 2,     -- 玩家矿山少于此数 → 态度 +1（领地竞争消退）
+        low_power_sympathy  = 30,    -- AI power 低于此值 → 态度 +1（弱势求和倾向）
+        natural_recovery    = 1,     -- 每季自然回暖 +1（人心向善基线）
+        attitude_cap        = 60,    -- 正向态度上限（不会无限好感）
     },
 }
 

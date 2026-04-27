@@ -467,6 +467,12 @@ function TurnEngine.EndTurn(state)
             end
             local growth = math.floor(faction.cash * math.max(0, rate))
             faction.cash = faction.cash + growth
+            -- 现金上限：防止复利爆炸增长
+            local cashCap = aiConfig.cash_cap or 10000
+            if faction.cash > cashCap then
+                faction.cash = cashCap
+            end
+
             local foreignControl = GameState.GetModifierValue(state, "foreign_control")
             if faction.type == "foreign_capital" and foreignControl ~= 0 then
                 faction.attitude = math.max(-100, math.min(100,
@@ -510,7 +516,72 @@ function TurnEngine.EndTurn(state)
                 end
             end
 
-            -- 与玩家的态度随竞争变化（多维触发）
+            -- ── AI 主动花费现金（防止现金无意义堆积）──
+            local spend = Balance.AI.spending
+            -- 1) 雇佣兵：有钱时花钱提升 power
+            if faction.cash >= (spend.mercenary_cost or 500)
+                and faction.cash > (aiConfig.expand_threshold or 600)
+                and faction.power < 90
+                and math.random() < (spend.mercenary_chance or 0.25) then
+                faction.cash = faction.cash - spend.mercenary_cost
+                faction.power = math.min(100, faction.power + (spend.mercenary_power or 5))
+                table.insert(report.ai_changes,
+                    string.format("%s 雇佣了私兵（power +%d）", faction.name, spend.mercenary_power or 5))
+            end
+            -- 2) 地区压制：态度差时打压玩家控制度
+            if faction.attitude < -30
+                and faction.cash >= (spend.suppress_cost or 400)
+                and math.random() < (spend.suppress_chance or 0.20) then
+                faction.cash = faction.cash - spend.suppress_cost
+                local targetRegion = PickAIExpansionRegion(state, faction)
+                if targetRegion then
+                    targetRegion.control = math.max(0,
+                        (targetRegion.control or 0) + (spend.suppress_control or -3))
+                    table.insert(report.ai_changes,
+                        string.format("%s 在%s进行了地区压制（控制度 %d）",
+                            faction.name, targetRegion.name, spend.suppress_control or -3))
+                end
+            end
+            -- 3) 经济制裁：外资对玩家施加负面修正器
+            if faction.type == "foreign_capital"
+                and faction.attitude < -40
+                and faction.cash >= (spend.sanction_cost or 600)
+                and math.random() < (spend.sanction_chance or 0.15) then
+                faction.cash = faction.cash - spend.sanction_cost
+                GameState.AddModifier(state, "foreign_sanction", "income_mod", -0.10, 3)
+                table.insert(report.ai_changes,
+                    string.format("%s 对家族实施了经济制裁（收入 -10%%，持续3季）", faction.name))
+            end
+            -- 4) 通胀操纵：外资推高通胀（极端敌对时）
+            if faction.type == "foreign_capital"
+                and faction.attitude < -50
+                and faction.cash >= (spend.inflate_cost or 800)
+                and math.random() < (spend.inflate_chance or 0.12) then
+                faction.cash = faction.cash - spend.inflate_cost
+                GameState.AddModifier(state, "foreign_inflate",
+                    "inflation_drift", spend.inflate_drift or 0.012, spend.inflate_duration or 4)
+                table.insert(report.ai_changes,
+                    string.format("%s 操纵了货币供应，推高通胀（+%.1f%%/季，持续%d季）",
+                        faction.name, (spend.inflate_drift or 0.012) * 100, spend.inflate_duration or 4))
+            end
+            -- 5) 矿价波动：外资压低金银矿产品价格
+            if faction.type == "foreign_capital"
+                and faction.attitude < -35
+                and faction.cash >= (spend.mine_price_cost or 700)
+                and math.random() < (spend.mine_price_chance or 0.15) then
+                faction.cash = faction.cash - spend.mine_price_cost
+                local priceMod = spend.mine_price_mod or -0.15
+                local priceDur = spend.mine_price_duration or 3
+                GameState.AddModifier(state, "foreign_gold_dump",
+                    "gold_price_mod", priceMod, priceDur)
+                GameState.AddModifier(state, "foreign_silver_dump",
+                    "silver_price_mod", priceMod, priceDur)
+                table.insert(report.ai_changes,
+                    string.format("%s 压低了金银市场价格（%.0f%%，持续%d季）",
+                        faction.name, priceMod * 100, priceDur))
+            end
+
+            -- ── 态度系统：负向触发器 ──
             -- 1) 经济碾压 → 嫉妒
             if state.cash > faction.cash * 1.5 then
                 faction.attitude = math.max(-100, faction.attitude - 3)
@@ -527,6 +598,64 @@ function TurnEngine.EndTurn(state)
             if faction.power >= 60 and faction.attitude > -50 then
                 faction.attitude = faction.attitude - 1
             end
+
+            -- ── 态度系统：正向触发器（平衡单调下降）──
+            local posTrig = Balance.AI.positive_triggers
+            local attCap = posTrig.attitude_cap or 60
+            -- 5) 自然回暖：每季基线 +1（关系不会永远恶化）
+            if faction.attitude < attCap then
+                faction.attitude = math.min(attCap,
+                    faction.attitude + (posTrig.natural_recovery or 1))
+            end
+            -- 6) 玩家经济弱势 → 不再是威胁
+            if state.cash < (posTrig.player_weak_cash or 500)
+                and faction.attitude < attCap then
+                faction.attitude = math.min(attCap, faction.attitude + 2)
+            end
+            -- 7) 玩家矿山少 → 领地竞争消退
+            if #state.mines < (posTrig.player_few_mines or 2)
+                and faction.attitude < attCap then
+                faction.attitude = math.min(attCap, faction.attitude + 1)
+            end
+            -- 8) AI 弱势时求和倾向
+            if faction.power < (posTrig.low_power_sympathy or 30)
+                and faction.attitude < attCap then
+                faction.attitude = math.min(attCap, faction.attitude + 1)
+            end
+            -- 最终 clamp
+            faction.attitude = math.max(-100, math.min(100, faction.attitude))
+        end
+    end
+
+    -- ── 阶段 6.2: foreign_control 持续性修正器 ──
+    -- 根据 foreign_capital 在各地区的 ai_presence 总和计算外资控制度
+    -- 该修正器影响 foreign_capital 的态度和 power（已在上方消费）
+    do
+        local totalForeignPresence = 0
+        for _, r in ipairs(state.regions or {}) do
+            if r.ai_presence and r.ai_presence.foreign_capital then
+                totalForeignPresence = totalForeignPresence + r.ai_presence.foreign_capital
+            end
+        end
+        -- 外资存在度 > 30 时开始产生 foreign_control 修正
+        -- 每 20 点存在度 → +1 foreign_control 值
+        local fcValue = 0
+        if totalForeignPresence > 30 then
+            fcValue = math.floor((totalForeignPresence - 30) / 20)
+        end
+        -- 移除旧的 foreign_control 修正器，替换为当前值
+        if state.modifiers then
+            local kept = {}
+            for _, mod in ipairs(state.modifiers) do
+                if mod.target ~= "foreign_control" then
+                    table.insert(kept, mod)
+                end
+            end
+            state.modifiers = kept
+        end
+        if fcValue > 0 then
+            GameState.AddModifier(state, "foreign_presence_control",
+                "foreign_control", fcValue, 1)
         end
     end
 

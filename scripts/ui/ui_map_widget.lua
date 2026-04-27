@@ -82,8 +82,6 @@ local ERA_MAP_THEMES = {
     [3] = { bg = { 28, 35, 49 }, grid = { 50, 60, 80, 20 }, polyA = 45, labelA = 135 },  -- 深蓝钢
     [4] = { bg = { 40, 40, 40 }, grid = { 60, 60, 60, 18 }, polyA = 35, labelA = 95 },   -- 混凝土灰
     [5] = { bg = { 27, 40, 55 }, grid = { 40, 55, 75, 20 }, polyA = 42, labelA = 125 },  -- 冷战蓝
-    [6] = { bg = { 42, 38, 35 }, grid = { 65, 58, 50, 18 }, polyA = 32, labelA = 85 },   -- 围城烟灰
-    [7] = { bg = { 22, 32, 42 }, grid = { 40, 52, 65, 22 }, polyA = 48, labelA = 140 },  -- 现代深海
 }
 
 -- ============================================================================
@@ -203,6 +201,30 @@ function MapWidget:SetRegions(regions) self.regions_ = regions or {} end
 function MapWidget:SetSelected(id) self.selectedNodeId_ = id end
 function MapWidget:GetSelected() return self.selectedNodeId_ end
 function MapWidget:SetEra(eraId) self.eraId_ = eraId or 1 end
+
+--- 根据游戏状态动态解锁地图图层
+---@param state table 游戏状态
+function MapWidget:UpdateUnlocks(state)
+    if not state then return end
+    for _, layer in ipairs(LAYERS) do
+        if layer.locked then
+            local shouldUnlock = false
+            if layer.id == "trade" then
+                -- 贸易层：拥有 ≥ 3 矿山（商业网络建立）
+                shouldUnlock = state.mines and #state.mines >= 3
+            elseif layer.id == "military" then
+                -- 军事层：护卫 ≥ 10（军事力量成型）
+                shouldUnlock = state.military and state.military.guards >= 10
+            elseif layer.id == "intel" then
+                -- 情报层：执行过任何情报行动
+                shouldUnlock = state.flags and state.flags.intel_unlocked
+            end
+            if shouldUnlock then
+                layer.locked = false
+            end
+        end
+    end
+end
 
 function MapWidget:ToggleLayer(layerId)
     -- control 不可关闭

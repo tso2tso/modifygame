@@ -1140,6 +1140,7 @@ function ActionModals._IntelScout(state, faction)
     end
     ActionModals._Spend(state, cfg)
     faction.scouted = true
+    state.flags.intel_unlocked = true
     GameState.AddLog(state, string.format("[情报] 侦察 %s：现金 %d，势力 %d",
         faction.name, faction.cash, faction.power))
     UI.Toast.Show("侦察完成，情报已更新", { variant = "success", duration = 1.5 })
