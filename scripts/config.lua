@@ -52,7 +52,15 @@ Config.ERAS = {
         war_stripe = true,
         glitch = false,
     },
-    -- 第五章~第七章已移除：游戏终止于 1945 年二战结束
+    {
+        id = 5, start_year = 1946, end_year = 1955,
+        label  = "第五章 战后余烬",
+        accent = { 100, 140, 180, 255 },  -- #648CB4 冷钢蓝（社会主义工业风）
+        border = {  60,  80, 100, 255 },  -- #3C5064 深灰蓝
+        overlay = {  40,  55,  75, 77 },  -- 30% 深蓝灰
+        war_stripe = false,
+        glitch = false,
+    },
 }
 
 --- 根据年份获取对应时代定义
@@ -272,7 +280,7 @@ Config.QUARTER_DATES = {
 Config.BALANCE = {
     start_year     = 1904,
     start_quarter  = 1,
-    end_year       = 1945,
+    end_year       = 1955,
     end_quarter    = 4,
     base_ap        = 6,
     max_ap_bonus   = 4,

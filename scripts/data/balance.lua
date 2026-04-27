@@ -11,7 +11,7 @@ local Balance = {}
 Balance.TIME = {
     start_year    = 1904,
     start_quarter = 1,
-    end_year      = 1945,   -- 聚焦到二战结束
+    end_year      = 1955,   -- 延伸到战后重建（1946-1955）
     end_quarter   = 4,
     quarters_per_year = 4,
 }
@@ -106,39 +106,40 @@ Balance.ECONOMY = {
 }
 
 -- ============================================================================
--- 胜利条件（v2 — 大幅降速 + 章节门控 + 快照验证）
+-- 胜利条件（v3 — 时间线延长至1955 + 可达性调优）
+-- 设计目标：经济线在1945-1950可达，军事线在1940-1950可达
 -- ============================================================================
 Balance.VICTORY = {
-    -- 经济胜利：每季增量 = (floor(cash/3000) + floor(gold*0.35) + floor(total_control/20) + floor(total_influence/60)) * war_mod
+    -- 经济胜利：每季增量 = (floor(cash/2000) + floor(gold*0.5) + floor(total_control/15) + floor(total_influence/50)) * war_mod
     economic = {
-        threshold       = 2000,  -- 经济胜利点阈值
-        cash_divisor    = 3000,  -- 每 3000 现金 +1 点
-        gold_multiplier = 0.35,  -- 每黄金 +0.35 点
-        control_divisor = 20,    -- 每 20 总控制度 +1 点
-        influence_divisor = 60,  -- 每 60 总影响力 +1 点
+        threshold       = 1600,  -- 经济胜利点阈值（2000→1600：延长时间线后适度降低）
+        cash_divisor    = 2000,  -- 每 2000 现金 +1 点（3000→2000：让现金积累更有效）
+        gold_multiplier = 0.5,   -- 每黄金 +0.5 点（0.35→0.5：奖励黄金囤积策略）
+        control_divisor = 15,    -- 每 15 总控制度 +1 点（20→15：区域控制更有价值）
+        influence_divisor = 50,  -- 每 50 总影响力 +1 点（60→50：文化投入更有回报）
         war_mod         = 0.6,   -- 战时乘数（战争拖慢经济胜利）
         gate_year       = 1930,  -- 章节门控：经济线要到 1930 年后才结算
         -- 快照验证：达到阈值瞬间必须满足以下条件，否则视为无效
         snapshot = {
-            min_cash          = 15000,
-            min_gold          = 25,
-            min_total_control = 100,
+            min_cash          = 10000,  -- 15000→10000：降低快照门槛
+            min_gold          = 20,     -- 25→20
+            min_total_control = 80,     -- 100→80
         },
     },
-    -- 军事胜利：每季增量 = (floor(guards*0.25) + floor(morale/28) + floor(total_control/14) + 本季/近期胜场) * war_mod
+    -- 军事胜利：每季增量 = (floor(guards*0.3) + floor(morale/25) + floor(total_control/12) + 本季/近期胜场) * war_mod
     military = {
-        threshold        = 2500,  -- 军事胜利点阈值
-        guard_multiplier = 0.25,  -- 每护卫 +0.25 点
-        morale_divisor   = 28,    -- 每 28 士气 +1 点
-        control_divisor  = 14,    -- 每 14 总控制度 +1 点
-        battle_wins_cap  = 3,     -- 每季最多计入 3 场近期胜利，避免累计胜场重复滚雪球
+        threshold        = 2000,  -- 军事胜利点阈值（2500→2000：与经济线拉近难度差）
+        guard_multiplier = 0.3,   -- 每护卫 +0.3 点（0.25→0.3：护卫投资更有效）
+        morale_divisor   = 25,    -- 每 25 士气 +1 点（28→25：士气管理更重要）
+        control_divisor  = 12,    -- 每 12 总控制度 +1 点（14→12：军事扩张更有收益）
+        battle_wins_cap  = 3,     -- 每季最多计入 3 场近期胜利
         war_mod          = 1.25,  -- 战时乘数（战争加速军事胜利）
         gate_year        = 1925,  -- 章节门控：军事线要到 1925 年后才结算
         -- 快照验证
         snapshot = {
-            min_guards        = 30,
-            min_morale        = 55,
-            min_total_control = 120,
+            min_guards        = 25,     -- 30→25：降低快照门槛
+            min_morale        = 50,     -- 55→50
+            min_total_control = 100,    -- 120→100
         },
     },
 }

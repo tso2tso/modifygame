@@ -1,6 +1,6 @@
 -- ============================================================================
 -- 事件数据：固定历史事件 + 随机事件模板
--- 范围：1904-1945（二战结束），共 35 个固定事件 + 14 个随机模板
+-- 范围：1904-1955（战后重建），共 43 个固定事件 + 14 个随机模板
 -- 所有效果使用系数修正（multiplier / drift），不使用直接数值
 -- ============================================================================
 
@@ -383,6 +383,7 @@ function EventsData.GetFixedEvents()
             fixed_date = { year = 1914, quarter = 3 },
             priority = EventsData.PRIORITY.MAIN,
             icon = "📯",
+            image = "image/events/war_breaks_out_1914.png",
             desc = "战争正式吞没帝国边陲。铁路优先运输军队，矿山被要求保障军需，粮食、煤炭和工资同时上涨。",
             options = {
                 {
@@ -1109,6 +1110,7 @@ function EventsData.GetFixedEvents()
             fixed_date = { year = 1929, quarter = 4 },
             priority = EventsData.PRIORITY.MAIN,
             icon = "📉",
+            image = "image/events/economic_crisis_1929.png",
             desc = "纽约股灾的冲击沿着银行和贸易网络传到巴尔干。信贷收缩、订单减少，现金比账面资产更重要。",
             options = {
                 {
@@ -1401,6 +1403,7 @@ function EventsData.GetFixedEvents()
             fixed_date = { year = 1938, quarter = 4 },
             priority = EventsData.PRIORITY.MAIN,
             icon = "📋",
+            image = "image/events/anschluss_1938.png",
             desc = "英法对德绥靖让整个欧洲感到不安。战争似乎不可避免，各国开始秘密囤积战略物资。巴尔干矿产的战略价值急剧上升。",
             options = {
                 {
@@ -1455,6 +1458,7 @@ function EventsData.GetFixedEvents()
             fixed_date = { year = 1939, quarter = 3 },
             priority = EventsData.PRIORITY.MAIN,
             icon = "🌐",
+            image = "image/events/wwii_starts_1939.png",
             desc = "德国入侵波兰，英法对德宣战，第二次世界大战正式爆发。虽然南斯拉夫暂时保持中立，但战争经济已经开始重塑一切。",
             options = {
                 {
@@ -1798,6 +1802,7 @@ function EventsData.GetFixedEvents()
             fixed_date = { year = 1945, quarter = 2 },
             priority = EventsData.PRIORITY.MAIN,
             icon = "🏛️",
+            image = "image/events/war_ends_1945.png",
             desc = "战争结束，铁托领导的新政权接管工业与金融秩序。公开资产面临审查和国有化，但技术、人员和地方信用仍有价值。家族百年经营的最终考验到来。",
             options = {
                 {
@@ -1841,6 +1846,386 @@ function EventsData.GetFixedEvents()
                             { target = "shadow_income", value = 50, duration = 12 },
                             { target = "corruption_risk", value = 20, duration = 12 },
                             { target = "political_standing", value = -10, duration = 0 },
+                        },
+                    },
+                },
+            },
+        },
+
+        -- ================================================================
+        -- ===   第五章  战后余烬 (1946-1955)                           ===
+        -- ================================================================
+
+        -- ================================================================
+        -- 1946 Q2 - 土地改革与国有化
+        -- ================================================================
+        {
+            id = "land_reform_1946",
+            title = "土地改革",
+            fixed_date = { year = 1946, quarter = 2 },
+            priority = EventsData.PRIORITY.MAIN,
+            icon = "🏗️",
+            desc = "新政权推行激进土地改革，大地主庄园被没收分配。矿业暂时例外，但'生产工具归公'的口号已经贴满矿区围墙。你需要在政策夹缝中保住家族产业。",
+            options = {
+                {
+                    text = "主动上缴部分土地，以退为进",
+                    desc = "牺牲土地换取矿权保全",
+                    effects = {
+                        cash = -200,
+                        modifiers = {
+                            { target = "political_standing", value = 15, duration = 0 },
+                            { target = "total_assets", value = -300, duration = 0 },
+                            { target = "public_support", value = 10, duration = 0 },
+                        },
+                    },
+                },
+                {
+                    text = "聘请法律顾问拖延审查",
+                    desc = "争取时间但引起注意",
+                    effects = {
+                        cash = -100,
+                        modifiers = {
+                            { target = "corruption_risk", value = 15, duration = 8 },
+                            { target = "tech_bonus", value = 5, duration = 0 },
+                        },
+                    },
+                },
+                {
+                    text = "将资产转入合作社名义",
+                    desc = "伪装顺从，暗中保留控制权",
+                    effects = {
+                        cash = -50,
+                        modifiers = {
+                            { target = "shadow_income", value = 40, duration = 8 },
+                            { target = "political_standing", value = -5, duration = 0 },
+                            { target = "legitimacy", value = -8, duration = 0 },
+                        },
+                    },
+                },
+            },
+        },
+
+        -- ================================================================
+        -- 1947 Q1 - 第一个五年计划
+        -- ================================================================
+        {
+            id = "five_year_plan_1947",
+            title = "五年计划",
+            fixed_date = { year = 1947, quarter = 1 },
+            priority = EventsData.PRIORITY.MAIN,
+            icon = "📋",
+            desc = "南斯拉夫仿照苏联模式推出第一个五年计划。重工业、矿产被列为优先发展目标。国家对产量施加硬性指标，但也提供设备和劳动力支持。",
+            options = {
+                {
+                    text = "全力配合，超额完成指标",
+                    desc = "获得政府投资，但失去经营自主权",
+                    effects = {
+                        cash = 300,
+                        inflation_delta = 0.02,
+                        modifiers = {
+                            { target = "mine_output_mult", value = 0.20, duration = 8 },
+                            { target = "political_standing", value = 20, duration = 0 },
+                            { target = "worker_morale", value = -5, duration = 0 },
+                        },
+                    },
+                },
+                {
+                    text = "谨慎参与，保留技术核心",
+                    desc = "既不出头也不掉队",
+                    effects = {
+                        cash = 100,
+                        modifiers = {
+                            { target = "tech_bonus", value = 8, duration = 8 },
+                            { target = "mine_output_mult", value = 0.08, duration = 8 },
+                        },
+                    },
+                },
+                {
+                    text = "虚报产量，暗留利润",
+                    desc = "短期获利，一旦查出代价惨重",
+                    effects = {
+                        cash = 250,
+                        gold = 3,
+                        modifiers = {
+                            { target = "corruption_risk", value = 30, duration = 12 },
+                            { target = "political_standing", value = -10, duration = 0 },
+                        },
+                    },
+                },
+            },
+        },
+
+        -- ================================================================
+        -- 1948 Q3 - 铁托-斯大林决裂
+        -- ================================================================
+        {
+            id = "tito_stalin_split_1948",
+            title = "铁托决裂",
+            fixed_date = { year = 1948, quarter = 3 },
+            priority = EventsData.PRIORITY.MAIN,
+            icon = "⚡",
+            desc = "铁托拒绝服从莫斯科，南斯拉夫被共产国际开除。苏联及东欧盟国实施全面封锁。波黑各地人心惶惶——选错阵营意味着灭顶之灾。",
+            options = {
+                {
+                    text = "公开效忠铁托路线",
+                    desc = "站队胜者，但短期经济受损",
+                    effects = {
+                        cash = -150,
+                        inflation_delta = 0.04,
+                        modifiers = {
+                            { target = "political_standing", value = 30, duration = 0 },
+                            { target = "trade_income_mult", value = -0.15, duration = 8 },
+                            { target = "legitimacy", value = 15, duration = 0 },
+                        },
+                    },
+                },
+                {
+                    text = "保持沉默，两不得罪",
+                    desc = "暂时安全但失去信任",
+                    effects = {
+                        modifiers = {
+                            { target = "political_standing", value = -10, duration = 0 },
+                            { target = "public_support", value = -5, duration = 0 },
+                        },
+                    },
+                },
+                {
+                    text = "秘密联络西方买家",
+                    desc = "铁幕裂缝中的新商机",
+                    effects = {
+                        cash = 200,
+                        modifiers = {
+                            { target = "trade_income_mult", value = 0.10, duration = 12 },
+                            { target = "corruption_risk", value = 15, duration = 8 },
+                            { target = "foreign_assets", value = 1, duration = 0 },
+                        },
+                    },
+                },
+            },
+        },
+
+        -- ================================================================
+        -- 1949 Q4 - 西方援助到来
+        -- ================================================================
+        {
+            id = "western_aid_1949",
+            title = "西方援助",
+            fixed_date = { year = 1949, quarter = 4 },
+            priority = EventsData.PRIORITY.REGION,
+            icon = "🤝",
+            desc = "与苏联决裂后，美英开始向南斯拉夫提供经济和军事援助。波黑地区获得一批工业设备和贷款额度。但附带条件：允许外国顾问进入矿区考察。",
+            options = {
+                {
+                    text = "全面接受援助和顾问",
+                    desc = "获得资金和技术，但外资渗透加深",
+                    effects = {
+                        cash = 400,
+                        inflation_delta = -0.02,
+                        modifiers = {
+                            { target = "tech_bonus", value = 12, duration = 12 },
+                            { target = "foreign_influence", value = 15, duration = 0 },
+                            { target = "mine_output_mult", value = 0.10, duration = 8 },
+                        },
+                    },
+                },
+                {
+                    text = "只接受设备，拒绝顾问",
+                    desc = "有限获利，保住自主权",
+                    effects = {
+                        cash = 150,
+                        modifiers = {
+                            { target = "tech_bonus", value = 5, duration = 8 },
+                            { target = "political_standing", value = 5, duration = 0 },
+                        },
+                    },
+                },
+            },
+        },
+
+        -- ================================================================
+        -- 1951 Q1 - 朝鲜战争原材料热潮
+        -- ================================================================
+        {
+            id = "korean_war_boom_1951",
+            title = "矿产热潮",
+            fixed_date = { year = 1951, quarter = 1 },
+            priority = EventsData.PRIORITY.REGION,
+            icon = "📈",
+            desc = "朝鲜战争爆发，全球原材料价格暴涨。波黑的铅、锌、煤炭需求猛增，矿区日夜不停运转。这是战后最好的赚钱窗口，但工人体力和设备都在透支。",
+            options = {
+                {
+                    text = "全力扩产，抓住风口",
+                    desc = "短期暴利但设备磨损加剧",
+                    effects = {
+                        cash = 500,
+                        gold = 5,
+                        inflation_delta = 0.03,
+                        asset_price_mod = 0.15,
+                        asset_price_duration = 6,
+                        modifiers = {
+                            { target = "mine_output_mult", value = 0.25, duration = 6 },
+                            { target = "worker_morale", value = -10, duration = 0 },
+                            { target = "equipment_wear", value = 20, duration = 8 },
+                        },
+                    },
+                },
+                {
+                    text = "稳健经营，适度增产",
+                    desc = "保证质量和工人福利",
+                    effects = {
+                        cash = 250,
+                        gold = 2,
+                        modifiers = {
+                            { target = "mine_output_mult", value = 0.10, duration = 6 },
+                            { target = "worker_morale", value = 5, duration = 0 },
+                        },
+                    },
+                },
+                {
+                    text = "囤积原矿待价而沽",
+                    desc = "赌价格继续上涨",
+                    effects = {
+                        gold = 8,
+                        modifiers = {
+                            { target = "total_assets", value = 300, duration = 0 },
+                            { target = "corruption_risk", value = 10, duration = 6 },
+                        },
+                    },
+                },
+            },
+        },
+
+        -- ================================================================
+        -- 1952 Q3 - 工人自治制度
+        -- ================================================================
+        {
+            id = "self_management_1952",
+            title = "工人自治",
+            fixed_date = { year = 1952, quarter = 3 },
+            priority = EventsData.PRIORITY.MAIN,
+            icon = "🏭",
+            desc = "铁托推行独特的'工人自治'制度——企业由工人委员会管理，而非国家官僚。矿区也必须成立工人委员会。这既是机遇也是挑战：处理得当可以赢得人心，否则将失去实际控制权。",
+            options = {
+                {
+                    text = "真心推行自治，让工人参与决策",
+                    desc = "赢得工人拥戴，产效提升",
+                    effects = {
+                        cash = -80,
+                        modifiers = {
+                            { target = "worker_morale", value = 25, duration = 0 },
+                            { target = "mine_output_mult", value = 0.08, duration = 12 },
+                            { target = "public_support", value = 15, duration = 0 },
+                            { target = "legitimacy", value = 10, duration = 0 },
+                        },
+                    },
+                },
+                {
+                    text = "形式上成立委员会，实际保留决策权",
+                    desc = "维持控制但工人不满",
+                    effects = {
+                        modifiers = {
+                            { target = "worker_morale", value = -5, duration = 0 },
+                            { target = "political_standing", value = 5, duration = 0 },
+                            { target = "corruption_risk", value = 10, duration = 8 },
+                        },
+                    },
+                },
+                {
+                    text = "利用委员会安插亲信",
+                    desc = "扩大家族网络，但有被揭穿风险",
+                    effects = {
+                        modifiers = {
+                            { target = "total_influence", value = 15, duration = 0 },
+                            { target = "corruption_risk", value = 25, duration = 12 },
+                            { target = "political_standing", value = -5, duration = 0 },
+                        },
+                    },
+                },
+            },
+        },
+
+        -- ================================================================
+        -- 1954 Q1 - 的里雅斯特危机解决
+        -- ================================================================
+        {
+            id = "trieste_resolution_1954",
+            title = "的里雅斯特和约",
+            fixed_date = { year = 1954, quarter = 1 },
+            priority = EventsData.PRIORITY.REGION,
+            icon = "🕊️",
+            desc = "经过多年谈判，南意之间的的里雅斯特领土争端终于解决。亚得里亚海贸易通道重新开放，波黑矿产品获得了通往地中海的出口渠道。",
+            options = {
+                {
+                    text = "投资亚得里亚贸易线",
+                    desc = "开拓出口市场",
+                    effects = {
+                        cash = -200,
+                        modifiers = {
+                            { target = "trade_income_mult", value = 0.20, duration = 0 },
+                            { target = "foreign_assets", value = 1, duration = 0 },
+                            { target = "total_assets", value = 200, duration = 0 },
+                        },
+                    },
+                },
+                {
+                    text = "建立走私渠道",
+                    desc = "暴利但极度危险",
+                    effects = {
+                        cash = 350,
+                        gold = 5,
+                        modifiers = {
+                            { target = "shadow_income", value = 60, duration = 8 },
+                            { target = "corruption_risk", value = 35, duration = 12 },
+                        },
+                    },
+                },
+            },
+        },
+
+        -- ================================================================
+        -- 1955 Q3 - 百年终章：家族命运
+        -- ================================================================
+        {
+            id = "family_legacy_1955",
+            title = "百年传承",
+            fixed_date = { year = 1955, quarter = 3 },
+            priority = EventsData.PRIORITY.MAIN,
+            icon = "👑",
+            desc = "从1904年的第一块矿权，到1955年的社会主义南斯拉夫——半个世纪的风雨已经过去。老矿区的烟囱依然在冒烟，但世界早已不是当年的模样。是时候为家族的下一个篇章定下基调了。",
+            options = {
+                {
+                    text = "扎根波黑，成为地方柱石",
+                    desc = "深耕本土，世代传承",
+                    effects = {
+                        modifiers = {
+                            { target = "political_standing", value = 30, duration = 0 },
+                            { target = "public_support", value = 20, duration = 0 },
+                            { target = "legitimacy", value = 25, duration = 0 },
+                            { target = "total_influence", value = 20, duration = 0 },
+                        },
+                    },
+                },
+                {
+                    text = "布局海外，分散家族资产",
+                    desc = "全球化视野，降低单一风险",
+                    effects = {
+                        cash = -300,
+                        gold = 10,
+                        modifiers = {
+                            { target = "foreign_assets", value = 3, duration = 0 },
+                            { target = "total_assets", value = 500, duration = 0 },
+                        },
+                    },
+                },
+                {
+                    text = "功成身退，家族隐于幕后",
+                    desc = "低调生存，韬光养晦",
+                    effects = {
+                        gold = 15,
+                        modifiers = {
+                            { target = "shadow_income", value = 80, duration = 0 },
+                            { target = "political_standing", value = -20, duration = 0 },
+                            { target = "total_assets", value = 300, duration = 0 },
                         },
                     },
                 },
