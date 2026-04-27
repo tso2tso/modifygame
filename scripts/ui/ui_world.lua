@@ -1025,6 +1025,8 @@ end
 --- 全局指标变化
 function WorldPage._CreateGlobalIndicators(state)
     local era = Config.GetEraByYear(state.year)
+    local standing = GameState.GetVictoryStanding(state)
+    local claimText = state.victory and state.victory.claimed and "已宣布" or "未宣布"
     return UI.Panel {
         width = "100%",
         backgroundColor = C.paper_dark,
@@ -1050,6 +1052,13 @@ function WorldPage._CreateGlobalIndicators(state)
                 WorldPage._CalcTotalControl(state) .. "%", C.text_primary),
             WorldPage._InfoRow("AI 威胁",
                 WorldPage._CalcThreatLevel(state), C.accent_amber),
+            WorldPage._InfoRow("经济领先",
+                string.format("%+d", standing.lead.economic), standing.lead.economic >= 0 and C.accent_green or C.accent_red),
+            WorldPage._InfoRow("军事领先",
+                string.format("%+d", standing.lead.military), standing.lead.military >= 0 and C.accent_green or C.accent_red),
+            WorldPage._InfoRow("统治领先",
+                string.format("%+d", standing.lead.dominance), standing.lead.dominance >= 0 and C.accent_green or C.accent_red),
+            WorldPage._InfoRow("胜利声明", claimText, state.victory and state.victory.claimed and C.accent_gold or C.text_secondary),
         },
     }
 end

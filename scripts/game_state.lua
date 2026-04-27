@@ -89,7 +89,7 @@ function GameState.CreateNew()
         -- 广告幸运事件
         -- ============================
         lucky_ad_watched = 0,            -- 本季已看广告次数
-        lucky_ad_decay = 1.0,            -- 累计概率衰减系数
+        lucky_ad_decay = 1.0,            -- 本季广告奖励衰减系数
 
         -- ============================
         -- 科技
@@ -106,6 +106,10 @@ function GameState.CreateNew()
         victory = {
             economic = 0,
             military = 0,
+            claimed = nil,
+            claimed_year = nil,
+            claimed_quarter = nil,
+            prompt_pending = nil,
         },
         battle_wins_total = 0,            -- 累计战斗胜利场次（用于军事胜利快照/记录）
         battle_wins_unclaimed = 0,        -- 尚未结算进军事胜利点的近期胜场
@@ -176,6 +180,7 @@ function GameState.CreateNew()
                 cash = Balance.AI.local_clan.start_cash,
                 attitude = -5,   -- 对玩家态度 -100~100（初始微妙敌意）
                 power = 38,      -- 势力值（起步更强）
+                victory = { economic = 0, military = 0 },
                 desc = "扎根当地百年的传统望族，控制着大片土地和人脉网络。",
             },
             {
@@ -186,6 +191,7 @@ function GameState.CreateNew()
                 cash = Balance.AI.foreign_capital.start_cash,
                 attitude = 5,    -- 外资初始中立偏友好
                 power = 45,      -- 资本集团势力更强
+                victory = { economic = 0, military = 0 },
                 desc = "来自帝国首都的资本集团，资金雄厚但在本地根基较浅。",
             },
         },
@@ -261,6 +267,7 @@ function GameState.AdvanceQuarter(state)
     state.ap.bonus_used = 0
     -- 重置本季广告次数
     state.lucky_ad_watched = 0
+    state.lucky_ad_decay = 1.0
 end
 
 --- 计算玩家地区总控制度
@@ -303,6 +310,179 @@ function GameState.GetInfluenceRecruitDiscount(state)
     return 0
 end
 
+local function GetFactionPresenceScore(state, factionId)
+    local totalPresence = 0
+    local weightedValue = 0
+    for _, r in ipairs(state.regions or {}) do
+        local presence = r.ai_presence and (r.ai_presence[factionId] or 0) or 0
+        totalPresence = totalPresence + presence
+
+        local regionWeight = 10
+        if r.type == "mine" then
+            regionWeight = 24
+        elseif r.type == "industrial" then
+            regionWeight = 20
+        elseif r.type == "capital" then
+            regionWeight = 18
+        end
+        weightedValue = weightedValue + math.floor(presence * regionWeight / 100)
+    end
+    return totalPresence, weightedValue
+end
+
+--- 计算玩家当前胜利评分
+---@param state table
+---@return table scores { economic, military, dominance }
+function GameState.CalcPlayerVictoryScores(state)
+    local economic = (state.victory and state.victory.economic) or 0
+    local military = (state.victory and state.victory.military) or 0
+    local controlBonus = math.floor(GameState.CalcTotalControl(state) / 5)
+    local influenceBonus = math.floor(GameState.CalcTotalInfluence(state) / 10)
+    return {
+        economic = economic,
+        military = military,
+        dominance = economic + military + controlBonus + influenceBonus,
+    }
+end
+
+--- 计算 AI 当前胜利评分
+---@param state table
+---@param faction table
+---@return table scores { economic, military, dominance, presence }
+function GameState.CalcAIVictoryScores(state, faction)
+    faction.victory = faction.victory or { economic = 0, military = 0 }
+    local totalPresence, weightedValue = GetFactionPresenceScore(state, faction.id)
+    local economic = faction.victory.economic or 0
+    local military = faction.victory.military or 0
+    local dominance = economic + military + math.floor(totalPresence / 2) + weightedValue
+    return {
+        economic = economic,
+        military = military,
+        dominance = dominance,
+        presence = totalPresence,
+    }
+end
+
+--- 计算 AI 本季胜利评分增量
+---@param state table
+---@param faction table
+---@return table delta { economic, military }
+function GameState.CalcAIVictoryDelta(state, faction)
+    local totalPresence, weightedValue = GetFactionPresenceScore(state, faction.id)
+    local economic = 0
+    local military = 0
+
+    if state.year >= Balance.VICTORY.economic.gate_year then
+        economic = math.floor((faction.cash or 0) / Balance.VICTORY.economic.cash_divisor)
+            + math.floor(totalPresence / 15)
+            + math.floor(weightedValue / 20)
+    end
+    if state.year >= Balance.VICTORY.military.gate_year then
+        local relative = (Balance.VICTORY and Balance.VICTORY.relative) or {}
+        local powerMultiplier = relative.ai_military_power_multiplier or 0.20
+        military = math.floor((faction.power or 0) * powerMultiplier)
+            + math.floor(totalPresence / 18)
+            + math.min(faction.battle_wins_unclaimed or 0, Balance.VICTORY.military.battle_wins_cap)
+    end
+
+    return { economic = economic, military = military }
+end
+
+--- 获取玩家相对 AI 的胜利领先态势
+---@param state table
+---@return table standing
+function GameState.GetVictoryStanding(state)
+    local player = GameState.CalcPlayerVictoryScores(state)
+    local bestAI = {
+        economic = { score = 0, faction = nil },
+        military = { score = 0, faction = nil },
+        dominance = { score = 0, faction = nil },
+    }
+
+    for _, faction in ipairs(state.ai_factions or {}) do
+        local scores = GameState.CalcAIVictoryScores(state, faction)
+        if scores.economic > bestAI.economic.score then
+            bestAI.economic = { score = scores.economic, faction = faction }
+        end
+        if scores.military > bestAI.military.score then
+            bestAI.military = { score = scores.military, faction = faction }
+        end
+        if scores.dominance > bestAI.dominance.score then
+            bestAI.dominance = { score = scores.dominance, faction = faction }
+        end
+    end
+
+    local relative = (Balance.VICTORY and Balance.VICTORY.relative) or {}
+    local margins = relative.lead_margin or {}
+    local ecoLead = player.economic - bestAI.economic.score
+    local milLead = player.military - bestAI.military.score
+    local domLead = player.dominance - bestAI.dominance.score
+
+    local claimable = nil
+    local minClaimYear = relative.min_claim_year or 1945
+    if not (state.victory and state.victory.claimed) and state.year >= minClaimYear then
+        if ecoLead >= (margins.economic or 200) and GameState.CheckEconomicSnapshot(state) then
+            claimable = { type = "economic", lead = ecoLead, margin = margins.economic or 200 }
+        elseif milLead >= (margins.military or 250) and GameState.CheckMilitarySnapshot(state) then
+            claimable = { type = "military", lead = milLead, margin = margins.military or 250 }
+        elseif domLead >= (relative.dominance_margin or 300)
+            and ((not relative.dominance_requires_positive_track) or ecoLead > 0 or milLead > 0) then
+            claimable = { type = "dominance", lead = domLead, margin = relative.dominance_margin or 300 }
+        end
+    end
+
+    return {
+        player = player,
+        best_ai = bestAI,
+        lead = {
+            economic = ecoLead,
+            military = milLead,
+            dominance = domLead,
+        },
+        claimable = claimable,
+    }
+end
+
+function GameState.UpdateVictoryPrompt(state)
+    state.victory = state.victory or { economic = 0, military = 0 }
+    if state.victory.claimed then
+        state.victory.prompt_pending = nil
+        return nil
+    end
+
+    local standing = GameState.GetVictoryStanding(state)
+    if standing.claimable then
+        local prompt = {
+            type = standing.claimable.type,
+            lead = standing.claimable.lead,
+            margin = standing.claimable.margin,
+            year = state.year,
+            quarter = state.quarter,
+        }
+        state.victory.prompt_pending = prompt
+        return prompt
+    end
+
+    state.victory.prompt_pending = nil
+    return nil
+end
+
+function GameState.ClaimVictory(state, victoryType)
+    state.victory = state.victory or { economic = 0, military = 0 }
+    local prompt = state.victory.prompt_pending
+    state.victory.claimed = victoryType or (prompt and prompt.type) or "dominance"
+    state.victory.claimed_year = (prompt and prompt.year) or state.year
+    state.victory.claimed_quarter = (prompt and prompt.quarter) or state.quarter
+    state.victory.prompt_pending = nil
+    GameState.AddLog(state, string.format("家族宣布%s胜利，但继续经营至时代终局。", state.victory.claimed))
+end
+
+function GameState.DismissVictoryPrompt(state)
+    if state.victory then
+        state.victory.prompt_pending = nil
+    end
+end
+
 --- 经济胜利快照验证
 ---@param state table
 ---@return boolean
@@ -341,20 +521,6 @@ function GameState.IsGameOver(state)
     if state.year == BT.end_year and state.quarter > BT.end_quarter then
         return true
     end
-    -- 经济胜利：分数达标 + 章节门控 + 快照验证
-    local BVE = Balance.VICTORY.economic
-    if state.victory.economic >= BVE.threshold
-        and state.year >= BVE.gate_year
-        and GameState.CheckEconomicSnapshot(state) then
-        return true
-    end
-    -- 军事胜利：分数达标 + 章节门控 + 快照验证
-    local BVM = Balance.VICTORY.military
-    if state.victory.military >= BVM.threshold
-        and state.year >= BVM.gate_year
-        and GameState.CheckMilitarySnapshot(state) then
-        return true
-    end
     return false
 end
 
@@ -366,20 +532,15 @@ function GameState.GetVictoryType(state)
     if state.bankrupt then
         return "bankrupt"
     end
-    local BVE = Balance.VICTORY.economic
-    if state.victory.economic >= BVE.threshold
-        and state.year >= BVE.gate_year
-        and GameState.CheckEconomicSnapshot(state) then
-        return "economic"
-    end
-    local BVM = Balance.VICTORY.military
-    if state.victory.military >= BVM.threshold
-        and state.year >= BVM.gate_year
-        and GameState.CheckMilitarySnapshot(state) then
-        return "military"
-    end
     if state.year > BT.end_year or
        (state.year == BT.end_year and state.quarter > BT.end_quarter) then
+        if state.victory and state.victory.claimed then
+            return state.victory.claimed
+        end
+        local standing = GameState.GetVictoryStanding(state)
+        if standing.claimable then
+            return standing.claimable.type
+        end
         return "timeout"
     end
     return nil
@@ -399,6 +560,11 @@ function GameState.GetEndingInfo(state)
     local totalAssets = GameState.CalcTotalAssets(state)
     local totalDebt = GameState.CalcTotalDebt(state)
     local netWorth = totalAssets - totalDebt
+    local standing = GameState.GetVictoryStanding(state)
+    local claimedText = state.victory and state.victory.claimed
+        and string.format("%d年%s宣布", state.victory.claimed_year or state.year,
+            Config.QUARTER_NAMES[state.victory.claimed_quarter or state.quarter] or "")
+        or "未宣布"
 
     local ending = {
         type = victoryType,
@@ -415,17 +581,18 @@ function GameState.GetEndingInfo(state)
             { label = "地区控制", value = tostring(totalControl) },
             { label = "地区影响力", value = tostring(totalInfluence) },
             { label = "度过季度", value = tostring(state.turn_count or 0) },
+            { label = "胜利声明", value = claimedText },
         },
         progress = {
             economic = {
                 label = "经济胜利",
                 value = state.victory.economic or 0,
-                threshold = BVE.threshold,
+                threshold = (standing.best_ai.economic.score or 0) + ((Balance.VICTORY.relative.lead_margin or {}).economic or 200),
             },
             military = {
                 label = "军事胜利",
                 value = state.victory.military or 0,
-                threshold = BVM.threshold,
+                threshold = (standing.best_ai.military.score or 0) + ((Balance.VICTORY.relative.lead_margin or {}).military or 250),
             },
         },
     }
@@ -442,6 +609,12 @@ function GameState.GetEndingInfo(state)
         ending.variant = "success"
         ending.icon = "🛡️"
         ending.description = "武装力量、士气与领地控制支撑起家族不可撼动的统治。"
+    elseif victoryType == "dominance" then
+        ending.title = "统治胜利：巴尔干霸主"
+        ending.resultLabel = "胜利"
+        ending.variant = "success"
+        ending.icon = "★"
+        ending.description = "家族在财富、武装与地区影响上全面压过所有竞争势力。"
     elseif victoryType == "bankrupt" then
         ending.title = "失败：家族破产"
         ending.resultLabel = "失败"
@@ -753,9 +926,13 @@ end
 function GameState.CalcTotalAssets(state)
     local inflation = GameState.GetInflationFactor(state)
     local goldPrice = math.floor(Balance.MINE.gold_price * inflation)
+    local silverPrice = math.floor(Balance.MINE.silver_price * inflation)
+    local coalPrice = math.floor(Balance.MINE.coal_price * inflation)
 
     local cash = math.max(0, state.cash)
     local goldValue = (state.gold or 0) * goldPrice
+    local silverValue = (state.silver or 0) * silverPrice
+    local coalValue = (state.coal or 0) * coalPrice
 
     -- 矿山估值：等级 × 基础价值
     local mineValue = 0
@@ -777,12 +954,39 @@ function GameState.CalcTotalAssets(state)
         end
     end
 
-    local total = cash + goldValue + mineValue + stockValue
+    local total = cash + goldValue + silverValue + coalValue + mineValue + stockValue
     return total, {
         cash = cash,
         gold_value = goldValue,
+        silver_value = silverValue,
+        coal_value = coalValue,
         mine_value = mineValue,
         stock_value = stockValue,
+    }
+end
+
+--- 计算贷款抵押价值
+--- 实体资产抵押率高，股票资产因波动性只按较低比例计入可贷基础。
+---@param state table
+---@return number collateralValue
+---@return table details { real_asset_value, stock_value, real_collateral, stock_collateral }
+function GameState.CalcLoanCollateralValue(state)
+    local _, assets = GameState.CalcTotalAssets(state)
+    local cfg = (Balance.LOAN and Balance.LOAN.collateral) or {}
+    local realRatio = cfg.real_asset_ratio or 0.80
+    local stockRatio = cfg.stock_asset_ratio or 0.25
+
+    local realAssetValue = (assets.cash or 0) + (assets.gold_value or 0)
+        + (assets.silver_value or 0) + (assets.coal_value or 0) + (assets.mine_value or 0)
+    local stockValue = assets.stock_value or 0
+    local realCollateral = math.floor(realAssetValue * realRatio)
+    local stockCollateral = math.floor(stockValue * stockRatio)
+
+    return realCollateral + stockCollateral, {
+        real_asset_value = realAssetValue,
+        stock_value = stockValue,
+        real_collateral = realCollateral,
+        stock_collateral = stockCollateral,
     }
 end
 
@@ -797,13 +1001,13 @@ function GameState.CalcTotalDebt(state)
     return total
 end
 
---- 计算杠杆率（负债/资产）
+--- 计算贷款杠杆率（负债/抵押价值）
 ---@param state table
 ---@return number leverage 0~∞
 function GameState.CalcLeverage(state)
-    local assets = GameState.CalcTotalAssets(state)
-    if assets <= 0 then return 999 end
-    return GameState.CalcTotalDebt(state) / assets
+    local collateralValue = GameState.CalcLoanCollateralValue(state)
+    if collateralValue <= 0 then return 999 end
+    return GameState.CalcTotalDebt(state) / collateralValue
 end
 
 return GameState

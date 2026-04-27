@@ -135,9 +135,7 @@ end
 ---@param techId string
 local function applyEffect(state, eff, techId)
     if eff.kind == "mine_output_base" then
-        for _, mine in ipairs(state.mines) do
-            mine.output_bonus = (mine.output_bonus or 0) + eff.value
-        end
+        state.mine_output_base_bonus = (state.mine_output_base_bonus or 0) + eff.value
 
     elseif eff.kind == "mine_output_mult" then
         state.mine_output_mult_bonus = (state.mine_output_mult_bonus or 0) + eff.value
@@ -181,7 +179,12 @@ local function applyEffect(state, eff, techId)
         state.passive_influence = (state.passive_influence or 0) + eff.value
 
     elseif eff.kind == "morale_bonus" then
-        state.morale = (state.morale or 50) + eff.value
+        if state.workers then
+            state.workers.morale = math.min(100, (state.workers.morale or 70) + eff.value)
+        end
+        if state.military then
+            state.military.morale = math.min(100, (state.military.morale or 70) + eff.value)
+        end
 
     elseif eff.kind == "guard_power_bonus" then
         state.guard_power_tech_bonus = (state.guard_power_tech_bonus or 0) + eff.value

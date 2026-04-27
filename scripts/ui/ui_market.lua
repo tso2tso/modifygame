@@ -407,24 +407,26 @@ function MarketPage._LoanDetailCol(label, value, color)
     }
 end
 
---- 贷款选项网格（动态额度 = 总资产 × ratio，利率根据杠杆动态调整）
+--- 贷款选项网格（动态额度 = 抵押价值 × ratio，利率根据杠杆动态调整）
 function MarketPage._LoanOptionsGrid(state, accent)
-    local totalAssets = GameState.CalcTotalAssets(state)
+    local collateralValue = GameState.CalcLoanCollateralValue(state)
+    local totalDebt = GameState.CalcTotalDebt(state)
     local leverage = GameState.CalcLeverage(state)
     local maxLev = Balance.LOAN.max_leverage or 0.80
     local leverageMul = Balance.LOAN.leverage_interest_multiplier or 1.5
     local slotsLeft = Balance.LOAN.max_active - #(state.loans or {})
+    local remainingCapacity = math.max(0, math.floor(collateralValue * maxLev - totalDebt))
 
     local optionCards = {}
     for _, opt in ipairs(Balance.LOAN.options) do
         -- 动态计算额度
         local calcAmount = math.max(
             opt.min_amount or 300,
-            math.floor(totalAssets * (opt.amount_ratio or 0.15)))
+            math.floor(collateralValue * (opt.amount_ratio or 0.15)))
         -- 动态利率
         local effectiveRate = (opt.base_interest or 0.04) * (1 + leverage * leverageMul)
         -- 能否借
-        local canTake = slotsLeft > 0 and leverage < maxLev
+        local canTake = slotsLeft > 0 and leverage < maxLev and calcAmount <= remainingCapacity
 
         table.insert(optionCards, UI.Panel {
             flexGrow = 1, flexBasis = 0,
@@ -1207,6 +1209,14 @@ function MarketPage._OnTakeLoan(state, opt, calcAmount, effectiveRate)
         UI.Toast.Show(string.format("杠杆率 %d%% 已超上限 %d%%，无法贷款",
             math.floor(leverage * 100), math.floor(maxLev * 100)),
             { variant = "error", duration = 2 })
+        return
+    end
+    local collateralValue = GameState.CalcLoanCollateralValue(state)
+    local remainingCapacity = math.max(0,
+        math.floor(collateralValue * maxLev - GameState.CalcTotalDebt(state)))
+    if calcAmount > remainingCapacity then
+        UI.Toast.Show("抵押额度不足，无法申请该档贷款",
+            { variant = "error", duration = 1.5 })
         return
     end
     state.cash = state.cash + calcAmount

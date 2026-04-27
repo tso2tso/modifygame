@@ -110,6 +110,17 @@ Balance.ECONOMY = {
 -- 设计目标：经济线在1945-1950可达，军事线在1940-1950可达
 -- ============================================================================
 Balance.VICTORY = {
+    -- 相对领先胜利：不再因固定阈值直接结束，而是领先 AI 后可宣布胜利并继续游玩
+    relative = {
+        min_claim_year = 1945,
+        lead_margin = {
+            economic = 800,
+            military = 150,
+        },
+        dominance_margin = 900,
+        ai_military_power_multiplier = 0.20,
+        dominance_requires_positive_track = true,
+    },
     -- 经济胜利：每季增量 = (floor(cash/2000) + floor(gold*0.5) + floor(total_control/15) + floor(total_influence/50)) * war_mod
     economic = {
         threshold       = 1600,  -- 经济胜利点阈值（2000→1600：延长时间线后适度降低）
@@ -294,14 +305,19 @@ Balance.AP_PURCHASE = {
 -- ============================================================================
 Balance.LOAN = {
     max_active    = 3,         -- 同时最多持有 3 笔贷款
-    -- 贷款档位：amount_ratio = 占总资产的比例（实际额度 = 总资产 × ratio，最低保底 min_amount）
+    -- 抵押折扣：实体资产可贷比例高，股票波动大所以可贷比例低
+    collateral = {
+        real_asset_ratio  = 0.80,  -- 现金/黄金/矿山等实体资产抵押率
+        stock_asset_ratio = 0.25,  -- 股票市值抵押率
+    },
+    -- 贷款档位：amount_ratio = 占抵押价值的比例（实际额度 = 抵押价值 × ratio，最低保底 min_amount）
     options = {
         { amount_ratio = 0.15, min_amount = 300,  base_interest = 0.04, duration = 4, label = "小额短贷" },
         { amount_ratio = 0.35, min_amount = 800,  base_interest = 0.05, duration = 6, label = "中额贷款" },
         { amount_ratio = 0.60, min_amount = 2000, base_interest = 0.06, duration = 8, label = "大额长贷" },
     },
     -- 杠杆利率加成：实际利率 = base_interest × (1 + leverage × leverage_interest_multiplier)
-    -- leverage = 总负债 / 总资产
+    -- leverage = 总负债 / 抵押价值
     leverage_interest_multiplier = 1.5,  -- 杠杆率 0.5 → 利率 ×1.75；杠杆率 1.0 → 利率 ×2.5
     max_leverage   = 0.80,     -- 杠杆率超过 80% 时禁止再贷款
     default_penalty = 0.15,    -- 违约（资金不足付息）时本金膨胀 15%

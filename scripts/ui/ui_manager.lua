@@ -101,6 +101,9 @@ function UIManager.Create(state, callbacks)
     EndingModal.SetRoot(uiRoot_)
     EndingModal.SetCallbacks({
         onNewGame = onNewGame_,
+        onStateChanged = function()
+            UIManager.RefreshAll(stateRef_)
+        end,
     })
     UIManager._ShowView("dashboard")
 end
@@ -459,6 +462,10 @@ end
 
 function UIManager.ShowEnding(state)
     EndingModal.Show(state or stateRef_)
+end
+
+function UIManager.ShowVictoryPrompt(state)
+    EndingModal.ShowVictoryPrompt(state or stateRef_)
 end
 
 return UIManager

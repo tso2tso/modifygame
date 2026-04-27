@@ -146,6 +146,7 @@ function Combat.ApplyResult(state, faction, result)
         state.cash = math.max(0, state.cash - pillage)
         faction.cash = faction.cash + pillage
         faction.power = math.min(100, faction.power + 5)
+        faction.battle_wins_unclaimed = (faction.battle_wins_unclaimed or 0) + 1
         local mapImpact = Combat.ApplyMapImpact(state, faction, result) or ""
         log = string.format("💥 %s 突袭得手，折损 %d 护卫，被抢走 %d 现金%s",
             faction.name, lost, pillage, mapImpact)

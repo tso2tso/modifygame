@@ -240,6 +240,16 @@ function Economy.Settle(state)
         report.transport_penalty = math.floor(exposedIncome * math.min(0.30, transportRisk * 0.25))
     end
 
+    report.income_mod_adjustment = 0
+    local grossIncome = report.gold_income + report.silver_income + (report.coal_income or 0)
+        + report.region_income + report.finance_income + (report.trade_income or 0) + report.shadow_income
+    local incomeMod = GameState.GetModifierValue(state, "income_mod")
+    if incomeMod ~= 0 then
+        incomeMod = math.max(-0.75, math.min(1.00, incomeMod))
+        report.income_mod_adjustment = math.floor(grossIncome * incomeMod)
+        state.cash = state.cash + report.income_mod_adjustment
+    end
+
     -- 地区被动收入加到现金
     if report.region_income > 0 then
         state.cash = state.cash + report.region_income
@@ -277,8 +287,7 @@ function Economy.Settle(state)
     -- 5. 汇总并扣款
     -- ============================
     -- 注意：gold_income / silver_income / region_income 已在步骤 2-3.5 加到 state.cash，此处只减支出
-    report.total_income = report.gold_income + report.silver_income + (report.coal_income or 0)
-        + report.region_income + report.finance_income + (report.trade_income or 0) + report.shadow_income
+    report.total_income = grossIncome + report.income_mod_adjustment
     report.total_expense = report.worker_expense + report.military_expense
         + report.supply_expense + report.tax + report.ai_penalty + report.transport_penalty
     report.net = report.total_income - report.total_expense
@@ -330,11 +339,14 @@ function Economy._CalcMineOutput(state, mine)
     local workerBonus = math.floor(state.workers.hired / BW.workers_per_unit * efficiencyMul)
     -- 事件修正
     local outputMod = GameState.GetModifierValue(state, "mine_output")
+        + (state.mine_output_base_bonus or 0)
+        + (mine.output_bonus or 0)
 
     local total = (base + outputMod) * levelMul * (1 + posBonus) + workerBonus
     -- 科技乘法加成（mine_output_mult）
-    local multBonus = state.mine_output_mult_bonus or 0
-    if multBonus > 0 then
+    local multBonus = (state.mine_output_mult_bonus or 0)
+        + GameState.GetModifierValue(state, "mine_output_mult")
+    if multBonus ~= 0 then
         total = total * (1 + multBonus)
     end
     return math.max(0, math.floor(total))
@@ -405,6 +417,12 @@ function Economy.GetEstimate(state)
 
     income = details.gold_auto_income + details.silver_income + details.coal_income
         + details.region_income + details.finance_income + details.trade_income + details.shadow_income
+    local estimateIncomeMod = GameState.GetModifierValue(state, "income_mod")
+    if estimateIncomeMod ~= 0 then
+        estimateIncomeMod = math.max(-0.75, math.min(1.00, estimateIncomeMod))
+        details.income_mod_adjustment = math.floor(income * estimateIncomeMod)
+        income = income + details.income_mod_adjustment
+    end
 
     if transportRisk > 0 then
         details.transport_penalty = math.floor(income * math.min(0.30, transportRisk * 0.25))

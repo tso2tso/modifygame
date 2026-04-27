@@ -175,10 +175,6 @@ function Events.Enqueue(state, events)
         end
         if not already then
             table.insert(state.event_queue, event)
-            -- 固定事件入队即标记，防止下次 CheckEvents 再次命中
-            if event.fixed_date then
-                state.events_fired[event.id] = true
-            end
         end
     end
 end

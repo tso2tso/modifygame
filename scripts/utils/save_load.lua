@@ -149,6 +149,7 @@ function SaveLoad._SerializeState(state)
     data.cash = state.cash
     data.gold = state.gold
     data.silver = state.silver or 0
+    data.coal = state.coal or 0
     data.inflation_factor = state.inflation_factor or 1.0
     data.ap = {
         current = state.ap.current,
@@ -159,7 +160,13 @@ function SaveLoad._SerializeState(state)
     data.victory = {
         economic = state.victory.economic,
         military = state.victory.military,
+        claimed = state.victory.claimed,
+        claimed_year = state.victory.claimed_year,
+        claimed_quarter = state.victory.claimed_quarter,
+        prompt_pending = state.victory.prompt_pending,
     }
+    data.battle_wins_total = state.battle_wins_total or 0
+    data.battle_wins_unclaimed = state.battle_wins_unclaimed or 0
     data.phase = state.phase
     data.turn_count = state.turn_count
 
@@ -201,6 +208,7 @@ function SaveLoad._SerializeState(state)
             policy = r.policy,
             culture = r.culture,
             control = r.control,
+            influence = r.influence or 0,
             ai_presence = r.ai_presence,
         })
     end
@@ -245,6 +253,19 @@ function SaveLoad._SerializeState(state)
 
     -- 被动加成（印刷宣传等）
     data.passive_influence = state.passive_influence or 0
+    data.derived_effects = {
+        mine_output_base_bonus = state.mine_output_base_bonus or 0,
+        mine_output_mult_bonus = state.mine_output_mult_bonus or 0,
+        worker_efficiency_bonus = state.worker_efficiency_bonus or 0,
+        guard_power_tech_bonus = state.guard_power_tech_bonus or 0,
+        research_speed_bonus = state.research_speed_bonus or 0,
+        trade_passive_income = state.trade_passive_income or 0,
+        finance_passive_income = state.finance_passive_income or 0,
+        finance_supply_discount = state.finance_supply_discount or 0,
+        gold_price_bonus = state.gold_price_bonus or 0,
+        hire_cost_discount = state.hire_cost_discount or 0,
+        accident_rate_mod = state.accident_rate_mod or 0,
+    }
 
     -- 广告幸运事件
     data.lucky_ad_watched = state.lucky_ad_watched or 0
@@ -261,6 +282,7 @@ function SaveLoad._SerializeState(state)
         morale = state.military.morale,
         wage = state.military.wage,
         equipment = state.military.equipment,
+        supply = state.military.supply,
     }
 
     -- AI 势力
@@ -278,6 +300,7 @@ function SaveLoad._SerializeState(state)
 
     -- 事件状态
     data.events_fired = state.events_fired
+    data.event_queue = state.event_queue or {}
     data.random_cooldowns = state.random_cooldowns
 
     -- 全局标记
@@ -318,6 +341,7 @@ function SaveLoad._DeserializeState(data)
 
     -- 新字段兼容旧存档：若不存在则从 Balance 重建
     data.silver = data.silver or 0
+    data.coal = data.coal or 0
     data.inflation_factor = data.inflation_factor or 1.0
     data.loans = data.loans or {}
     data.tech = data.tech or { researched = {}, in_progress = nil, bonus_points = 0 }
@@ -325,6 +349,72 @@ function SaveLoad._DeserializeState(data)
     data.portfolio = data.portfolio or { holdings = {} }
     data.portfolio.holdings = data.portfolio.holdings or {}
     data.passive_influence = data.passive_influence or 0
+    data.battle_wins_total = data.battle_wins_total or 0
+    data.battle_wins_unclaimed = data.battle_wins_unclaimed or 0
+    data.victory.claimed = data.victory.claimed
+    data.victory.claimed_year = data.victory.claimed_year
+    data.victory.claimed_quarter = data.victory.claimed_quarter
+    data.victory.prompt_pending = data.victory.prompt_pending
+
+    for _, r in ipairs(data.regions) do
+        r.influence = r.influence or 0
+    end
+    for _, faction in ipairs(data.ai_factions) do
+        faction.victory = faction.victory or { economic = 0, military = 0 }
+        faction.victory.economic = faction.victory.economic or 0
+        faction.victory.military = faction.victory.military or 0
+        faction.battle_wins_unclaimed = faction.battle_wins_unclaimed or 0
+    end
+
+    local derived = data.derived_effects or {}
+    data.mine_output_base_bonus = derived.mine_output_base_bonus or data.mine_output_base_bonus or 0
+    data.mine_output_mult_bonus = derived.mine_output_mult_bonus or data.mine_output_mult_bonus or 0
+    data.worker_efficiency_bonus = derived.worker_efficiency_bonus or data.worker_efficiency_bonus or 0
+    data.guard_power_tech_bonus = derived.guard_power_tech_bonus or data.guard_power_tech_bonus or 0
+    data.research_speed_bonus = derived.research_speed_bonus or data.research_speed_bonus or 0
+    data.trade_passive_income = derived.trade_passive_income or data.trade_passive_income or 0
+    data.finance_passive_income = derived.finance_passive_income or data.finance_passive_income or 0
+    data.finance_supply_discount = derived.finance_supply_discount or data.finance_supply_discount or 0
+    data.gold_price_bonus = derived.gold_price_bonus or data.gold_price_bonus or 0
+    data.hire_cost_discount = derived.hire_cost_discount or data.hire_cost_discount or 0
+    data.accident_rate_mod = derived.accident_rate_mod or data.accident_rate_mod or 0
+    data.military.supply = data.military.supply or 20
+
+    -- 兼容旧存档：老版本只保存 researched，没有保存科技派生字段。
+    if not data.derived_effects and data.tech and data.tech.researched then
+        local TechData = require("data.tech_data")
+        for _, tech in ipairs(TechData.GetAll()) do
+            if data.tech.researched[tech.id] then
+                for _, eff in ipairs(tech.effects or {}) do
+                    if eff.kind == "mine_output_base" then
+                        data.mine_output_base_bonus = (data.mine_output_base_bonus or 0) + eff.value
+                    elseif eff.kind == "mine_output_mult" then
+                        data.mine_output_mult_bonus = (data.mine_output_mult_bonus or 0) + eff.value
+                    elseif eff.kind == "worker_efficiency" then
+                        data.worker_efficiency_bonus = (data.worker_efficiency_bonus or 0) + eff.value
+                    elseif eff.kind == "guard_power_bonus" then
+                        data.guard_power_tech_bonus = (data.guard_power_tech_bonus or 0) + eff.value
+                    elseif eff.kind == "research_speed" then
+                        data.research_speed_bonus = (data.research_speed_bonus or 0) + eff.value
+                    elseif eff.kind == "trade_income" then
+                        data.trade_passive_income = (data.trade_passive_income or 0) + eff.value
+                    elseif eff.kind == "finance_network" then
+                        data.finance_supply_discount = 0.20
+                        data.finance_passive_income = 80
+                    elseif eff.kind == "gold_price_bonus" then
+                        data.gold_price_bonus = (data.gold_price_bonus or 0) + eff.value
+                    elseif eff.kind == "hire_cost_reduction" then
+                        data.hire_cost_discount = (data.hire_cost_discount or 0) + eff.value
+                    elseif eff.kind == "accident_reduction" then
+                        data.accident_rate_mod = (data.accident_rate_mod or 0) + eff.value
+                    end
+                end
+            end
+        end
+        for _, mine in ipairs(data.mines or {}) do
+            mine.output_bonus = 0
+        end
+    end
 
     -- 广告幸运事件兼容
     data.lucky_ad_watched = data.lucky_ad_watched or 0

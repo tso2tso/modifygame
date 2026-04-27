@@ -86,6 +86,8 @@ function Start()
 
     if GameState.IsGameOver(state_) then
         UIManager.ShowEnding(state_)
+    elseif state_.victory and state_.victory.prompt_pending then
+        UIManager.ShowVictoryPrompt(state_)
     end
 
     -- 5. 订阅事件
@@ -142,6 +144,8 @@ function HandleNewGame(newState)
     UIManager.BackToDashboard()
     if GameState.IsGameOver(state_) then
         UIManager.ShowEnding(state_)
+    elseif state_.victory and state_.victory.prompt_pending then
+        UIManager.ShowVictoryPrompt(state_)
     end
 
     -- 新游戏检查开局事件 —— 入队后刷新仪表盘立即显示
@@ -283,6 +287,11 @@ function FinalizeEndTurn()
             UI.Toast.Show(ending.title, { variant = variant, duration = 3 })
         end
         UIManager.ShowEnding(state_)
+        return
+    end
+
+    if state_.victory and state_.victory.prompt_pending then
+        UIManager.ShowVictoryPrompt(state_)
         return
     end
 

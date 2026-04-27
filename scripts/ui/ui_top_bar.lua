@@ -626,9 +626,9 @@ function TopBar._OnWatchAd()
             end
         end
 
-        -- 通胀浮动金额
+        -- 通胀浮动金额；同一季度连续观看会按 lucky_ad_decay 衰减实际奖金
         local inflation = GameState.GetInflationFactor(stateRef_)
-        local amount = math.floor(chosen.base * inflation)
+        local amount = math.floor(chosen.base * inflation * decay)
 
         -- 发放奖励
         stateRef_.cash = stateRef_.cash + amount

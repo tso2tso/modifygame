@@ -398,13 +398,19 @@ function TurnEngine.EndTurn(state)
     state.victory.economic = state.victory.economic + ecoDelta
     state.victory.military = state.victory.military + milDelta
 
-    -- 上限保护
-    state.victory.economic = math.min(state.victory.economic, BVE.threshold + 50)
-    state.victory.military = math.min(state.victory.military, BVM.threshold + 50)
+    -- AI 同步累积相对胜利分，用于“领先 AI 多少点”的胜利判断
+    for _, faction in ipairs(state.ai_factions or {}) do
+        faction.victory = faction.victory or { economic = 0, military = 0 }
+        local aiDelta = GameState.CalcAIVictoryDelta(state, faction)
+        faction.victory.economic = (faction.victory.economic or 0) + (aiDelta.economic or 0)
+        faction.victory.military = (faction.victory.military or 0) + (aiDelta.military or 0)
+        faction.battle_wins_unclaimed = 0
+    end
 
     report.victory_delta.economic = state.victory.economic - oldEco
     report.victory_delta.military = state.victory.military - oldMil
     state.battle_wins_unclaimed = 0
+    GameState.UpdateVictoryPrompt(state)
 
     -- ========================================
     -- 阶段 4: 修正器推进

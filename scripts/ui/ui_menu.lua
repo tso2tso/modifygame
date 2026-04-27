@@ -7,6 +7,7 @@ local UI = require("urhox-libs/UI")
 local Config = require("config")
 local GameState = require("game_state")
 local SaveLoad = require("utils.save_load")
+local Balance = require("data.balance")
 
 local C = Config.COLORS
 local F = Config.FONT
@@ -264,6 +265,11 @@ function MenuPage._CreateStatsCard(state)
     local totalExpense = state.total_expense or 0
     local members = #state.family.members
     local logCount = #state.history_log
+    local standing = GameState.GetVictoryStanding(state)
+    local ecoTarget = (standing.best_ai.economic.score or 0)
+        + (((Balance.VICTORY.relative.lead_margin or {}).economic) or 200)
+    local milTarget = (standing.best_ai.military.score or 0)
+        + (((Balance.VICTORY.relative.lead_margin or {}).military) or 250)
 
     return UI.Panel {
         width = "100%",
@@ -288,8 +294,9 @@ function MenuPage._CreateStatsCard(state)
             MenuPage._InfoRow("净利润", string.format("%d", totalIncome - totalExpense)),
             MenuPage._InfoRow("家族成员", tostring(members) .. " 人"),
             MenuPage._InfoRow("事件记录", tostring(logCount) .. " 条"),
-            MenuPage._InfoRow("经济胜利进度", string.format("%d%%", state.victory.economic)),
-            MenuPage._InfoRow("军事胜利进度", string.format("%d%%", state.victory.military)),
+            MenuPage._InfoRow("经济领先", string.format("%d / %d", state.victory.economic, ecoTarget)),
+            MenuPage._InfoRow("军事领先", string.format("%d / %d", state.victory.military, milTarget)),
+            MenuPage._InfoRow("胜利声明", state.victory.claimed and "已宣布" or "未宣布"),
         },
     }
 end
