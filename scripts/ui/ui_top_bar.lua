@@ -62,6 +62,7 @@ function TopBar.Create(state, callbacks)
         width = "100%",
         flexDirection = "column",
         backgroundColor = C.bg_base,
+        paddingTop = 3,
         borderBottomWidth = 1,
         borderBottomColor = borderBottom,
         children = children,
@@ -76,10 +77,10 @@ end
 -- ============================================================================
 function TopBar._CreateInfoRow(state, era)
     era = era or Config.GetEraByYear(state.year)
-    -- 设计图格式："1904年 Q{n} {季}季"
-    local yearText = string.format("%d年 Q%d %s季",
-        state.year, state.quarter, Config.QUARTER_NAMES[state.quarter])
-    -- 日期副文字
+    -- 年份+季节（主标题行）: 1904年 春
+    local seasonChar = ({ "春", "夏", "秋", "冬" })[state.quarter] or "春"
+    local yearText = string.format("%d年 %s", state.year, seasonChar)
+    -- 日期+时代（副文字行）
     local dateText = Config.QUARTER_DATES[state.quarter] or ""
 
     -- 产能（当季矿产）
@@ -104,12 +105,12 @@ function TopBar._CreateInfoRow(state, era)
         alignItems = "center",
         paddingHorizontal = S.page_padding,
         children = {
-            -- 年份 + 季节（§4.1 左侧：时间信息区，22px 大字 + 12px 副文字）
-            -- 接入时代 accent：年份文字使用 era.accent 传达年代感
+            -- 年份 + 日期/时代（左侧时间信息区）
             UI.Panel {
                 flexDirection = "column",
                 flexShrink = 0,
-                width = 136,
+                width = 160,
+                gap = 2,
                 children = {
                     UI.Label {
                         id = "yearLabel",
@@ -118,18 +119,24 @@ function TopBar._CreateInfoRow(state, era)
                         fontWeight = "bold",
                         fontColor = era.accent,
                     },
-                    UI.Label {
-                        id = "dateLabel",
-                        text = dateText,
-                        fontSize = F.body_minor,
-                        fontColor = C.text_secondary,
-                    },
-                    -- 时代标签（小字，显示当前章节名）
-                    UI.Label {
-                        id = "eraLabel",
-                        text = era.label,
-                        fontSize = 10,
-                        fontColor = { era.accent[1], era.accent[2], era.accent[3], 180 },
+                    UI.Panel {
+                        flexDirection = "row",
+                        alignItems = "center",
+                        gap = 6,
+                        children = {
+                            UI.Label {
+                                id = "dateLabel",
+                                text = dateText,
+                                fontSize = F.body_minor,
+                                fontColor = C.text_secondary,
+                            },
+                            UI.Label {
+                                id = "eraLabel",
+                                text = era.label,
+                                fontSize = 10,
+                                fontColor = { era.accent[1], era.accent[2], era.accent[3], 180 },
+                            },
+                        },
                     },
                 },
             },
@@ -453,8 +460,8 @@ function TopBar.Refresh(root, state)
 
     local yearLabel = root:FindById("yearLabel")
     if yearLabel then
-        yearLabel:SetText(string.format("%d年 Q%d %s季",
-            state.year, state.quarter, Config.QUARTER_NAMES[state.quarter]))
+        local seasonChar = ({ "春", "夏", "秋", "冬" })[state.quarter] or "春"
+        yearLabel:SetText(string.format("%d年 %s", state.year, seasonChar))
         if yearLabel.SetFontColor then yearLabel:SetFontColor(era.accent) end
     end
 

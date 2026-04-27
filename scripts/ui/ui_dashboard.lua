@@ -505,16 +505,6 @@ function Dashboard._FocusCard(state, mine, era)
     local utilization = math.floor(state.workers.hired / math.max(1, totalIdealWorkers) * 100)
     local utilColor = Config.GetUtilColor(utilization)
 
-    -- 资源储量
-    local region = GameState.GetRegion(state, mine.region_id)
-    local goldReserve = region and region.resources.gold_reserve or 0
-    local silverReserve = region and region.resources.silver_reserve or 0
-    local goldColor = goldReserve < 50 and C.accent_red or C.accent_gold
-    local silverColor = silverReserve < 100 and C.accent_red or C.text_secondary
-    local security = region and region.security or 0
-    local securityColor = security <= 2 and C.accent_red
-        or (security >= 4 and C.accent_green or C.accent_amber)
-
     -- 雇佣费用
     local BW = Balance.WORKERS
     local hireCost = math.floor(BW.hire_cost * GameState.GetLaborCostFactor(state)
@@ -535,123 +525,81 @@ function Dashboard._FocusCard(state, mine, era)
                 height = 1,
                 backgroundColor = C.highlight,
             },
-            -- 头部：资产名 + 类型标签
+            -- 插画横幅 + 标题叠加
             UI.Panel {
                 width = "100%",
-                padding = S.card_padding,
-                paddingBottom = 8,
-                flexDirection = "row",
-                alignItems = "center",
-                gap = 8,
+                height = 160,
+                backgroundImage = "image/mine_banner.png",
                 children = {
-                    UI.Label {
-                        text = mine.name,
-                        fontSize = F.card_title,
-                        fontWeight = "bold",
-                        fontColor = C.text_primary,
-                    },
+                    -- 底部渐变遮罩（让文字可读）
                     UI.Panel {
-                        backgroundColor = C.bg_elevated,
-                        borderRadius = S.radius_badge,
-                        paddingHorizontal = 8, paddingVertical = 3,
+                        position = "absolute",
+                        left = 0, right = 0, bottom = 0, height = 60,
+                        backgroundColor = { 0, 0, 0, 120 },
+                    },
+                    -- 标题行叠在图片上
+                    UI.Panel {
+                        position = "absolute",
+                        left = 0, right = 0, bottom = 0,
+                        paddingHorizontal = S.card_padding,
+                        paddingVertical = 8,
+                        flexDirection = "row",
+                        alignItems = "center",
+                        gap = 8,
                         children = {
                             UI.Label {
-                                text = "金矿开采",
-                                fontSize = F.label,
-                                fontColor = C.paper_light,
+                                text = mine.name,
+                                fontSize = F.card_title,
+                                fontWeight = "bold",
+                                fontColor = { 240, 230, 208, 255 },
+                                pointerEvents = "none",
                             },
-                        },
-                    },
-                    UI.Panel { flexGrow = 1 },
-                    UI.Label {
-                        text = "Lv." .. mine.level,
-                        fontSize = F.body,
-                        fontWeight = "bold",
-                        fontColor = accent,
-                    },
-                },
-            },
-
-            -- 核心 KPI：图片 + 2x2 指标
-            UI.Panel {
-                width = "100%",
-                paddingHorizontal = S.card_padding,
-                paddingBottom = 8,
-                flexDirection = "row",
-                gap = 8,
-                children = {
-                    -- 左：资产图片
-                    UI.Panel {
-                        width = 88, height = 96,
-                        backgroundColor = C.bg_inset,
-                        borderRadius = S.radius_btn,
-                        borderWidth = 1,
-                        borderColor = C.border_soft,
-                        justifyContent = "center", alignItems = "center",
-                        flexShrink = 0,
-                        children = {
                             UI.Panel {
-                                position = "absolute",
-                                left = 8, right = 8, bottom = 8,
-                                height = 2,
-                                borderRadius = 1,
-                                backgroundColor = { accent[1], accent[2], accent[3], 120 },
+                                backgroundColor = { 0, 0, 0, 100 },
+                                borderRadius = S.radius_badge,
+                                borderWidth = 1,
+                                borderColor = { accent[1], accent[2], accent[3], 150 },
+                                paddingHorizontal = 8, paddingVertical = 3,
+                                children = {
+                                    UI.Label {
+                                        text = "金矿开采",
+                                        fontSize = F.label,
+                                        fontColor = { 240, 230, 208, 220 },
+                                        pointerEvents = "none",
+                                    },
+                                },
                             },
+                            UI.Panel { flexGrow = 1 },
                             UI.Label {
-                                text = "⛏️",
-                                fontSize = 34,
-                                textAlign = "center",
-                            },
-                        },
-                    },
-                    -- 右：2x2 指标网格
-                    UI.Panel {
-                        flexGrow = 1, flexShrink = 1,
-                        flexDirection = "column",
-                        gap = 6,
-                        children = {
-                            UI.Panel {
-                                width = "100%",
-                                flexDirection = "row",
-                                gap = 6,
-                                children = {
-                                    Dashboard._FocusMetric("产量(本季)",
-                                        output .. " 单位", accent),
-                                    Dashboard._FocusMetric("产能利用率",
-                                        utilization .. "%", utilColor, utilization),
-                                },
-                            },
-                            UI.Panel {
-                                width = "100%",
-                                flexDirection = "row",
-                                gap = 6,
-                                children = {
-                                    Dashboard._FocusMetric("工人状态",
-                                        moraleIcon .. moraleText,
-                                        morale >= 60 and C.text_primary or C.accent_red),
-                                    Dashboard._FocusMetric("维护费用",
-                                        "-" .. Config.FormatNumber(workerExpense),
-                                        workerExpense > state.cash * 0.3 and C.accent_red or C.text_secondary),
-                                },
+                                text = "Lv." .. mine.level,
+                                fontSize = F.body,
+                                fontWeight = "bold",
+                                fontColor = accent,
+                                pointerEvents = "none",
                             },
                         },
                     },
                 },
             },
 
+            -- 状态指标一排
             UI.Panel {
                 width = "100%",
                 paddingHorizontal = S.card_padding,
-                paddingBottom = 8,
+                paddingVertical = 8,
                 flexDirection = "row",
-                alignItems = "center",
-                gap = 6,
+                gap = 5,
                 children = {
-                    Dashboard._FocusPill("●", "黄金储量", tostring(goldReserve), goldColor),
-                    Dashboard._FocusPill("○", "白银储量", tostring(silverReserve), silverColor),
-                    Dashboard._FocusPill("🛡", "安全", RegionsData.GetSecurityText(security), securityColor),
+                    Dashboard._StatusPill("⛏", "产量", output .. " 单位", accent),
+                    Dashboard._StatusPill("📊", "利用率", utilization .. "%", utilColor),
+                    Dashboard._StatusPill(moraleIcon, "工人", moraleText,
+                        morale >= 60 and C.text_primary or C.accent_red),
+                    Dashboard._StatusPill("💰", "维护", "-" .. Config.FormatNumber(workerExpense),
+                        workerExpense > state.cash * 0.3 and C.accent_red or C.text_secondary),
                 },
             },
+
+            -- 招募按钮
             UI.Panel {
                 width = "100%",
                 paddingHorizontal = S.card_padding,
@@ -669,6 +617,49 @@ function Dashboard._FocusCard(state, mine, era)
                         onClick = function(self)
                             Actions.HireWorkers(stateRef_, 5, callbacks_.onStateChanged)
                         end,
+                    },
+                },
+            },
+        },
+    }
+end
+
+--- 状态胶囊（与安全等级大小一致的紧凑样式）
+function Dashboard._StatusPill(icon, label, value, valueColor)
+    return UI.Panel {
+        flexGrow = 1,
+        flexBasis = 0,
+        paddingVertical = 5,
+        paddingHorizontal = 7,
+        backgroundColor = C.bg_inset,
+        borderRadius = S.radius_btn,
+        borderWidth = 1,
+        borderColor = C.border_soft,
+        flexDirection = "row",
+        alignItems = "center",
+        gap = 4,
+        children = {
+            UI.Label {
+                text = icon,
+                fontSize = 12,
+                pointerEvents = "none",
+            },
+            UI.Panel {
+                flexDirection = "column",
+                flexShrink = 1,
+                children = {
+                    UI.Label {
+                        text = label,
+                        fontSize = 9,
+                        fontColor = C.text_muted,
+                        pointerEvents = "none",
+                    },
+                    UI.Label {
+                        text = value,
+                        fontSize = F.label,
+                        fontWeight = "bold",
+                        fontColor = valueColor or C.text_primary,
+                        pointerEvents = "none",
                     },
                 },
             },
@@ -963,27 +954,13 @@ function Dashboard._SeasonOverview(state)
                         flexGrow = 1,
                         flexBasis = 0,
                         flexDirection = "column",
-                        gap = 7,
+                        gap = 5,
                         children = {
-                            UI.Panel {
-                                width = "100%",
-                                flexDirection = "row",
-                                gap = 7,
-                                children = {
-                                    Dashboard._OverviewCol("💰", "现金流",
-                                        (cashFlow >= 0 and "+" or "") .. Config.FormatNumber(cashFlow), cashFlowColor),
-                                    Dashboard._OverviewCol("📊", "负债率", debtRatio .. "%", debtColor),
-                                },
-                            },
-                            UI.Panel {
-                                width = "100%",
-                                flexDirection = "row",
-                                gap = 7,
-                                children = {
-                                    Dashboard._OverviewCol("❤️", "民心", tostring(publicSentiment), sentimentColor),
-                                    Dashboard._OverviewCol("🌐", "影响力", tostring(influence), C.text_primary),
-                                },
-                            },
+                            Dashboard._OverviewRow("💰", "现金流",
+                                (cashFlow >= 0 and "+" or "") .. Config.FormatNumber(cashFlow), cashFlowColor),
+                            Dashboard._OverviewRow("📊", "负债率", debtRatio .. "%", debtColor),
+                            Dashboard._OverviewRow("❤️", "民心", tostring(publicSentiment), sentimentColor),
+                            Dashboard._OverviewRow("🌐", "影响力", tostring(influence), C.text_primary),
                         },
                     },
                 },
@@ -1022,6 +999,45 @@ function Dashboard._OverviewCol(icon, label, value, valueColor)
                 fontSize = F.label,
                 fontColor = C.text_secondary,
                 textAlign = "center",
+            },
+        },
+    }
+end
+
+--- 概览行（紧凑横排：图标 + 标签 + 数值靠右）
+function Dashboard._OverviewRow(icon, label, value, valueColor)
+    return UI.Panel {
+        width = "100%",
+        paddingVertical = 4,
+        paddingHorizontal = 7,
+        backgroundColor = C.bg_inset,
+        borderRadius = S.radius_btn,
+        borderWidth = 1,
+        borderColor = C.border_soft,
+        flexDirection = "row",
+        alignItems = "center",
+        gap = 5,
+        children = {
+            UI.Label {
+                text = icon,
+                fontSize = 11,
+                width = 16,
+                textAlign = "center",
+                pointerEvents = "none",
+            },
+            UI.Label {
+                text = label,
+                fontSize = F.label,
+                fontColor = C.text_secondary,
+                pointerEvents = "none",
+            },
+            UI.Panel { flexGrow = 1 },
+            UI.Label {
+                text = value,
+                fontSize = F.body_minor,
+                fontWeight = "bold",
+                fontColor = valueColor or C.text_primary,
+                pointerEvents = "none",
             },
         },
     }

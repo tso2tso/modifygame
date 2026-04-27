@@ -112,13 +112,50 @@ local EFFECT_LABELS = {
     hire_cost_reduction = function(v) return string.format("雇佣成本 %d%%", math.floor(v * 100)) end,
 }
 
+--- 解析管道式 requires，返回第一个前置id（用于深度计算）
+---@param requires string|nil
+---@return string|nil
+local function getFirstRequire(requires)
+    if not requires then return nil end
+    -- "a|b" → 取第一个
+    local first = requires:match("^([^|]+)")
+    return first
+end
+
+--- 解析管道式 requires，返回所有前置id列表
+---@param requires string|nil
+---@return string[]
+local function getAllRequires(requires)
+    if not requires then return {} end
+    local list = {}
+    for part in requires:gmatch("[^|]+") do
+        table.insert(list, part)
+    end
+    return list
+end
+
+--- 检查前置科技是否满足（支持 "a|b" 管道语法）
+---@param requires string|nil
+---@param researched table
+---@return boolean
+local function checkReqMet(requires, researched)
+    if not requires then return true end
+    if requires:find("|") then
+        for part in requires:gmatch("[^|]+") do
+            if researched[part] then return true end
+        end
+        return false
+    end
+    return researched[requires] == true
+end
+
 --- 构建科技树节点数据
 local function buildTechTreeNodes(state)
     local allTechs = TechData.GetAll()
     local researched = (state.tech and state.tech.researched) or {}
     local inProgress = state.tech and state.tech.in_progress
 
-    -- 计算每个科技的深度（列号）
+    -- 计算每个科技的深度（列号），支持管道式 requires
     local depthMap = {}
     local function getDepth(techId)
         if depthMap[techId] then return depthMap[techId] end
@@ -127,17 +164,23 @@ local function buildTechTreeNodes(state)
             depthMap[techId] = 0
             return 0
         end
-        depthMap[techId] = getDepth(t.requires) + 1
+        -- 管道式: 取所有前置中最大深度 + 1
+        local parents = getAllRequires(t.requires)
+        local maxD = 0
+        for _, pid in ipairs(parents) do
+            maxD = math.max(maxD, getDepth(pid))
+        end
+        depthMap[techId] = maxD + 1
         return depthMap[techId]
     end
     for _, t in ipairs(allTechs) do
         getDepth(t.id)
     end
 
-    -- 布局参数（扩大间距适配 30 节点）
+    -- 布局参数
     local nodeSize = 80
     local colGap = 220
-    local rowGap = 120
+    local rowGap = 110
     local paddingX = 50
     local paddingY = 30
 
@@ -162,11 +205,17 @@ local function buildTechTreeNodes(state)
         for row, t in ipairs(bucket) do
             local isResearched = researched[t.id] == true
             local isInProgress = inProgress and inProgress.id == t.id
+            local isExcluded = t.excludes and researched[t.excludes] == true
 
             local displayName = t.icon .. " " .. t.name
             if isInProgress then
                 displayName = "⏳ " .. t.name
+            elseif isExcluded then
+                displayName = "🚫 " .. t.name
             end
+
+            -- parentId: 取第一个前置用于连线
+            local parentId = getFirstRequire(t.requires)
 
             table.insert(nodes, {
                 id = t.id,
@@ -174,10 +223,11 @@ local function buildTechTreeNodes(state)
                 icon = t.icon or "🔬",
                 x = paddingX + d * colGap,
                 y = paddingY + offsetY + (row - 1) * rowGap,
-                parentId = t.requires or nil,
+                parentId = parentId,
                 unlocked = isResearched,
                 techData = t,
                 inProgress = isInProgress,
+                excluded = isExcluded,
             })
         end
     end
@@ -201,11 +251,13 @@ local function showTechDetail(state, tech, accent)
         dm:Close()  -- onClose 回调会调用 Destroy()
     end
 
-    local isResearched = state.tech and state.tech.researched[tech.id]
+    local researched = (state.tech and state.tech.researched) or {}
+    local isResearched = researched[tech.id] == true
     local inProgress = state.tech and state.tech.in_progress
     local isInProgress = inProgress and inProgress.id == tech.id
     local hasOtherInProgress = inProgress and inProgress.id ~= tech.id
-    local reqMet = (not tech.requires) or (state.tech and state.tech.researched[tech.requires])
+    local reqMet = checkReqMet(tech.requires, researched)
+    local isExcluded = tech.excludes and researched[tech.excludes] == true
     local canAfford = state.cash >= tech.cost
     local hasAP = (state.ap.current + (state.ap.temp or 0)) >= Balance.TECH.base_research_ap
 
@@ -214,6 +266,10 @@ local function showTechDetail(state, tech, accent)
     if isResearched then
         statusText = "✓ 已研发"
         statusColor = { 75, 175, 95, 255 }
+    elseif isExcluded then
+        local exTech = TechData.GetById(tech.excludes)
+        statusText = "🚫 已被排除（" .. (exTech and exTech.name or "?") .. "）"
+        statusColor = { 160, 80, 80, 255 }
     elseif isInProgress then
         statusText = string.format("⏳ 研发中 %d/%d 季", inProgress.progress, inProgress.total)
         statusColor = { 90, 155, 225, 255 }
@@ -252,14 +308,19 @@ local function showTechDetail(state, tech, accent)
         })
     end
 
-    -- 前置科技信息
+    -- 前置科技信息（支持管道式）
     local reqText = "无"
     if tech.requires then
-        local req = TechData.GetById(tech.requires)
-        if req then
-            local reqDone = state.tech and state.tech.researched[req.id]
-            reqText = req.icon .. " " .. req.name .. (reqDone and " ✓" or " ✗")
+        local parts = getAllRequires(tech.requires)
+        local reqParts = {}
+        for _, pid in ipairs(parts) do
+            local req = TechData.GetById(pid)
+            if req then
+                local reqDone = researched[req.id] == true
+                table.insert(reqParts, req.icon .. " " .. req.name .. (reqDone and " ✓" or " ✗"))
+            end
         end
+        reqText = table.concat(reqParts, " 或 ")
     end
 
     -- 内容面板
@@ -365,8 +426,20 @@ local function showTechDetail(state, tech, accent)
         fontColor = C.text_secondary,
     })
 
+    -- 互斥提示
+    if tech.excludes then
+        local exTech = TechData.GetById(tech.excludes)
+        local exName = exTech and (exTech.icon .. " " .. exTech.name) or tech.excludes
+        local exDone = researched[tech.excludes] == true
+        table.insert(contentChildren, UI.Label {
+            text = "互斥：" .. exName .. (exDone and " (已研发)" or ""),
+            fontSize = F.body_minor,
+            fontColor = exDone and C.accent_red or C.text_secondary,
+        })
+    end
+
     -- 研发按钮（仅在可研发时显示）
-    if not isResearched and not isInProgress then
+    if not isResearched and not isInProgress and not isExcluded then
         local canStart = reqMet and canAfford and hasAP and not hasOtherInProgress
         local btnLabel = not reqMet and "需要前置科技"
             or hasOtherInProgress and "正在研发其他科技"
@@ -448,19 +521,24 @@ local TECH_LANES = {
 local function getTechState(state, tech)
     local researched = state.tech and state.tech.researched or {}
     local inProgress = state.tech and state.tech.in_progress
-    local reqMet = (not tech.requires) or researched[tech.requires]
+    local reqMet = checkReqMet(tech.requires, researched)
+    local isExcluded = tech.excludes and researched[tech.excludes] == true
     local isDone = researched[tech.id] == true
     local isProgress = inProgress and inProgress.id == tech.id
     local hasOtherProgress = inProgress and inProgress.id ~= tech.id
     local canAfford = state.cash >= tech.cost
     local hasAP = (state.ap.current + (state.ap.temp or 0)) >= Balance.TECH.base_research_ap
-    local canStart = (not isDone) and (not isProgress) and reqMet and canAfford and hasAP and not hasOtherProgress
+    local canStart = (not isDone) and (not isProgress) and (not isExcluded)
+        and reqMet and canAfford and hasAP and not hasOtherProgress
 
     local label = "未解锁"
     local color = C.paper_mid
     if isDone then
         label = "已研发"
         color = C.accent_green
+    elseif isExcluded then
+        label = "已排除"
+        color = C.accent_red
     elseif isProgress then
         label = "研发中"
         color = C.accent_blue
@@ -476,6 +554,7 @@ local function getTechState(state, tech)
         label = label,
         color = color,
         reqMet = reqMet,
+        isExcluded = isExcluded,
         isDone = isDone,
         isProgress = isProgress,
         hasOtherProgress = hasOtherProgress,
@@ -699,12 +778,20 @@ local function createTechDetailPanel(state, accent, techId)
 
     local reqText = "无"
     if tech.requires then
-        local req = TechData.GetById(tech.requires)
-        local reqDone = req and state.tech and state.tech.researched[req.id]
-        reqText = (req and req.name or tech.requires) .. (reqDone and " ✓" or " ✗")
+        local parts = getAllRequires(tech.requires)
+        local reqParts = {}
+        for _, pid in ipairs(parts) do
+            local req = TechData.GetById(pid)
+            if req then
+                local reqDone = state.tech and state.tech.researched and state.tech.researched[req.id]
+                table.insert(reqParts, req.name .. (reqDone and " ✓" or " ✗"))
+            end
+        end
+        reqText = table.concat(reqParts, " / ")
     end
 
     local btnLabel = st.isDone and "已完成"
+        or st.isExcluded and "互斥已排除"
         or st.isProgress and "研发进行中"
         or (not st.reqMet) and "需要前置科技"
         or st.hasOtherProgress and "已有研发项目"

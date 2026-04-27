@@ -976,6 +976,11 @@ function MarketPage._OpenTradeModal(state, stock, accent)
         tradeModal_:Close() -- onClose 回调负责 Destroy 和置 nil
     end
 
+    -- 安全网：强制隐藏系统键盘 & 清除残留焦点，防止上一个弹窗的
+    -- TextField 焦点/键盘状态泄漏到新弹窗
+    input:SetScreenKeyboardVisible(false)
+    UI.ClearFocus()
+
     -- 内部数量状态（闭包）
     local qty = 10
     local qtyInput
@@ -1026,6 +1031,8 @@ function MarketPage._OpenTradeModal(state, stock, accent)
         closeOnEscape = true,
         showCloseButton = true,
         onClose = function(self)
+            UI.ClearFocus()                        -- 清焦点 → TextField:OnBlur
+            input:SetScreenKeyboardVisible(false)  -- 保底：确保键盘一定关闭
             tradeModal_ = nil
             self:Destroy()
         end,

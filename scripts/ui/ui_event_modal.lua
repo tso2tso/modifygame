@@ -99,19 +99,51 @@ function EventModal.Show(event, onChoose)
     }
 
     -- 内容区
+    local contentChildren = {}
+
+    -- 事件插图（如有）
+    if event.image then
+        table.insert(contentChildren, UI.Panel {
+            width = "100%",
+            aspectRatio = 16 / 9,
+            borderRadius = S.radius_card,
+            overflow = "hidden",
+            backgroundImage = event.image,
+            backgroundFit = "cover",
+            marginBottom = 4,
+            flexShrink = 0,
+            children = {
+                -- 底部渐变遮罩
+                UI.Panel {
+                    position = "absolute",
+                    left = 0, right = 0, bottom = 0, height = 50,
+                    backgroundColor = { 0, 0, 0, 100 },
+                },
+            },
+        })
+    end
+
+    -- 事件描述
+    table.insert(contentChildren, UI.Label {
+        text = event.desc,
+        fontSize = F.body,
+        fontColor = C.text_primary,
+        whiteSpace = "normal",
+        lineHeight = 1.6,
+    })
+
     local contentPanel = UI.Panel {
         width = "100%",
         flexDirection = "column",
         gap = 12,
         padding = 4,
         children = {
-            -- 事件描述
-            UI.Label {
-                text = event.desc,
-                fontSize = F.body,
-                fontColor = C.text_primary,
-                whiteSpace = "normal",
-                lineHeight = 1.6,
+            -- 插图 + 描述（已动态插入 contentChildren）
+            UI.Panel {
+                width = "100%",
+                flexDirection = "column",
+                gap = 8,
+                children = contentChildren,
             },
             -- 分隔线
             UI.Divider { color = C.divider },
@@ -131,7 +163,15 @@ function EventModal.Show(event, onChoose)
             },
         },
     }
-    modal_:AddContent(contentPanel)
+
+    -- 用 ScrollView 包裹内容，防止选项溢出不可选
+    local scrollContent = UI.ScrollView {
+        width = "100%",
+        height = "100%",
+        scrollY = true,
+        children = { contentPanel },
+    }
+    modal_:AddContent(scrollContent)
 
     -- Modal 必须加入 UI 树才能渲染
     if uiRoot_ then

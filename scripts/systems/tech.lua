@@ -1,5 +1,7 @@
 -- ============================================================================
--- 科技研发系统（扩展版 — 支持 effects 数组 + 9 种新效果）
+-- 科技研发系统（扩展版 — 支持分叉互斥 + 管道式前置）
+-- requires 支持 "a|b" 语法：只要 a 或 b 其中之一已研发即可
+-- excludes: 互斥科技id，若对方已研发则本项不可研发
 -- ============================================================================
 
 local TechData = require("data.tech_data")
@@ -7,6 +9,45 @@ local GameState = require("game_state")
 local Balance = require("data.balance")
 
 local Tech = {}
+
+--- 检查前置科技是否满足（支持 "a|b" 管道语法）
+---@param requires string|nil
+---@param researched table
+---@return boolean
+local function checkRequires(requires, researched)
+    if not requires then return true end
+    -- 管道语法: "a|b" 表示 a 或 b 任一已研发即可
+    if requires:find("|") then
+        for part in requires:gmatch("[^|]+") do
+            if researched[part] then return true end
+        end
+        return false
+    end
+    -- 普通单一前置
+    return researched[requires] == true
+end
+
+--- 检查互斥科技是否阻止研发
+---@param excludes string|nil
+---@param researched table
+---@return boolean blocked
+local function checkExcludes(excludes, researched)
+    if not excludes then return false end
+    return researched[excludes] == true
+end
+
+--- 获取前置科技名称列表（用于提示信息）
+---@param requires string|nil
+---@return string
+local function getRequiresNames(requires)
+    if not requires then return "" end
+    local names = {}
+    for part in requires:gmatch("[^|]+") do
+        local t = TechData.GetById(part)
+        table.insert(names, t and t.name or part)
+    end
+    return table.concat(names, " 或 ")
+end
 
 --- 开始研发一项科技
 ---@param state table
@@ -23,9 +64,13 @@ function Tech.Start(state, techId)
     end
     local tech = TechData.GetById(techId)
     if not tech then return false, "科技不存在" end
-    if tech.requires and not state.tech.researched[tech.requires] then
-        local req = TechData.GetById(tech.requires)
-        return false, "需要先研发：" .. (req and req.name or tech.requires)
+    local researched = state.tech.researched or {}
+    if not checkRequires(tech.requires, researched) then
+        return false, "需要先研发：" .. getRequiresNames(tech.requires)
+    end
+    if checkExcludes(tech.excludes, researched) then
+        local exTech = TechData.GetById(tech.excludes)
+        return false, "与已研发的[" .. (exTech and exTech.name or tech.excludes) .. "]互斥"
     end
     if state.cash < tech.cost then
         return false, "资金不足"
@@ -171,18 +216,19 @@ function Tech.Complete(state, techId)
     GameState.AddLog(state, string.format("[科技] 完成：%s", tech.name))
 end
 
---- 可立即研发的科技清单（满足前置 / 未研发 / 未进行中）
+--- 可立即研发的科技清单（满足前置 / 未被互斥 / 未研发 / 未进行中）
 ---@param state table
 ---@return table[]
 function Tech.GetAvailable(state)
     state.tech = state.tech or { researched = {} }
+    local researched = state.tech.researched or {}
     local avail = {}
     for _, t in ipairs(TechData.GetAll()) do
-        if not state.tech.researched[t.id]
-            and (not state.tech.in_progress or state.tech.in_progress.id ~= t.id) then
-            if (not t.requires) or state.tech.researched[t.requires] then
-                table.insert(avail, t)
-            end
+        if not researched[t.id]
+            and (not state.tech.in_progress or state.tech.in_progress.id ~= t.id)
+            and checkRequires(t.requires, researched)
+            and not checkExcludes(t.excludes, researched) then
+            table.insert(avail, t)
         end
     end
     return avail

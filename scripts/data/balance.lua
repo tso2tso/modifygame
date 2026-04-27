@@ -11,7 +11,7 @@ local Balance = {}
 Balance.TIME = {
     start_year    = 1904,
     start_quarter = 1,
-    end_year      = 2014,   -- 扩展至第七章"玻璃金融" 1996-2014
+    end_year      = 1945,   -- 聚焦到二战结束
     end_quarter   = 4,
     quarters_per_year = 4,
 }
@@ -117,7 +117,7 @@ Balance.VICTORY = {
         control_divisor = 20,    -- 每 20 总控制度 +1 点
         influence_divisor = 60,  -- 每 60 总影响力 +1 点
         war_mod         = 0.6,   -- 战时乘数（战争拖慢经济胜利）
-        gate_year       = 1950,  -- 章节门控：经济线要到 1950 年后才结算
+        gate_year       = 1930,  -- 章节门控：经济线要到 1930 年后才结算
         -- 快照验证：达到阈值瞬间必须满足以下条件，否则视为无效
         snapshot = {
             min_cash          = 15000,
@@ -133,7 +133,7 @@ Balance.VICTORY = {
         control_divisor  = 14,    -- 每 14 总控制度 +1 点
         battle_wins_cap  = 3,     -- 每季最多计入 3 场近期胜利，避免累计胜场重复滚雪球
         war_mod          = 1.25,  -- 战时乘数（战争加速军事胜利）
-        gate_year        = 1940,  -- 章节门控：军事线要到 1940 年后才结算
+        gate_year        = 1925,  -- 章节门控：军事线要到 1925 年后才结算
         -- 快照验证
         snapshot = {
             min_guards        = 30,

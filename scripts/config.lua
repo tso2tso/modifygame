@@ -52,33 +52,7 @@ Config.ERAS = {
         war_stripe = true,
         glitch = false,
     },
-    {
-        id = 5, start_year = 1946, end_year = 1991,
-        label  = "第五章 制度蓝红",
-        accent = {  46, 125,  50, 255 },  -- #2E7D32 计划绿
-        border = {  27,  58, 107, 255 },  -- #1B3A6B 政治蓝
-        overlay = {  27,  58, 107, 64 },  -- 25% 政治蓝
-        war_stripe = false,
-        glitch = false,
-    },
-    {
-        id = 6, start_year = 1992, end_year = 1995,
-        label  = "第六章 围城信号",
-        accent = { 255, 102,   0, 255 },  -- #FF6600 火光橙
-        border = {  61,  61,  61, 255 },  -- #3D3D3D 烟灰
-        overlay = { 255, 102,   0, 26 },  -- 10% 橙色微光
-        war_stripe = true,
-        glitch = true,                    -- 信号抖动效果
-    },
-    {
-        id = 7, start_year = 1996, end_year = 2014,
-        label  = "第七章 玻璃金融",
-        accent = {   0, 137, 123, 255 },  -- #00897B 科技青
-        border = {  28,  53,  87, 255 },  -- #1C3557 深海蓝
-        overlay = {  28,  53,  87, 51 },  -- 20% 深海蓝
-        war_stripe = false,
-        glitch = false,
-    },
+    -- 第五章~第七章已移除：游戏终止于 1945 年二战结束
 }
 
 --- 根据年份获取对应时代定义
@@ -174,7 +148,7 @@ C.text_gold = C.accent_gold  -- 金色文字别名
 -- ============================================================================
 Config.FONT = {
     super_title  = 28,   -- 弹出面板大标题
-    page_title   = 22,   -- 顶栏年份/季节
+    page_title   = 18,   -- 顶栏年份/季节
     card_title   = 18,   -- 矿场名称、系统名
     subtitle     = 15,   -- 分组标签
     body         = 13,   -- 事件描述正文
@@ -298,7 +272,7 @@ Config.QUARTER_DATES = {
 Config.BALANCE = {
     start_year     = 1904,
     start_quarter  = 1,
-    end_year       = 2014,
+    end_year       = 1945,
     end_quarter    = 4,
     base_ap        = 6,
     max_ap_bonus   = 4,
@@ -328,8 +302,8 @@ Config.TABS = {
 -- ============================================================================
 -- ap_cost 为"典型"消耗（仅展示用；不同操作实际消耗见 data/balance.lua）
 Config.QUICK_ACTIONS = {
-    { id = "technology",  label = "科技研发", icon = "🔬", ap_cost = 2 },
     { id = "intelligence",label = "情报行动", icon = "👁️", ap_cost = 1 },
+    { id = "technology",  label = "科技研发", icon = "🔬", ap_cost = 2 },
     { id = "diplomacy",   label = "政治外交", icon = "🤝", ap_cost = 1 },
     { id = "trade",       label = "资产交易", icon = "🏭", ap_cost = 2 },
 }
@@ -375,9 +349,15 @@ Config._tapDownY = 0
 Config._tapDownCounter = 0         -- 暴露给外部读取
 
 --- 记录手指/鼠标按下位置（在 main.lua Start() 中订阅全局事件调用）
---- 注意：手机端 TouchBegin 和合成 MouseButtonDown 都会调用此函数，
---- 但因为坐标相同、计数器只影响去重，不影响正确性。
+--- 手机端 TouchBegin 和合成 MouseButtonDown 在同一帧内都会调用此函数。
+--- 用帧号去重，确保每次物理按下只让计数器 +1，避免 TapGuard 被绕过。
+local tapDownFrame_ = -1           -- 上次 TapDown 调用时的帧号
 function Config.TapDown()
+    -- 同一帧内的重复调用直接忽略（移动端 touch + synth mouse 双触发）
+    local frame = time.frameNumber
+    if frame == tapDownFrame_ then return end
+    tapDownFrame_ = frame
+
     local pos = input.mousePosition
     Config._tapDownX = pos.x
     Config._tapDownY = pos.y

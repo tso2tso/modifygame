@@ -7,6 +7,7 @@ local EventsData = require("data.events_data")
 local Balance = require("data.balance")
 local StockEngine = require("systems.stock_engine")
 local EventMarketEffects = require("data.event_market_effects")
+local Config = require("config")
 
 local Events = {}
 
@@ -23,6 +24,8 @@ local function AddRegulationPressure(state, delta)
 end
 
 --- 检查当季应触发的事件，返回事件列表
+--- 固定事件和随机事件可以同季触发（不再互斥）
+--- 连续 N 季无事件时触发保底随机事件（概率翻倍）
 ---@param state table
 ---@return table[] triggeredEvents
 function Events.CheckEvents(state)
@@ -41,23 +44,48 @@ function Events.CheckEvents(state)
         end
     end
 
-    -- 2. 检查随机事件（如果没有固定事件）
-    if #triggered == 0 then
-        local templates = EventsData.GetRandomEventTemplates()
-        for _, event in ipairs(templates) do
-            if not state.events_fired[event.id] and
-               Events._CheckTrigger(state, event) then
-                -- 冷却检查
-                local cd = state.random_cooldowns[event.id] or 0
-                if cd <= 0 then
-                    -- 概率检查
-                    if math.random() < (event.chance or 0.1) then
-                        table.insert(triggered, event)
-                        break  -- 每季最多一个随机事件
-                    end
+    -- 2. 检查随机事件（不再要求"没有固定事件"才检查）
+    local templates = EventsData.GetRandomEventTemplates()
+    -- 保底机制：连续无事件时概率提升
+    local drought = state.event_drought_counter or 0
+    local chanceMultiplier = 1.0
+    if drought >= 3 then
+        chanceMultiplier = 2.0   -- 连续3季无事件，概率翻倍
+    elseif drought >= 2 then
+        chanceMultiplier = 1.5   -- 连续2季无事件，概率×1.5
+    end
+
+    -- 打乱模板顺序以增加随机性
+    local shuffled = {}
+    for _, e in ipairs(templates) do table.insert(shuffled, e) end
+    for i = #shuffled, 2, -1 do
+        local j = math.random(1, i)
+        shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
+    end
+
+    local randomCount = 0
+    local maxRandom = (#triggered > 0) and 1 or 2  -- 有固定事件时最多1个随机，否则最多2个
+    for _, event in ipairs(shuffled) do
+        if randomCount >= maxRandom then break end
+        if Events._CheckTrigger(state, event) then
+            -- 冷却检查
+            local cd = state.random_cooldowns[event.id] or 0
+            if cd <= 0 then
+                -- 概率检查（带保底乘数）
+                local effectiveChance = (event.chance or 0.1) * chanceMultiplier
+                if math.random() < effectiveChance then
+                    table.insert(triggered, event)
+                    randomCount = randomCount + 1
                 end
             end
         end
+    end
+
+    -- 3. 更新事件干旱计数器
+    if #triggered > 0 then
+        state.event_drought_counter = 0
+    else
+        state.event_drought_counter = (state.event_drought_counter or 0) + 1
     end
 
     return triggered
@@ -102,6 +130,21 @@ function Events._CheckTrigger(state, event)
     -- 最低年份
     if trigger.min_year then
         if state.year < trigger.min_year then
+            return false
+        end
+    end
+
+    -- 最高年份
+    if trigger.max_year then
+        if state.year > trigger.max_year then
+            return false
+        end
+    end
+
+    -- 需要处于战争状态
+    if trigger.requires_war then
+        local atWar = state.flags and state.flags.at_war
+        if not atWar then
             return false
         end
     end
@@ -156,6 +199,12 @@ function Events.ApplyOption(state, event, optionIndex)
     end
     if effects.gold then
         state.gold = math.max(0, state.gold + effects.gold)
+    end
+    if effects.gold_reserve then
+        local region = GameState.GetRegion(state, "mine_district")
+        if region then
+            region.resources.gold_reserve = (region.resources.gold_reserve or 0) + effects.gold_reserve
+        end
     end
 
     -- 1.5 历史事件对宏观环境的直接冲击
@@ -309,6 +358,33 @@ function Events.ApplyOption(state, event, optionIndex)
 
     -- 12. 日志
     GameState.AddLog(state, string.format("[事件] %s → %s", event.title, option.text))
+
+    -- 13. Toast 反馈——让玩家直观看到效果
+    local parts = {}
+    if effects.cash and effects.cash ~= 0 then
+        local sign = effects.cash > 0 and "+" or ""
+        table.insert(parts, "现金 " .. sign .. Config.FormatNumber(effects.cash))
+    end
+    if effects.gold and effects.gold ~= 0 then
+        local sign = effects.gold > 0 and "+" or ""
+        table.insert(parts, "黄金 " .. sign .. effects.gold)
+    end
+    if effects.gold_reserve and effects.gold_reserve ~= 0 then
+        local sign = effects.gold_reserve > 0 and "+" or ""
+        table.insert(parts, "金矿储量 " .. sign .. effects.gold_reserve)
+    end
+    if effects.workers_bonus and effects.workers_bonus ~= 0 then
+        local sign = effects.workers_bonus > 0 and "+" or ""
+        table.insert(parts, "工人 " .. sign .. effects.workers_bonus)
+    end
+    if effects.security_bonus and effects.security_bonus ~= 0 then
+        local sign = effects.security_bonus > 0 and "+" or ""
+        table.insert(parts, "治安 " .. sign .. effects.security_bonus)
+    end
+    if #parts > 0 then
+        local UI = require("urhox-libs/UI")
+        UI.Toast.Show(table.concat(parts, "  "), { variant = "info", duration = 2.5 })
+    end
 end
 
 --- 从队列取出下一个事件
