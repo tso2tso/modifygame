@@ -17,6 +17,8 @@ local MenuPage = require("ui.ui_menu")
 local ActionModals = require("ui.ui_action_modals")
 local EndingModal = require("ui.ui_ending_modal")
 
+local AudioManager = require("systems.audio_manager")
+
 local C = Config.COLORS
 local F = Config.FONT
 local S = Config.SIZE
@@ -52,6 +54,17 @@ function UIManager.InitUI()
         },
         scale = UI.Scale.DEFAULT,
     })
+
+    -- Monkey-patch ScrollView：降低滑动惯性速度
+    local ScrollViewClass = UI.ScrollView
+    local _origOnPanMove = ScrollViewClass.OnPanMove
+    local VELOCITY_SCALE = 0.45  -- 惯性衰减系数（1.0=原始，越小越慢）
+    ScrollViewClass.OnPanMove = function(self, event)
+        _origOnPanMove(self, event)
+        -- 缩减 velocity，降低松手后的惯性滑动距离
+        self.state.velocityX = self.state.velocityX * VELOCITY_SCALE
+        self.state.velocityY = self.state.velocityY * VELOCITY_SCALE
+    end
 end
 
 --- 创建完整游戏 UI
@@ -121,6 +134,7 @@ function UIManager._CreateContentArea(state)
         position = "absolute",
         top = 0, left = 0, right = 0, bottom = 0,
         padding = S.page_padding,
+        bounces = false,
         children = {
             Dashboard.Create(state, {
                 onEndTurn = onEndTurn_,
@@ -166,6 +180,7 @@ function UIManager._CreatePage(tabId, state)
         position = "absolute",
         top = 0, left = 0, right = 0, bottom = 0,
         padding = S.page_padding,
+        bounces = false,
         children = { content },
     }
 end
@@ -264,6 +279,7 @@ end
 -- ============================================================================
 
 function UIManager.SwitchTab(tabId)
+    AudioManager.PlayUI("ui_tab_switch")
     if tabId == activeView_ then
         UIManager._ShowView("dashboard")
         return
@@ -371,9 +387,13 @@ end
 -- ============================================================================
 
 function UIManager._OpenSettings()
+    AudioManager.PlayUI("ui_modal_open")
+    -- 每次重建，确保音量设置等内容反映最新状态
+    -- 直接 Destroy 旧 Modal（跳过 Close 动画），避免新旧 Modal 同时存在
     if settingsDrawer_ then
-        settingsDrawer_:Open()
-        return
+        local old = settingsDrawer_
+        settingsDrawer_ = nil
+        old:Destroy()
     end
 
     local menuCallbacks = {
@@ -383,30 +403,33 @@ function UIManager._OpenSettings()
         onNewGame = onNewGame_,
     }
 
-    settingsDrawer_ = UI.Drawer {
-        id = "settingsDrawer",
-        position = "right",
-        size = S.drawer_width_pct .. "%",
-        backgroundColor = C.bg_elevated,
-        borderLeftWidth = 1,
-        borderLeftColor = Config.GetEraAccent(stateRef_),
-        borderTopLeftRadius = S.radius_drawer,
-        borderBottomLeftRadius = S.radius_drawer,
+    local menuContent = MenuPage.Create(stateRef_, menuCallbacks)
+
+    settingsDrawer_ = UI.Modal {
         title = "⚙️ 设置与存档",
-        titleFontSize = F.subtitle,
-        titleFontColor = C.text_primary,
-        children = {
-            UI.ScrollView {
-                width = "100%",
-                height = "100%",
-                padding = S.page_padding,
-                children = {
-                    MenuPage.Create(stateRef_, menuCallbacks),
-                },
-            },
-        },
+        size = "fullscreen",
+        closeOnOverlay = true,
+        closeOnEscape = true,
+        showCloseButton = true,
+        onClose = function(self)
+            settingsDrawer_ = nil
+            self:Destroy()
+        end,
     }
 
+    settingsDrawer_:AddContent(UI.ScrollView {
+        width = "100%",
+        flexGrow = 1,
+        flexShrink = 1,
+        bounces = false,
+        children = {
+            menuContent,
+        },
+    })
+
+    if uiRoot_ then
+        uiRoot_:AddChild(settingsDrawer_)
+    end
     settingsDrawer_:Open()
 end
 

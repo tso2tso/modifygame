@@ -9,6 +9,8 @@ local GameState = require("game_state")
 local SaveLoad = require("utils.save_load")
 local Balance = require("data.balance")
 
+local AudioManager = require("systems.audio_manager")
+
 local C = Config.COLORS
 local F = Config.FONT
 local S = Config.SIZE
@@ -21,6 +23,10 @@ local stateRef_ = nil
 local onStateChanged_ = nil
 ---@type function|nil
 local onNewGame_ = nil
+---@type table|nil 存档操作卡片引用（用于局部刷新）
+local saveCardRef_ = nil
+---@type table|nil 存档列表卡片引用（用于局部刷新）
+local slotsCardRef_ = nil
 
 --- 创建菜单页完整内容
 ---@param state table
@@ -30,12 +36,17 @@ function MenuPage.Create(state, callbacks)
     stateRef_ = state
     onStateChanged_ = callbacks and callbacks.onStateChanged
     onNewGame_ = callbacks and callbacks.onNewGame
+    saveCardRef_ = nil
+    slotsCardRef_ = nil
     return MenuPage._BuildContent(state)
 end
 
 function MenuPage._BuildContent(state)
     local hasSave = SaveLoad.HasSave()
     local slots = SaveLoad.ListSlots()
+
+    saveCardRef_ = MenuPage._CreateSaveCard(state, hasSave)
+    slotsCardRef_ = MenuPage._CreateSlotsCard(state, slots)
 
     return UI.Panel {
         id = "menuContent",
@@ -46,11 +57,14 @@ function MenuPage._BuildContent(state)
             -- 游戏标题卡片
             MenuPage._CreateTitleCard(state),
 
+            -- 音量设置卡片
+            MenuPage._CreateAudioCard(),
+
             -- 存档操作卡片
-            MenuPage._CreateSaveCard(state, hasSave),
+            saveCardRef_,
 
             -- 存档列表卡片
-            MenuPage._CreateSlotsCard(state, slots),
+            slotsCardRef_,
 
             -- 游戏统计
             MenuPage._CreateStatsCard(state),
@@ -102,8 +116,57 @@ function MenuPage._CreateTitleCard(state)
     }
 end
 
---- 存档操作卡片
-function MenuPage._CreateSaveCard(state, hasSave)
+--- 音量设置卡片
+function MenuPage._CreateAudioCard()
+    local function volumeRow(label, category)
+        local val = math.floor(AudioManager.GetVolume(category) * 100)
+        local valLabel = nil
+        valLabel = UI.Label {
+            id = "vol_" .. category,
+            text = val .. "%",
+            fontSize = F.label,
+            fontColor = C.text_muted,
+            width = 36,
+            textAlign = "right",
+        }
+        return UI.Panel {
+            width = "100%",
+            flexDirection = "row",
+            alignItems = "center",
+            gap = 6,
+            children = {
+                UI.Label {
+                    text = label,
+                    fontSize = F.body_minor,
+                    fontColor = C.text_secondary,
+                    width = 40,
+                },
+                UI.Panel {
+                    flexGrow = 1,
+                    flexShrink = 1,
+                    children = {
+                        UI.Slider {
+                            value = val,
+                            min = 0,
+                            max = 100,
+                            step = 5,
+                            width = "100%",
+                            trackColor = C.paper_mid,
+                            fillColor = C.accent_gold,
+                            onChange = (function(cat, lbl)
+                                return function(self, v)
+                                    AudioManager.SetVolume(cat, v / 100)
+                                    if lbl then lbl:SetText(math.floor(v) .. "%") end
+                                end
+                            end)(category, valLabel),
+                        },
+                    },
+                },
+                valLabel,
+            },
+        }
+    end
+
     return UI.Panel {
         width = "100%",
         padding = S.card_padding,
@@ -115,68 +178,98 @@ function MenuPage._CreateSaveCard(state, hasSave)
         gap = 8,
         children = {
             UI.Label {
-                text = "存档管理",
+                text = "🔊 音量设置",
                 fontSize = F.subtitle,
                 fontWeight = "bold",
                 fontColor = C.text_primary,
             },
             UI.Divider { color = C.divider },
-            -- 快速存档
-            UI.Button {
-                text = "快速存档",
-                width = "100%",
-                height = 36,
-                fontSize = F.body,
-                variant = "primary",
-                backgroundColor = C.accent_gold,
-                fontColor = C.bg_base,
-                borderRadius = S.radius_btn,
-                onClick = function(self)
-                    MenuPage._OnQuickSave()
-                end,
-            },
-            -- 快速读档
-            UI.Button {
-                text = "快速读档",
-                width = "100%",
-                height = 36,
-                fontSize = F.body,
-                variant = "outlined",
-                disabled = not hasSave,
-                borderRadius = S.radius_btn,
-                onClick = function(self)
-                    MenuPage._OnQuickLoad()
-                end,
-            },
-            UI.Divider { color = C.divider },
-            -- 新游戏
-            UI.Button {
-                text = "开始新游戏",
-                width = "100%",
-                height = 36,
-                fontSize = F.body,
-                variant = "outlined",
-                fontColor = C.accent_red,
-                borderColor = C.accent_red,
-                borderRadius = S.radius_btn,
-                onClick = function(self)
-                    MenuPage._OnNewGame()
-                end,
-            },
-            UI.Label {
-                text = "新游戏将覆盖当前进度（自动存档会保留）",
-                fontSize = F.label,
-                fontColor = C.text_muted,
-                textAlign = "center",
-                whiteSpace = "normal",
-            },
+            volumeRow("音乐", "music"),
+            volumeRow("音效", "effect"),
+            volumeRow("界面", "ui"),
         },
     }
 end
 
---- 存档列表卡片
-function MenuPage._CreateSlotsCard(state, slots)
-    -- 避免 table.unpack 陷阱，用 table.insert 构建 children
+--- 存档操作卡片内部子元素列表
+function MenuPage._CreateSaveCardInner(state, hasSave)
+    return {
+        UI.Label {
+            text = "存档管理",
+            fontSize = F.subtitle,
+            fontWeight = "bold",
+            fontColor = C.text_primary,
+        },
+        UI.Divider { color = C.divider },
+        -- 快速存档
+        UI.Button {
+            text = "快速存档",
+            width = "100%",
+            height = 36,
+            fontSize = F.body,
+            variant = "primary",
+            backgroundColor = C.accent_gold,
+            fontColor = C.bg_base,
+            borderRadius = S.radius_btn,
+            onClick = function(self)
+                MenuPage._OnQuickSave()
+            end,
+        },
+        -- 快速读档
+        UI.Button {
+            text = "快速读档",
+            width = "100%",
+            height = 36,
+            fontSize = F.body,
+            variant = "outlined",
+            disabled = not hasSave,
+            borderRadius = S.radius_btn,
+            onClick = function(self)
+                MenuPage._OnQuickLoad()
+            end,
+        },
+        UI.Divider { color = C.divider },
+        -- 新游戏
+        UI.Button {
+            text = "开始新游戏",
+            width = "100%",
+            height = 36,
+            fontSize = F.body,
+            variant = "outlined",
+            fontColor = C.accent_red,
+            borderColor = C.accent_red,
+            borderRadius = S.radius_btn,
+            onClick = function(self)
+                MenuPage._OnNewGame()
+            end,
+        },
+        UI.Label {
+            text = "新游戏将覆盖当前进度（自动存档会保留）",
+            fontSize = F.label,
+            fontColor = C.text_muted,
+            textAlign = "center",
+            whiteSpace = "normal",
+        },
+    }
+end
+
+--- 存档操作卡片（容器 + 内容）
+function MenuPage._CreateSaveCard(state, hasSave)
+    return UI.Panel {
+        width = "100%",
+        padding = S.card_padding,
+        backgroundColor = C.paper_dark,
+        borderRadius = S.radius_card,
+        borderWidth = 1,
+        borderColor = C.border_card,
+        flexDirection = "column",
+        gap = 8,
+        children = MenuPage._CreateSaveCardInner(state, hasSave),
+    }
+end
+
+--- 存档列表卡片内部子元素列表
+function MenuPage._CreateSlotsCardInner(state, slots)
     local slotChildren = {
         UI.Label {
             text = "存档列表",
@@ -245,6 +338,11 @@ function MenuPage._CreateSlotsCard(state, slots)
         end
     end
 
+    return slotChildren
+end
+
+--- 存档列表卡片（容器 + 内容）
+function MenuPage._CreateSlotsCard(state, slots)
     return UI.Panel {
         width = "100%",
         padding = S.card_padding,
@@ -254,7 +352,7 @@ function MenuPage._CreateSlotsCard(state, slots)
         borderColor = C.border_card,
         flexDirection = "column",
         gap = 6,
-        children = slotChildren,
+        children = MenuPage._CreateSlotsCardInner(state, slots),
     }
 end
 
@@ -364,6 +462,8 @@ function MenuPage._OnQuickSave()
         UI.Toast.Show("存档失败", { variant = "error", duration = 1.5 })
     end
     if onStateChanged_ then onStateChanged_() end
+    -- 局部刷新存档卡片（不重建 Modal）
+    MenuPage._RefreshSaveCards()
 end
 
 --- 快速读档
@@ -407,6 +507,8 @@ function MenuPage._OnDeleteSlot(slotName)
         UI.Toast.Show("删除失败", { variant = "error", duration = 1.5 })
     end
     if onStateChanged_ then onStateChanged_() end
+    -- 局部刷新存档卡片（不重建 Modal）
+    MenuPage._RefreshSaveCards()
 end
 
 --- 新游戏
@@ -418,6 +520,29 @@ function MenuPage._OnNewGame()
     UI.Toast.Show("新的百年传奇开始了！", { variant = "info", duration = 2 })
     if onNewGame_ then
         onNewGame_(newState)
+    end
+end
+
+--- 局部刷新存档相关卡片（不重建整个 Modal）
+function MenuPage._RefreshSaveCards()
+    if not stateRef_ then return end
+    local hasSave = SaveLoad.HasSave()
+    local slots = SaveLoad.ListSlots()
+
+    -- 替换存档操作卡片内容
+    if saveCardRef_ then
+        saveCardRef_:ClearChildren()
+        for _, child in ipairs(MenuPage._CreateSaveCardInner(stateRef_, hasSave)) do
+            saveCardRef_:AddChild(child)
+        end
+    end
+
+    -- 替换存档列表卡片内容
+    if slotsCardRef_ then
+        slotsCardRef_:ClearChildren()
+        for _, child in ipairs(MenuPage._CreateSlotsCardInner(stateRef_, slots)) do
+            slotsCardRef_:AddChild(child)
+        end
     end
 end
 

@@ -12,6 +12,8 @@ local TurnEngine = require("systems.turn_engine")
 local Events = require("systems.events")
 local EventModal = require("ui.ui_event_modal")
 local Balance = require("data.balance")
+local AudioManager = require("systems.audio_manager")
+local Tutorial = require("ui.ui_tutorial")
 
 -- ============================================================================
 -- 全局变量
@@ -38,12 +40,41 @@ function Start()
     --     UI 框架两组都订阅，导致 Dropdown 等组件的 OnClick 被调用两次（开→关）。
     --     此处将 UI 的鼠标处理函数替换为空操作，只保留触摸路径。
     local plat = GetPlatform and GetPlatform() or ""
-    if plat == "Android" or plat == "iOS" or plat == "Web" then
+    if plat == "Android" or plat == "iOS" then
         local noop = function() end
         UI.HandleMouseDown = noop
         UI.HandleMouseUp   = noop
         UI.HandleMouseMove = noop
         print("[Touch] 移动端：已抑制模拟鼠标事件，使用纯触摸路径")
+    else
+        print("[Input] 桌面/Web端：使用鼠标事件路径")
+    end
+
+    -- 1.5 初始化音频系统
+    local audioScene = Scene()
+    AudioManager.Init(audioScene)
+
+    -- 包裹 TapGuard：所有按钮点击自动播放 UI 音效
+    local _origTapGuard = Config.TapGuard
+    Config.TapGuard = function(fn)
+        return _origTapGuard(function(self)
+            AudioManager.PlayUI("ui_button_click")
+            fn(self)
+        end)
+    end
+
+    -- 包裹 Toast.Show：根据 variant 自动播放对应提示音
+    local _origToastShow = UI.Toast.Show
+    UI.Toast.Show = function(msg, opts)
+        local variant = opts and opts.variant or "info"
+        if variant == "error" then
+            AudioManager.PlayUI("ui_toast_error")
+        elseif variant == "warning" then
+            AudioManager.PlayUI("ui_toast_warning")
+        else
+            AudioManager.PlayUI("ui_toast_info")
+        end
+        _origToastShow(msg, opts)
     end
 
     -- 2. 尝试读取存档，否则新建游戏
@@ -58,6 +89,12 @@ function Start()
             GameState.GetTurnText(state_), state_.cash, state_.gold))
         GameState.AddLog(state_, "科瓦奇家族在巴科维奇矿区开始了创业之路。")
     end
+
+    -- 2.5 恢复音量设置并启动 BGM
+    if state_.audio_settings then
+        AudioManager.LoadSettings(state_.audio_settings)
+    end
+    AudioManager.UpdateBGM(state_)
 
     -- 打印初始信息
     print(string.format("家族成员 %d 人：", #state_.family.members))
@@ -81,8 +118,9 @@ function Start()
         onNewGame = HandleNewGame,
         onProcessEvent = HandleProcessEvent,
     })
-    -- EventModal 也需要 UI 根节点来显示弹窗
+    -- EventModal / Tutorial 也需要 UI 根节点来显示弹窗
     EventModal.SetRoot(UIManager.GetRoot())
+    Tutorial.SetRoot(UIManager.GetRoot())
 
     if GameState.IsGameOver(state_) then
         UIManager.ShowEnding(state_)
@@ -102,12 +140,25 @@ function Start()
         Config.TapDown()
     end)
 
-    -- 6. 检查开局事件（新游戏首回合）—— 入队后刷新仪表盘立即显示
+    -- 6. 新游戏：先展示新手引导，引导结束后再检查开局事件
     if not loaded then
-        local startEvents = Events.CheckEvents(state_)
-        if #startEvents > 0 then
-            Events.Enqueue(state_, startEvents)
-            UIManager.RefreshAll(state_)
+        if not state_.tutorial_done then
+            Tutorial.Start(function()
+                state_.tutorial_done = true
+                -- 引导结束后检查开局事件
+                local startEvents = Events.CheckEvents(state_)
+                if #startEvents > 0 then
+                    Events.Enqueue(state_, startEvents)
+                    UIManager.RefreshAll(state_)
+                end
+                SaveLoad.Save(state_)
+            end)
+        else
+            local startEvents = Events.CheckEvents(state_)
+            if #startEvents > 0 then
+                Events.Enqueue(state_, startEvents)
+                UIManager.RefreshAll(state_)
+            end
         end
     end
 
@@ -116,6 +167,7 @@ end
 
 function Stop()
     if state_ then
+        state_.audio_settings = AudioManager.GetSettings()
         SaveLoad.Save(state_)
     end
     UI.Shutdown()
@@ -134,6 +186,9 @@ function HandleNewGame(newState)
     print(string.format("[新游戏/读档] %s，现金 %d，黄金 %d",
         GameState.GetTurnText(state_), state_.cash, state_.gold))
 
+    -- 重置 BGM
+    AudioManager.UpdateBGM(state_)
+
     -- 重建 UI
     UIManager.Create(state_, {
         onEndTurn = HandleEndTurn,
@@ -141,6 +196,7 @@ function HandleNewGame(newState)
         onProcessEvent = HandleProcessEvent,
     })
     EventModal.SetRoot(UIManager.GetRoot())
+    Tutorial.SetRoot(UIManager.GetRoot())
     UIManager.BackToDashboard()
     if GameState.IsGameOver(state_) then
         UIManager.ShowEnding(state_)
@@ -148,8 +204,18 @@ function HandleNewGame(newState)
         UIManager.ShowVictoryPrompt(state_)
     end
 
-    -- 新游戏检查开局事件 —— 入队后刷新仪表盘立即显示
-    if state_.turn_count == 0 then
+    -- 新游戏：先展示引导，引导结束后再检查开局事件
+    if state_.turn_count == 0 and not state_.tutorial_done then
+        Tutorial.Start(function()
+            state_.tutorial_done = true
+            local startEvents = Events.CheckEvents(state_)
+            if #startEvents > 0 then
+                Events.Enqueue(state_, startEvents)
+                UIManager.RefreshAll(state_)
+            end
+            SaveLoad.Save(state_)
+        end)
+    elseif state_.turn_count == 0 then
         local startEvents = Events.CheckEvents(state_)
         if #startEvents > 0 then
             Events.Enqueue(state_, startEvents)
@@ -178,7 +244,7 @@ function HandleProcessEvent(eventIndex)
         Events.ApplyOption(state_, event, optionIndex)
         print(string.format("[事件选择] %s → 选项 %d", event.title, optionIndex))
         UIManager.RefreshAll(state_)
-    end)
+    end, state_)
 end
 
 -- ============================================================================
@@ -191,6 +257,9 @@ function HandleEndTurn()
     if EventModal.IsShowing() then
         return
     end
+
+    -- 播放回合结束音效
+    AudioManager.PlayEffect("turn_end")
 
     -- 清空上一轮动态通知
     if state_ then
@@ -250,7 +319,7 @@ function ProcessNextEvent()
         else
             FinalizeEndTurn()
         end
-    end)
+    end, state_)
 end
 
 --- 回合最终完成（事件全部处理后）
@@ -259,6 +328,9 @@ function FinalizeEndTurn()
     pendingReport_ = nil
 
     if not report then return end
+
+    -- 更新 BGM（跨时代切换）
+    AudioManager.UpdateBGM(state_)
 
     -- 收集本季动态通知（战斗结果、AI行动、警告）
     state_.turn_messages = {}
@@ -284,8 +356,14 @@ function FinalizeEndTurn()
         local ending = GameState.GetEndingInfo(state_)
         if ending then
             local variant = ending.variant == "failure" and "error" or "success"
+            if variant == "error" then
+                AudioManager.PlayEffect("game_defeat")
+            else
+                AudioManager.PlayEffect("game_victory")
+            end
             UI.Toast.Show(ending.title, { variant = variant, duration = 3 })
         end
+        AudioManager.StopBGM()
         UIManager.ShowEnding(state_)
         return
     end
@@ -297,6 +375,7 @@ function FinalizeEndTurn()
 
     -- 破产检测（EndTurn 中可能触发）
     if state_.bankrupt then
+        AudioManager.PlayEffect("danger_warning")
         UI.Toast.Show("💀 家族破产！债台高筑，黄金王朝轰然倒塌…",
             { variant = "error", duration = 5 })
         return
@@ -342,6 +421,13 @@ function FinalizeEndTurn()
                     Config.FormatNumber(netWorth), negTurns, remaining),
                 { variant = "error", duration = 4 })
         end
+    end
+
+    -- 收支音效
+    if report.economy.net >= 0 then
+        AudioManager.PlayEffect("coin_income")
+    else
+        AudioManager.PlayEffect("coin_expense")
     end
 
     -- Toast 提示

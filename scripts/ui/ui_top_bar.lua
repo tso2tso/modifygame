@@ -417,6 +417,31 @@ function TopBar._CreateAPRow(state, era)
                 },
             },
 
+            -- ⚙ 设置按钮（与 [+] 按钮同尺寸 36×36）
+            UI.Panel {
+                width = 36, height = 36,
+                borderRadius = S.radius_btn,
+                backgroundColor = C.paper_dark,
+                borderWidth = 1,
+                borderColor = era.accent,
+                justifyContent = "center",
+                alignItems = "center",
+                marginRight = S.spacing_sm,
+                pointerEvents = "auto",
+                onPointerUp = Config.TapGuard(function(self)
+                    if onSettings_ then onSettings_() end
+                end),
+                children = {
+                    UI.Label {
+                        text = "⚙",
+                        fontSize = 17,
+                        fontColor = era.accent,
+                        textAlign = "center",
+                        pointerEvents = "none",
+                    },
+                },
+            },
+
             -- §4.2 安全等级胶囊："安全等级" 文字 + 🛡 + 等级
             UI.Panel {
                 flexDirection = "column",

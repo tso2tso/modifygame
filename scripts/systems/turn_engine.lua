@@ -10,6 +10,8 @@ local Events = require("systems.events")
 local StockEngine = require("systems.stock_engine")
 local Combat = require("systems.combat")
 local Tech = require("systems.tech")
+local GrandPowers = require("systems.grand_powers")
+local BranchEvents = require("systems.branch_events")
 
 local BV = Balance.VICTORY
 
@@ -671,6 +673,32 @@ function TurnEngine.EndTurn(state)
     local combatResults = Combat.ResolveAIActions(state)
     for _, msg in ipairs(combatResults) do
         table.insert(report.ai_changes, msg)
+    end
+
+    -- ========================================
+    -- 阶段 6.7: 大国博弈系统更新
+    -- 历史漂移 → 继承处理 → 征服执行 → 抵抗增长 → 本地AI联动
+    -- ========================================
+    local gpReport = GrandPowers.Tick(state)
+    if gpReport then
+        for _, msg in ipairs(gpReport.conquest_msgs or {}) do
+            table.insert(report.ai_changes, msg)
+        end
+        for _, msg in ipairs(gpReport.succession_msgs or {}) do
+            table.insert(report.ai_changes, msg)
+        end
+    end
+
+    -- ========================================
+    -- 阶段 6.8: 历史分支事件检查
+    -- 在大国博弈更新之后，检查是否有分支节点需要触发
+    -- ========================================
+    local branchEvents = BranchEvents.CheckBranchEvents(state)
+    if #branchEvents > 0 then
+        Events.Enqueue(state, branchEvents)
+        for _, ev in ipairs(branchEvents) do
+            table.insert(report.events_triggered, ev.title)
+        end
     end
 
     -- ========================================

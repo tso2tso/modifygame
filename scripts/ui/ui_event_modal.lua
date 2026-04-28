@@ -6,6 +6,8 @@
 local UI = require("urhox-libs/UI")
 local Config = require("config")
 
+local AudioManager = require("systems.audio_manager")
+
 local C = Config.COLORS
 local F = Config.FONT
 local S = Config.SIZE
@@ -27,8 +29,10 @@ end
 --- 显示事件弹窗
 ---@param event table 事件数据
 ---@param onChoose function(optionIndex) 选择回调
-function EventModal.Show(event, onChoose)
+---@param state table|nil 游戏状态（用于通胀系数修正显示）
+function EventModal.Show(event, onChoose, state)
     onChoose_ = onChoose
+    AudioManager.PlayEffect("event_trigger")
 
     -- 关闭已有弹窗
     if modal_ then
@@ -40,30 +44,42 @@ function EventModal.Show(event, onChoose)
     local optionWidgets = {}
     for i, option in ipairs(event.options) do
         -- 效果提示文本及颜色（§4.8 代价：绿色正面/红色负面/灰色中性）
-        local effectHints, effectColor = EventModal._FormatEffects(option.effects or {})
+        local effectHints, effectColor = EventModal._FormatEffects(option.effects or {}, state)
+
+        -- 分支事件：选项可能因条件不满足而不可选
+        local isAvailable = (option._available == nil) or (option._available == true)
+        local bgColor = isAvailable and C.bg_elevated or {60, 55, 50, 255}
+        local textColor = isAvailable and C.text_primary or {120, 110, 100, 255}
+        local descColor = isAvailable and C.text_secondary or {100, 95, 88, 255}
 
         table.insert(optionWidgets, UI.Panel {
             width = "100%",
             padding = 10,
-            backgroundColor = C.bg_elevated,
+            backgroundColor = bgColor,
             borderRadius = S.radius_card,
             borderWidth = 1,
-            borderColor = C.border_card,
+            borderColor = isAvailable and C.border_card or {80, 75, 70, 180},
             flexDirection = "column",
             gap = 4,
             pointerEvents = "auto",
-            onPointerUp = (function(idx)
+            opacity = isAvailable and 1.0 or 0.6,
+            onPointerUp = (function(idx, avail)
                 return Config.TapGuard(function(self)
+                    if not avail then
+                        UI.Toast.Show("条件不满足，无法选择此选项",
+                            { variant = "warning", duration = 1.5 })
+                        return
+                    end
                     EventModal._OnChoose(idx)
                 end)
-            end)(i),
+            end)(i, isAvailable),
             children = {
                 -- §4.8 主文字（13px）
                 UI.Label {
                     text = string.format("%d. %s", i, option.text),
                     fontSize = F.body,
                     fontWeight = "bold",
-                    fontColor = C.text_primary,
+                    fontColor = textColor,
                     whiteSpace = "normal",
                     lineHeight = 1.3,
                     pointerEvents = "none",
@@ -72,7 +88,7 @@ function EventModal.Show(event, onChoose)
                 UI.Label {
                     text = option.desc or "",
                     fontSize = F.body_minor,
-                    fontColor = C.text_secondary,
+                    fontColor = descColor,
                     whiteSpace = "normal",
                     pointerEvents = "none",
                 },
@@ -169,6 +185,7 @@ function EventModal.Show(event, onChoose)
         width = "100%",
         height = "100%",
         scrollY = true,
+        bounces = false,
         children = { contentPanel },
     }
     modal_:AddContent(scrollContent)
@@ -183,16 +200,18 @@ end
 
 --- 格式化效果提示（§4.8 代价颜色：绿色正面/红色负面/灰色中性）
 ---@return string hints, table color
-function EventModal._FormatEffects(effects)
+function EventModal._FormatEffects(effects, state)
     local hints = {}
     local hasPositive = false
     local hasNegative = false
 
     if effects.cash then
-        local prefix = effects.cash >= 0 and "+" or ""
-        table.insert(hints, string.format("💰 %s%d", prefix, effects.cash))
-        if effects.cash > 0 then hasPositive = true end
-        if effects.cash < 0 then hasNegative = true end
+        local inflationFactor = (state and state.inflation_factor) or 1.0
+        local displayCash = math.floor(effects.cash * inflationFactor)
+        local prefix = displayCash >= 0 and "+" or ""
+        table.insert(hints, string.format("💰 %s%d", prefix, displayCash))
+        if displayCash > 0 then hasPositive = true end
+        if displayCash < 0 then hasNegative = true end
     end
     if effects.gold then
         local prefix = effects.gold >= 0 and "+" or ""
@@ -227,6 +246,14 @@ function EventModal._FormatEffects(effects)
         end
     end
 
+    -- 合作分数（分支事件）
+    if effects.collaboration_score and effects.collaboration_score ~= 0 then
+        local prefix = effects.collaboration_score > 0 and "+" or ""
+        table.insert(hints, string.format("🤝 合作度 %s%d", prefix, effects.collaboration_score))
+        if effects.collaboration_score > 0 then hasNegative = true end  -- 合作是"负面"（偏向占领方）
+        if effects.collaboration_score < 0 then hasPositive = true end  -- 抵抗是"正面"
+    end
+
     if #hints == 0 then
         return "无直接资源变化", C.text_muted
     end
@@ -246,6 +273,7 @@ end
 
 --- 选择回调
 function EventModal._OnChoose(optionIndex)
+    AudioManager.PlayEffect("event_choose")
     if modal_ then
         modal_:Close()
         modal_:Destroy()

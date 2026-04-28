@@ -12,6 +12,7 @@ local Events = require("systems.events")
 local Actions = require("systems.actions")
 local Balance = require("data.balance")
 local RegionsData = require("data.regions_data")
+local PlayerActionsGP = require("systems.player_actions_gp")
 
 local C = Config.COLORS
 local F = Config.FONT
@@ -43,6 +44,11 @@ function Dashboard._BuildContent(state)
     local msgSection = Dashboard._TurnMessagesSection(state, era)
     if msgSection then
         table.insert(children, msgSection)
+    end
+    -- 合作度状态栏（大国系统激活后显示）
+    local collabBar = Dashboard._CollaborationBar(state)
+    if collabBar then
+        table.insert(children, collabBar)
     end
     -- 事件流
     table.insert(children, Dashboard._EventSection(state, era))
@@ -131,6 +137,82 @@ function Dashboard._FineDivider()
         width = "100%",
         height = S.hairline_height,
         backgroundColor = C.divider,
+    }
+end
+
+--- 仪表盘合作度状态栏（紧凑单行）
+function Dashboard._CollaborationBar(state)
+    if not state._gp_initialized then return nil end
+
+    local score = state.collaboration_score or 0
+    local label = PlayerActionsGP.GetCollaborationLabel(score)
+
+    -- 颜色：抵抗→绿系 / 合作→红系 / 中间→琥珀
+    local barColor
+    if score <= -20 then
+        barColor = C.accent_green
+    elseif score >= 20 then
+        barColor = C.accent_red
+    else
+        barColor = C.accent_amber
+    end
+
+    -- 进度条值：-50~+50 映射到 0~100
+    local pct = math.max(0, math.min(100, (score + 50) * 100 / 100))
+
+    return UI.Panel {
+        width = "100%",
+        backgroundColor = C.bg_surface,
+        borderRadius = S.radius_card,
+        borderWidth = 1,
+        borderColor = C.border_soft,
+        padding = 8,
+        flexDirection = "row",
+        alignItems = "center",
+        gap = 8,
+        children = {
+            UI.Label {
+                text = "🤝",
+                fontSize = 16,
+                width = 20,
+                pointerEvents = "none",
+            },
+            UI.Label {
+                text = "合作度",
+                fontSize = F.label,
+                fontColor = C.text_secondary,
+                pointerEvents = "none",
+            },
+            -- 进度条容器
+            UI.Panel {
+                flexGrow = 1,
+                height = 6,
+                borderRadius = 3,
+                backgroundColor = { 50, 45, 35, 255 },
+                children = {
+                    UI.Panel {
+                        width = string.format("%.0f%%", pct),
+                        height = "100%",
+                        borderRadius = 3,
+                        backgroundColor = barColor,
+                    },
+                },
+            },
+            -- 数值标签
+            UI.Label {
+                text = string.format("%s%d", score > 0 and "+" or "", score),
+                fontSize = F.label,
+                fontWeight = "bold",
+                fontColor = barColor,
+                pointerEvents = "none",
+            },
+            UI.Label {
+                text = label,
+                fontSize = F.label,
+                fontColor = C.text_muted,
+                pointerEvents = "none",
+            },
+        },
     }
 end
 

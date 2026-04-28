@@ -6,6 +6,7 @@ local Config = require("config")
 local Balance = require("data.balance")
 local FamiliesData = require("data.families_data")
 local RegionsData = require("data.regions_data")
+local EuropeData = require("data.europe_data")
 
 --- 深拷贝（用于把 Balance.STOCKS 模板实例化进 state，避免共享引用）
 local function deepcopy(tbl)
@@ -84,6 +85,11 @@ function GameState.CreateNew()
         loan_consecutive_defaults = 0,   -- 连续违约季度数
         negative_net_worth_turns = 0,    -- 净资产为负连续季度数
         bankrupt = false,                -- 是否已破产（游戏结束条件）
+
+        -- ============================
+        -- 新手引导
+        -- ============================
+        tutorial_done = false,           -- 是否已完成新手引导
 
         -- ============================
         -- 广告幸运事件
@@ -167,6 +173,14 @@ function GameState.CreateNew()
             equipment = 1,  -- 装备等级 1-5
             supply    = 20, -- 补给储备
         },
+
+        -- ============================
+        -- 大国博弈系统
+        -- ============================
+        europe = EuropeData.CreateInitial(),  -- 17国领土状态（以id为key）
+        collaboration_score = 0,              -- 玩家合作度（-100~+100）
+        powers = {},                          -- 活跃大国AI（Phase 2 填充）
+        fronts = {},                          -- 活跃前线（Phase 2 填充）
 
         -- ============================
         -- AI 势力

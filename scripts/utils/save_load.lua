@@ -83,14 +83,21 @@ function SaveLoad.Load(slotName)
     return state
 end
 
---- 检查是否存在存档
+--- 检查是否存在有效存档（排除空文件和已删除标记）
 ---@param slotName string|nil
 ---@return boolean
 function SaveLoad.HasSave(slotName)
     local filename = slotName
         and (SAVE_DIR .. "/" .. slotName .. ".json")
         or SAVE_FILE
-    return fileSystem:FileExists(filename)
+    if not fileSystem:FileExists(filename) then return false end
+    local file = File(filename, FILE_READ)
+    if not file:IsOpen() then return false end
+    local content = file:ReadString()
+    file:Close()
+    if not content or #content < 10 then return false end
+    if content:find('"_deleted"') then return false end
+    return true
 end
 
 --- 删除存档
@@ -101,10 +108,10 @@ function SaveLoad.Delete(slotName)
         and (SAVE_DIR .. "/" .. slotName .. ".json")
         or SAVE_FILE
     if fileSystem:FileExists(filename) then
-        -- 用空文件覆盖（沙箱不支持 os.remove）
+        -- 写入删除标记（沙箱不支持 os.remove）
         local file = File(filename, FILE_WRITE)
         if file:IsOpen() then
-            file:WriteString("")
+            file:WriteString('{"_deleted":true}')
             file:Close()
             print("[SaveLoad] 存档已删除: " .. filename)
             return true
@@ -113,7 +120,7 @@ function SaveLoad.Delete(slotName)
     return false
 end
 
---- 列出所有存档槽
+--- 列出所有有效存档槽（排除已删除的）
 ---@return string[] slotNames
 function SaveLoad.ListSlots()
     if not fileSystem:DirExists(SAVE_DIR) then
@@ -122,9 +129,8 @@ function SaveLoad.ListSlots()
     local files = fileSystem:ScanDir(SAVE_DIR .. "/", "*.json", SCAN_FILES, false)
     local slots = {}
     for _, name in ipairs(files) do
-        -- 去掉 .json 后缀
         local slot = name:match("^(.+)%.json$")
-        if slot then
+        if slot and SaveLoad.HasSave(slot) then
             table.insert(slots, slot)
         end
     end
@@ -267,9 +273,15 @@ function SaveLoad._SerializeState(state)
         accident_rate_mod = state.accident_rate_mod or 0,
     }
 
+    -- 新手引导
+    data.tutorial_done = state.tutorial_done or false
+
     -- 广告幸运事件
     data.lucky_ad_watched = state.lucky_ad_watched or 0
     data.lucky_ad_decay = state.lucky_ad_decay or 1.0
+
+    -- 音量设置
+    data.audio_settings = state.audio_settings
 
     -- 工人/军事
     data.workers = {
@@ -416,9 +428,15 @@ function SaveLoad._DeserializeState(data)
         end
     end
 
+    -- 新手引导兼容（旧存档默认跳过引导）
+    if data.tutorial_done == nil then data.tutorial_done = true end
+
     -- 广告幸运事件兼容
     data.lucky_ad_watched = data.lucky_ad_watched or 0
     data.lucky_ad_decay = data.lucky_ad_decay or 1.0
+
+    -- 音量设置兼容（旧存档无此字段）
+    -- data.audio_settings 可以为 nil，由 AudioManager.LoadSettings 处理
 
     if not data.stocks or #data.stocks == 0 then
         local Balance = require("data.balance")

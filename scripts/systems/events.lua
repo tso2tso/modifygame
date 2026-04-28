@@ -9,6 +9,8 @@ local StockEngine = require("systems.stock_engine")
 local EventMarketEffects = require("data.event_market_effects")
 local Config = require("config")
 
+local BranchEvents = nil  -- 延迟加载，避免循环依赖
+
 local Events = {}
 
 local function ClampInflation(value)
@@ -73,6 +75,10 @@ function Events.CheckEvents(state)
             if cd <= 0 then
                 -- 概率检查（带保底乘数）
                 local effectiveChance = (event.chance or 0.1) * chanceMultiplier
+                -- 前两年（1904-1905）降低随机事件概率，给玩家缓冲期
+                if state.year and state.year <= 1905 then
+                    effectiveChance = effectiveChance * 0.4
+                end
                 if math.random() < effectiveChance then
                     table.insert(triggered, event)
                     randomCount = randomCount + 1
@@ -187,11 +193,36 @@ function Events.ApplyOption(state, event, optionIndex)
     local option = event.options[optionIndex]
     if not option then return end
 
+    -- 分支事件委托给 BranchEvents 模块处理
+    if event._is_branch then
+        if not BranchEvents then
+            BranchEvents = require("systems.branch_events")
+        end
+        local handled = BranchEvents.ApplyBranchOption(state, event, optionIndex)
+        if handled then
+            -- 标记已触发 + 日志 + Toast
+            state.events_fired[event.id] = true
+            GameState.AddLog(state, string.format("[分支事件] %s → %s", event.title, option.text))
+
+            -- collaboration_score 变化 Toast
+            local cs = option.effects and option.effects.collaboration_score
+            if cs and cs ~= 0 then
+                local sign = cs > 0 and "+" or ""
+                local UI = require("urhox-libs/UI")
+                UI.Toast.Show(string.format("合作度 %s%d", sign, cs),
+                    { variant = cs > 0 and "warning" or "success", duration = 2.5 })
+            end
+            return
+        end
+    end
+
     local effects = option.effects or {}
 
-    -- 1. 直接资源效果
+    -- 1. 直接资源效果（cash 乘以通胀系数，让费用/收益随通胀动态缩放）
     if effects.cash then
-        state.cash = state.cash + effects.cash
+        local inflationFactor = state.inflation_factor or 1.0
+        local adjustedCash = math.floor(effects.cash * inflationFactor)
+        state.cash = state.cash + adjustedCash
     end
     if effects.gold then
         state.gold = math.max(0, state.gold + effects.gold)
@@ -358,8 +389,10 @@ function Events.ApplyOption(state, event, optionIndex)
     -- 13. Toast 反馈——让玩家直观看到效果
     local parts = {}
     if effects.cash and effects.cash ~= 0 then
-        local sign = effects.cash > 0 and "+" or ""
-        table.insert(parts, "现金 " .. sign .. Config.FormatNumber(effects.cash))
+        local inflationFactor = state.inflation_factor or 1.0
+        local displayCash = math.floor(effects.cash * inflationFactor)
+        local sign = displayCash > 0 and "+" or ""
+        table.insert(parts, "现金 " .. sign .. Config.FormatNumber(displayCash))
     end
     if effects.gold and effects.gold ~= 0 then
         local sign = effects.gold > 0 and "+" or ""

@@ -314,17 +314,17 @@ function EventsData.GetFixedEvents()
                     desc = "保守策略，保全资产",
                     effects = {
                         gold = 10,
-                        inflation_delta = 0.03,
-                        inflation_drift_mod = 0.004,
+                        inflation_delta = 0.08,
+                        inflation_drift_mod = 0.015,
                         inflation_drift_duration = 8,
-                        asset_price_mod = 0.08,
+                        asset_price_mod = 0.15,
                         asset_price_duration = 8,
                         war_state = true,
                         modifiers = {
                             { target = "expansion_freeze", value = 1, duration = 4 },
                             { target = "risk", value = -10, duration = 0 },
-                            { target = "gold_price_mod", value = 0.30, duration = 8 },
-                            { target = "coal_price_mod", value = 0.40, duration = 8 },
+                            { target = "gold_price_mod", value = 0.50, duration = 8 },
+                            { target = "coal_price_mod", value = 0.60, duration = 8 },
                         },
                     },
                 },
@@ -333,18 +333,18 @@ function EventsData.GetFixedEvents()
                     desc = "战争财富，但声誉有损",
                     effects = {
                         cash = 500,
-                        inflation_delta = 0.05,
-                        inflation_drift_mod = 0.008,
+                        inflation_delta = 0.12,
+                        inflation_drift_mod = 0.025,
                         inflation_drift_duration = 12,
-                        asset_price_mod = 0.12,
+                        asset_price_mod = 0.20,
                         asset_price_duration = 8,
                         war_state = true,
                         modifiers = {
                             { target = "military_relation", value = 15, duration = 0 },
                             { target = "public_support", value = -5, duration = 0 },
                             { target = "military_industry_profit", value = 0.40, duration = 16 },
-                            { target = "gold_price_mod", value = 0.25, duration = 12 },
-                            { target = "coal_price_mod", value = 0.50, duration = 12 },
+                            { target = "gold_price_mod", value = 0.45, duration = 12 },
+                            { target = "coal_price_mod", value = 0.70, duration = 12 },
                         },
                     },
                 },
@@ -353,7 +353,7 @@ function EventsData.GetFixedEvents()
                     desc = "分散风险",
                     effects = {
                         cash = -200,
-                        inflation_delta = 0.02,
+                        inflation_delta = 0.06,
                         war_state = true,
                         modifiers = {
                             { target = "foreign_assets", value = 1, duration = 0 },
@@ -391,10 +391,10 @@ function EventsData.GetFixedEvents()
                     desc = "军需利润提高，民用市场受挤压",
                     effects = {
                         cash = 260,
-                        inflation_delta = 0.04,
-                        inflation_drift_mod = 0.006,
+                        inflation_delta = 0.10,
+                        inflation_drift_mod = 0.020,
                         inflation_drift_duration = 8,
-                        asset_price_mod = 0.10,
+                        asset_price_mod = 0.18,
                         asset_price_duration = 8,
                         war_state = true,
                         modifiers = {
@@ -409,7 +409,7 @@ function EventsData.GetFixedEvents()
                     desc = "利润较低，但稳住士气和民心",
                     effects = {
                         cash = -120,
-                        inflation_delta = 0.025,
+                        inflation_delta = 0.07,
                         war_state = true,
                         modifiers = {
                             { target = "worker_morale", value = 12, duration = 0 },
@@ -423,7 +423,7 @@ function EventsData.GetFixedEvents()
                     desc = "保留硬通货，承担走私风险",
                     effects = {
                         gold = 6,
-                        inflation_delta = 0.03,
+                        inflation_delta = 0.08,
                         war_state = true,
                         modifiers = {
                             { target = "shadow_income", value = 45, duration = 6 },
@@ -452,8 +452,8 @@ function EventsData.GetFixedEvents()
                     effects = {
                         cash = -200,
                         gold = 4,
-                        inflation_delta = 0.04,
-                        inflation_drift_mod = 0.005,
+                        inflation_delta = 0.10,
+                        inflation_drift_mod = 0.018,
                         inflation_drift_duration = 6,
                         modifiers = {
                             { target = "gold_price_mod", value = 0.20, duration = 6 },
@@ -465,8 +465,8 @@ function EventsData.GetFixedEvents()
                     desc = "成本增加但避免罢工",
                     effects = {
                         cash = -150,
-                        inflation_delta = 0.03,
-                        inflation_drift_mod = 0.003,
+                        inflation_delta = 0.08,
+                        inflation_drift_mod = 0.012,
                         inflation_drift_duration = 6,
                         modifiers = {
                             { target = "worker_morale", value = 10, duration = 0 },
@@ -478,8 +478,8 @@ function EventsData.GetFixedEvents()
                     text = "冻结工资，以实物补贴",
                     desc = "节省现金但工人不满",
                     effects = {
-                        inflation_delta = 0.035,
-                        inflation_drift_mod = 0.004,
+                        inflation_delta = 0.09,
+                        inflation_drift_mod = 0.015,
                         inflation_drift_duration = 4,
                         modifiers = {
                             { target = "worker_morale", value = -8, duration = 0 },
@@ -506,8 +506,8 @@ function EventsData.GetFixedEvents()
                     desc = "成本上升，降低罢工风险",
                     effects = {
                         cash = -240,
-                        inflation_delta = 0.05,
-                        inflation_drift_mod = 0.004,
+                        inflation_delta = 0.12,
+                        inflation_drift_mod = 0.018,
                         inflation_drift_duration = 6,
                         modifiers = {
                             { target = "worker_wage", value = 1, duration = 0 },
@@ -522,10 +522,10 @@ function EventsData.GetFixedEvents()
                     desc = "短期现金流好，民心和治安恶化",
                     effects = {
                         cash = 360,
-                        inflation_delta = 0.06,
-                        inflation_drift_mod = 0.006,
+                        inflation_delta = 0.15,
+                        inflation_drift_mod = 0.022,
                         inflation_drift_duration = 6,
-                        asset_price_mod = 0.08,
+                        asset_price_mod = 0.15,
                         asset_price_duration = 6,
                         security_bonus = -1,
                         modifiers = {
@@ -541,7 +541,7 @@ function EventsData.GetFixedEvents()
                     effects = {
                         cash = 120,
                         gold = -2,
-                        inflation_drift_mod = 0.005,
+                        inflation_drift_mod = 0.016,
                         inflation_drift_duration = 6,
                         modifiers = {
                             { target = "shadow_income", value = 70, duration = 6 },
@@ -673,10 +673,10 @@ function EventsData.GetFixedEvents()
                     desc = "趁乱扩张",
                     effects = {
                         cash = -300,
-                        inflation_delta = 0.03,
-                        inflation_drift_mod = -0.010,
+                        inflation_delta = 0.08,
+                        inflation_drift_mod = -0.025,
                         inflation_drift_duration = 6,
-                        asset_price_mod = -0.15,
+                        asset_price_mod = -0.25,
                         asset_price_duration = 6,
                         war_state = false,
                         modifiers = {
@@ -690,8 +690,8 @@ function EventsData.GetFixedEvents()
                     desc = "政治安全优先",
                     effects = {
                         cash = -100,
-                        inflation_delta = -0.01,
-                        inflation_drift_mod = -0.012,
+                        inflation_delta = -0.03,
+                        inflation_drift_mod = -0.030,
                         inflation_drift_duration = 8,
                         war_state = false,
                         modifiers = {
@@ -705,8 +705,8 @@ function EventsData.GetFixedEvents()
                     desc = "赢得民心",
                     effects = {
                         cash = -200,
-                        inflation_delta = -0.005,
-                        inflation_drift_mod = -0.008,
+                        inflation_delta = -0.015,
+                        inflation_drift_mod = -0.020,
                         inflation_drift_duration = 6,
                         war_state = false,
                         modifiers = {
@@ -836,8 +836,8 @@ function EventsData.GetFixedEvents()
                     effects = {
                         cash = -400,
                         gold = 12,
-                        inflation_delta = 0.06,
-                        inflation_drift_mod = 0.008,
+                        inflation_delta = 0.15,
+                        inflation_drift_mod = 0.025,
                         inflation_drift_duration = 8,
                         modifiers = {
                             { target = "gold_price_mod", value = 0.25, duration = 8 },
@@ -849,8 +849,8 @@ function EventsData.GetFixedEvents()
                     desc = "把贬值的钱变成不贬值的矿井",
                     effects = {
                         cash = -350,
-                        inflation_delta = 0.05,
-                        inflation_drift_mod = 0.006,
+                        inflation_delta = 0.12,
+                        inflation_drift_mod = 0.020,
                         inflation_drift_duration = 6,
                         modifiers = {
                             { target = "mine_output_mult", value = 0.12, duration = 0 },
@@ -863,8 +863,8 @@ function EventsData.GetFixedEvents()
                     desc = "用贬值的钱还债，但信用受损",
                     effects = {
                         cash = 500,
-                        inflation_delta = 0.04,
-                        inflation_drift_mod = 0.005,
+                        inflation_delta = 0.10,
+                        inflation_drift_mod = 0.018,
                         inflation_drift_duration = 6,
                         modifiers = {
                             { target = "legitimacy", value = -8, duration = 0 },
@@ -1118,10 +1118,10 @@ function EventsData.GetFixedEvents()
                     desc = "放慢扩张，降低金融风险",
                     effects = {
                         cash = -250,
-                        inflation_delta = -0.03,
-                        inflation_drift_mod = -0.008,
+                        inflation_delta = -0.08,
+                        inflation_drift_mod = -0.025,
                         inflation_drift_duration = 8,
-                        asset_price_mod = -0.20,
+                        asset_price_mod = -0.35,
                         asset_price_duration = 8,
                         modifiers = {
                             { target = "risk", value = -12, duration = 8 },
@@ -1136,10 +1136,10 @@ function EventsData.GetFixedEvents()
                     desc = "承担短期压力换长期资产",
                     effects = {
                         cash = -500,
-                        inflation_delta = -0.02,
-                        inflation_drift_mod = -0.006,
+                        inflation_delta = -0.06,
+                        inflation_drift_mod = -0.020,
                         inflation_drift_duration = 6,
-                        asset_price_mod = -0.30,
+                        asset_price_mod = -0.45,
                         asset_price_duration = 4,
                         modifiers = {
                             { target = "total_assets", value = 900, duration = 0 },
@@ -1179,8 +1179,8 @@ function EventsData.GetFixedEvents()
                     desc = "保住现金但加剧恐慌",
                     effects = {
                         cash = 300,
-                        inflation_delta = 0.03,
-                        inflation_drift_mod = 0.004,
+                        inflation_delta = 0.06,
+                        inflation_drift_mod = 0.012,
                         inflation_drift_duration = 4,
                         modifiers = {
                             { target = "legitimacy", value = -5, duration = 0 },
@@ -1193,7 +1193,7 @@ function EventsData.GetFixedEvents()
                     desc = "冒险但赢得信誉",
                     effects = {
                         cash = -100,
-                        inflation_delta = 0.02,
+                        inflation_delta = 0.04,
                         modifiers = {
                             { target = "legitimacy", value = 12, duration = 0 },
                             { target = "public_support", value = 10, duration = 0 },
@@ -1205,7 +1205,7 @@ function EventsData.GetFixedEvents()
                     desc = "高风险投机",
                     effects = {
                         cash = -350,
-                        inflation_delta = 0.025,
+                        inflation_delta = 0.05,
                         asset_price_mod = -0.12,
                         asset_price_duration = 4,
                         modifiers = {
@@ -1412,8 +1412,8 @@ function EventsData.GetFixedEvents()
                     effects = {
                         cash = -350,
                         gold = 8,
-                        inflation_delta = 0.025,
-                        inflation_drift_mod = 0.004,
+                        inflation_delta = 0.06,
+                        inflation_drift_mod = 0.012,
                         inflation_drift_duration = 6,
                         modifiers = {
                             { target = "gold_price_mod", value = 0.25, duration = 8 },
@@ -1426,7 +1426,7 @@ function EventsData.GetFixedEvents()
                     desc = "短期暴利",
                     effects = {
                         cash = 500,
-                        inflation_delta = 0.02,
+                        inflation_delta = 0.05,
                         modifiers = {
                             { target = "mine_output_mult", value = 0.12, duration = 4 },
                             { target = "military_industry_profit", value = 0.15, duration = 6 },
@@ -1439,7 +1439,7 @@ function EventsData.GetFixedEvents()
                     desc = "预防性投资",
                     effects = {
                         cash = -200,
-                        inflation_delta = 0.015,
+                        inflation_delta = 0.04,
                         security_bonus = 1,
                         modifiers = {
                             { target = "transport_risk", value = -0.10, duration = 8 },
@@ -1466,8 +1466,8 @@ function EventsData.GetFixedEvents()
                     desc = "两面获利，但中立地位脆弱",
                     effects = {
                         cash = 600,
-                        inflation_delta = 0.04,
-                        inflation_drift_mod = 0.006,
+                        inflation_delta = 0.10,
+                        inflation_drift_mod = 0.020,
                         inflation_drift_duration = 8,
                         modifiers = {
                             { target = "military_industry_profit", value = 0.25, duration = 8 },
@@ -1482,8 +1482,8 @@ function EventsData.GetFixedEvents()
                     desc = "降低风险等待局势明朗",
                     effects = {
                         cash = -100,
-                        inflation_delta = 0.025,
-                        inflation_drift_mod = 0.003,
+                        inflation_delta = 0.07,
+                        inflation_drift_mod = 0.012,
                         inflation_drift_duration = 6,
                         modifiers = {
                             { target = "risk", value = -10, duration = 0 },
@@ -1496,7 +1496,7 @@ function EventsData.GetFixedEvents()
                     desc = "保护家族财富但当地影响力下降",
                     effects = {
                         cash = -300,
-                        inflation_delta = 0.03,
+                        inflation_delta = 0.08,
                         modifiers = {
                             { target = "foreign_assets", value = 2, duration = 0 },
                             { target = "local_reputation", value = -12, duration = 0 },
@@ -1523,8 +1523,8 @@ function EventsData.GetFixedEvents()
                     desc = "为入侵做最后准备",
                     effects = {
                         cash = -300,
-                        inflation_delta = 0.05,
-                        inflation_drift_mod = 0.008,
+                        inflation_delta = 0.12,
+                        inflation_drift_mod = 0.025,
                         inflation_drift_duration = 8,
                         security_bonus = 1,
                         modifiers = {
@@ -1539,7 +1539,7 @@ function EventsData.GetFixedEvents()
                     desc = "保人不保产",
                     effects = {
                         cash = -200,
-                        inflation_delta = 0.04,
+                        inflation_delta = 0.10,
                         modifiers = {
                             { target = "public_support", value = -8, duration = 0 },
                             { target = "foreign_assets", value = 1, duration = 0 },
@@ -1551,7 +1551,7 @@ function EventsData.GetFixedEvents()
                     desc = "为长期抗争做准备",
                     effects = {
                         cash = -100,
-                        inflation_delta = 0.035,
+                        inflation_delta = 0.09,
                         modifiers = {
                             { target = "military_relation", value = 10, duration = 0 },
                             { target = "public_support", value = 15, duration = 0 },
@@ -1578,10 +1578,10 @@ function EventsData.GetFixedEvents()
                     desc = "保护长期资产，短期产能下降",
                     effects = {
                         cash = -420,
-                        inflation_delta = 0.06,
-                        inflation_drift_mod = 0.010,
+                        inflation_delta = 0.15,
+                        inflation_drift_mod = 0.030,
                         inflation_drift_duration = 10,
-                        asset_price_mod = 0.12,
+                        asset_price_mod = 0.20,
                         asset_price_duration = 8,
                         war_state = true,
                         modifiers = {
@@ -1597,8 +1597,8 @@ function EventsData.GetFixedEvents()
                     desc = "现金流稳定，声誉风险很高",
                     effects = {
                         cash = 600,
-                        inflation_delta = 0.08,
-                        inflation_drift_mod = 0.012,
+                        inflation_delta = 0.20,
+                        inflation_drift_mod = 0.035,
                         inflation_drift_duration = 10,
                         war_state = true,
                         modifiers = {
@@ -1613,8 +1613,8 @@ function EventsData.GetFixedEvents()
                     desc = "转入灰色经营，风险和收益都提高",
                     effects = {
                         gold = -4,
-                        inflation_delta = 0.05,
-                        inflation_drift_mod = 0.007,
+                        inflation_delta = 0.12,
+                        inflation_drift_mod = 0.022,
                         inflation_drift_duration = 8,
                         war_state = true,
                         modifiers = {
@@ -1644,8 +1644,8 @@ function EventsData.GetFixedEvents()
                     effects = {
                         cash = -200,
                         gold = -3,
-                        inflation_delta = 0.04,
-                        inflation_drift_mod = 0.006,
+                        inflation_delta = 0.10,
+                        inflation_drift_mod = 0.018,
                         inflation_drift_duration = 6,
                         modifiers = {
                             { target = "public_support", value = 20, duration = 0 },
@@ -1659,8 +1659,8 @@ function EventsData.GetFixedEvents()
                     desc = "谁来都交一点保护费",
                     effects = {
                         cash = -300,
-                        inflation_delta = 0.05,
-                        inflation_drift_mod = 0.005,
+                        inflation_delta = 0.12,
+                        inflation_drift_mod = 0.015,
                         inflation_drift_duration = 6,
                         modifiers = {
                             { target = "security", value = -1, duration = 6 },
@@ -1673,7 +1673,7 @@ function EventsData.GetFixedEvents()
                     desc = "建立社区防御但消耗大",
                     effects = {
                         cash = -250,
-                        inflation_delta = 0.035,
+                        inflation_delta = 0.08,
                         security_bonus = 1,
                         modifiers = {
                             { target = "worker_morale", value = 10, duration = 0 },
@@ -1701,7 +1701,7 @@ function EventsData.GetFixedEvents()
                     desc = "高风险但回报丰厚",
                     effects = {
                         cash = 300,
-                        inflation_delta = 0.03,
+                        inflation_delta = 0.08,
                         security_bonus = -1,
                         modifiers = {
                             { target = "supply_reserve", value = 25, duration = 0 },
@@ -1715,7 +1715,7 @@ function EventsData.GetFixedEvents()
                     desc = "建立与盟军的关系",
                     effects = {
                         cash = -80,
-                        inflation_delta = 0.02,
+                        inflation_delta = 0.06,
                         modifiers = {
                             { target = "political_standing", value = 12, duration = 0 },
                             { target = "foreign_assets", value = 1, duration = 0 },
@@ -1728,7 +1728,7 @@ function EventsData.GetFixedEvents()
                     desc = "保守但安全",
                     effects = {
                         cash = -120,
-                        inflation_delta = 0.025,
+                        inflation_delta = 0.06,
                         security_bonus = 1,
                         modifiers = {
                             { target = "worker_morale", value = 5, duration = 0 },
@@ -1754,8 +1754,8 @@ function EventsData.GetFixedEvents()
                     desc = "避免轰炸但产量下降",
                     effects = {
                         cash = -150,
-                        inflation_delta = 0.04,
-                        inflation_drift_mod = 0.005,
+                        inflation_delta = 0.10,
+                        inflation_drift_mod = 0.015,
                         inflation_drift_duration = 4,
                         modifiers = {
                             { target = "mine_output_mult", value = -0.15, duration = 4 },
@@ -1769,7 +1769,7 @@ function EventsData.GetFixedEvents()
                     effects = {
                         cash = -300,
                         gold = -3,
-                        inflation_delta = 0.035,
+                        inflation_delta = 0.08,
                         modifiers = {
                             { target = "political_standing", value = 20, duration = 0 },
                             { target = "legitimacy", value = 15, duration = 0 },
@@ -1783,7 +1783,7 @@ function EventsData.GetFixedEvents()
                     effects = {
                         cash = -200,
                         gold = 5,
-                        inflation_delta = 0.03,
+                        inflation_delta = 0.07,
                         modifiers = {
                             { target = "foreign_assets", value = 1, duration = 0 },
                             { target = "total_assets", value = 400, duration = 0 },
@@ -1810,10 +1810,10 @@ function EventsData.GetFixedEvents()
                     desc = "损失账面财富，保住家族成员",
                     effects = {
                         cash = -350,
-                        inflation_delta = -0.04,
-                        inflation_drift_mod = -0.012,
+                        inflation_delta = -0.10,
+                        inflation_drift_mod = -0.030,
                         inflation_drift_duration = 8,
-                        asset_price_mod = -0.10,
+                        asset_price_mod = -0.20,
                         asset_price_duration = 8,
                         war_state = false,
                         modifiers = {
@@ -1827,7 +1827,7 @@ function EventsData.GetFixedEvents()
                     desc = "以专业能力保留影响力",
                     effects = {
                         cash = -120,
-                        inflation_delta = -0.02,
+                        inflation_delta = -0.06,
                         war_state = false,
                         modifiers = {
                             { target = "tech_bonus", value = 10, duration = 12 },
@@ -1840,7 +1840,7 @@ function EventsData.GetFixedEvents()
                     desc = "保留硬资产，长期审查风险上升",
                     effects = {
                         gold = 8,
-                        inflation_delta = -0.01,
+                        inflation_delta = -0.03,
                         war_state = false,
                         modifiers = {
                             { target = "shadow_income", value = 50, duration = 12 },
@@ -1971,7 +1971,7 @@ function EventsData.GetFixedEvents()
                     desc = "站队胜者，但短期经济受损",
                     effects = {
                         cash = -150,
-                        inflation_delta = 0.04,
+                        inflation_delta = 0.08,
                         modifiers = {
                             { target = "political_standing", value = 30, duration = 0 },
                             { target = "trade_income_mult", value = -0.15, duration = 8 },

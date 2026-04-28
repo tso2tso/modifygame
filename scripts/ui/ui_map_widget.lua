@@ -59,6 +59,28 @@ local FACTION_COLORS = {
 }
 
 -- ============================================================================
+-- 大国主权着色（占领方颜色覆盖）
+-- ============================================================================
+
+local SOVEREIGN_COLORS = {
+    -- 帝国时代
+    austria_hungary = { 160, 130,  80 },  -- 哈布斯堡金
+    germany         = { 100, 100,  85 },  -- 普鲁士灰
+    russia          = { 130, 110,  85 },  -- 沙俄棕
+    britain         = { 120,  90, 100 },  -- 帝国紫红
+    france          = {  80,  95, 140 },  -- 法兰西蓝
+    ottoman         = { 165, 140,  75 },  -- 奥斯曼金
+    italy           = {  95, 130,  85 },  -- 意大利绿
+    serbia          = { 170,  75,  75 },  -- 塞尔维亚红
+    -- 继承国 / 二战
+    nazi_germany    = { 140,  55,  55 },  -- 纳粹深红
+    soviet_union    = { 175,  60,  50 },  -- 苏联红
+    yugoslavia      = {  70, 105, 145 },  -- 南斯拉夫蓝
+    turkey          = { 155, 130,  70 },  -- 土耳其橄榄
+    tito_yugoslavia = {  85, 115, 140 },  -- 铁托蓝灰
+}
+
+-- ============================================================================
 -- §8.5 节点类型定义
 -- ============================================================================
 
@@ -176,6 +198,12 @@ function MapWidget:Init(props)
     -- 时代（影响底图风格）
     self.eraId_ = 1
 
+    -- 大国博弈：欧洲领土状态
+    self.europeState_ = nil
+
+    -- 大国博弈：前线数据
+    self.frontLineData_ = nil
+
     -- 拖拽状态
     self.pressing_      = false
     self.dragMoved_     = false
@@ -201,6 +229,8 @@ function MapWidget:SetRegions(regions) self.regions_ = regions or {} end
 function MapWidget:SetSelected(id) self.selectedNodeId_ = id end
 function MapWidget:GetSelected() return self.selectedNodeId_ end
 function MapWidget:SetEra(eraId) self.eraId_ = eraId or 1 end
+function MapWidget:SetEuropeState(europeData) self.europeState_ = europeData end
+function MapWidget:SetFrontLineData(data) self.frontLineData_ = data end
 
 --- 根据游戏状态动态解锁地图图层
 ---@param state table 游戏状态
@@ -441,10 +471,35 @@ function MapWidget:Render(nvg)
     -- ② 经纬网格
     self:_DrawGrid(nvg, mx, my, mw, mh, theme)
 
-    -- ③ 欧洲背景多边形
+    -- ③ 欧洲背景多边形（根据主权状态动态着色）
     for _, er in ipairs(EUROPE_REGIONS) do
         local c = er.color
-        self:_DrawPoly(nvg, er.poly, {c[1], c[2], c[3], theme.polyA}, {85,75,60,40}, 0.6, mx, my, mw, mh)
+        local fillA = theme.polyA
+        local strokeC = {85, 75, 60, 40}
+        local strokeW = 0.6
+
+        if self.europeState_ then
+            local cs = self.europeState_[er.id]
+            if cs and cs.sovereign ~= cs.original then
+                -- 被占领：使用占领方颜色，提高不透明度，红色边框
+                local sc = SOVEREIGN_COLORS[cs.sovereign]
+                if sc then
+                    c = sc
+                end
+                fillA = math.min(255, theme.polyA + 40)
+                strokeC = {180, 60, 50, 120}
+                strokeW = 1.2
+            elseif cs then
+                -- 自治：使用主权方颜色（可能与原始颜色不同，如继承国）
+                local sc = SOVEREIGN_COLORS[cs.sovereign]
+                if sc then
+                    c = sc
+                    fillA = math.min(255, theme.polyA + 10)
+                end
+            end
+        end
+
+        self:_DrawPoly(nvg, er.poly, {c[1], c[2], c[3], fillA}, strokeC, strokeW, mx, my, mw, mh)
     end
 
     -- ④ 控制层：游戏区域多边形按势力着色
@@ -467,9 +522,32 @@ function MapWidget:Render(nvg)
         self:_DrawSecurityLayer(nvg, mx, my, mw, mh)
     end
 
-    -- ⑥ 欧洲标签
+    -- ⑤.5 前线指示器（攻势箭头）
+    self:_DrawFrontLines(nvg, mx, my, mw, mh)
+
+    -- ⑥ 欧洲标签 + 占领指示器
     for _, er in ipairs(EUROPE_REGIONS) do
         self:_DrawContextLabel(nvg, er, mx, my, mw, mh, theme)
+
+        -- 占领指示器：缩放 >= 1.8 时显示
+        if self.europeState_ and self.zoom_ >= 1.8 then
+            local cs = self.europeState_[er.id]
+            if cs and cs.sovereign ~= cs.original then
+                local lp = er.labelPos
+                local sx, sy = self:_W2S(lp[1], lp[2], mx, my, mw, mh)
+                local tagSize = math.max(7, math.min(11, 6 + self.zoom_ * 0.8))
+                nvgFontFace(nvg, "sans")
+                nvgFontSize(nvg, tagSize)
+                nvgTextAlign(nvg, NVG_ALIGN_CENTER + NVG_ALIGN_TOP)
+                nvgFillColor(nvg, nvgRGBA(200, 70, 60, 200))
+                -- 显示占领方名称
+                local occupierLabel = cs.sovereign
+                if self.europeState_[cs.sovereign] then
+                    occupierLabel = self.europeState_[cs.sovereign].label
+                end
+                nvgText(nvg, sx, sy + tagSize * 0.6, "占" .. occupierLabel)
+            end
+        end
     end
 
     -- ⑦ 资源图层：在节点旁显示资源图标
@@ -563,6 +641,100 @@ function MapWidget:_DrawSecurityLayer(nvg, mx, my, mw, mh)
             elseif sec <= 4 then r, g, b = 80, 160, 80
             else                 r, g, b = 40, 140, 60 end
             self:_DrawPoly(nvg, gn.poly, {r, g, b, 50}, nil, 0, mx, my, mw, mh)
+        end
+    end
+end
+
+--- 前线指示器 — 大国攻势箭头
+function MapWidget:_DrawFrontLines(nvg, mx, my, mw, mh)
+    if not self.frontLineData_ or #self.frontLineData_ == 0 then return end
+
+    -- 构建区域中心位置查找表
+    local posLookup = {}
+    for _, er in ipairs(EUROPE_REGIONS) do
+        posLookup[er.id] = er.labelPos
+    end
+
+    local t = os.clock()
+
+    for _, fl in ipairs(self.frontLineData_) do
+        local fromPos = posLookup[fl.from_id]
+        local toPos = posLookup[fl.to_id]
+        if fromPos and toPos then
+            local sx1, sy1 = self:_W2S(fromPos[1], fromPos[2], mx, my, mw, mh)
+            local sx2, sy2 = self:_W2S(toPos[1], toPos[2], mx, my, mw, mh)
+
+            -- 使用攻方主权颜色
+            local c = SOVEREIGN_COLORS[fl.from_id] or {200, 60, 50}
+
+            -- 脉冲动画：每条前线有不同相位
+            local pulse = 0.55 + 0.45 * math.sin(t * 2.5 + (fl._phase or 0))
+            local alpha = math.floor(180 * pulse)
+
+            -- 计算方向
+            local dx = sx2 - sx1
+            local dy = sy2 - sy1
+            local len = math.sqrt(dx * dx + dy * dy)
+            if len < 5 then goto continue end
+
+            local ux, uy = dx / len, dy / len
+
+            -- 缩短起止点，避免覆盖标签
+            local shrink = math.min(len * 0.18, 16)
+            local ax1 = sx1 + ux * shrink
+            local ay1 = sy1 + uy * shrink
+            local ax2 = sx2 - ux * shrink
+            local ay2 = sy2 - uy * shrink
+
+            -- 主线（虚线效果通过多段短线模拟）
+            local segLen = math.max(4, 6 + self.zoom_ * 0.5)
+            local gapLen = math.max(3, 4 + self.zoom_ * 0.3)
+            local lineDx = ax2 - ax1
+            local lineDy = ay2 - ay1
+            local lineLen = math.sqrt(lineDx * lineDx + lineDy * lineDy)
+            local lux, luy = lineDx / math.max(1, lineLen), lineDy / math.max(1, lineLen)
+            local lineW = math.max(1.2, math.min(2.5, 1.0 + self.zoom_ * 0.25))
+
+            nvgStrokeColor(nvg, nvgRGBA(c[1], c[2], c[3], alpha))
+            nvgStrokeWidth(nvg, lineW)
+
+            local pos = 0
+            while pos < lineLen do
+                local segEnd = math.min(pos + segLen, lineLen)
+                nvgBeginPath(nvg)
+                nvgMoveTo(nvg, ax1 + lux * pos, ay1 + luy * pos)
+                nvgLineTo(nvg, ax1 + lux * segEnd, ay1 + luy * segEnd)
+                nvgStroke(nvg)
+                pos = segEnd + gapLen
+            end
+
+            -- 箭头（目标端）
+            local arrowLen = math.max(5, math.min(10, lineLen * 0.12))
+            local ahx = ax2 - ux * arrowLen
+            local ahy = ay2 - uy * arrowLen
+            local perpX, perpY = -uy * arrowLen * 0.45, ux * arrowLen * 0.45
+
+            nvgBeginPath(nvg)
+            nvgMoveTo(nvg, ax2, ay2)
+            nvgLineTo(nvg, ahx + perpX, ahy + perpY)
+            nvgLineTo(nvg, ahx - perpX, ahy - perpY)
+            nvgClosePath(nvg)
+            nvgFillColor(nvg, nvgRGBA(c[1], c[2], c[3], alpha))
+            nvgFill(nvg)
+
+            -- 中点 ⚔ 图标（缩放 >= 1.5 时显示）
+            if self.zoom_ >= 1.5 then
+                local midX = (ax1 + ax2) * 0.5
+                local midY = (ay1 + ay2) * 0.5
+                local iconSize = math.max(8, math.min(14, 7 + self.zoom_ * 1.0))
+                nvgFontFace(nvg, "sans")
+                nvgFontSize(nvg, iconSize)
+                nvgTextAlign(nvg, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)
+                nvgFillColor(nvg, nvgRGBA(c[1], c[2], c[3], math.min(255, alpha + 40)))
+                nvgText(nvg, midX, midY, "⚔")
+            end
+
+            ::continue::
         end
     end
 end

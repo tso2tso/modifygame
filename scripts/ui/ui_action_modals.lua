@@ -12,6 +12,8 @@ local TechData = require("data.tech_data")
 local Combat = require("systems.combat")
 local RegionsData = require("data.regions_data")
 
+local AudioManager = require("systems.audio_manager")
+
 local C = Config.COLORS
 local F = Config.FONT
 local S = Config.SIZE
@@ -37,6 +39,7 @@ end
 
 local function closeModal()
     if currentModal_ then
+        AudioManager.PlayUI("ui_modal_close")
         currentModal_:Close()
         -- onClose 回调负责 Destroy 和置 nil
     end
@@ -956,6 +959,7 @@ local function buildTechContent(state, accent, selectedTechId)
         width = "100%",
         maxHeight = 480,
         flexShrink = 1,
+        bounces = false,
         children = {
             UI.Panel {
                 width = "100%",
@@ -985,6 +989,8 @@ function ActionModals.ShowTechnology(state, accent, selectedTechId)
         ActionModals._UpdateTechDetail(state, accent, selectedTechId)
         return
     end
+
+    AudioManager.PlayUI("ui_modal_open")
 
     closeModal()
     techDetailContainer_ = nil
@@ -1037,6 +1043,7 @@ end
 -- 情报行动弹窗
 -- ============================================================================
 function ActionModals.ShowIntelligence(state, accent)
+    AudioManager.PlayUI("ui_modal_open")
     closeModal()
 
     local rows = {}
@@ -1185,6 +1192,7 @@ end
 -- 外交弹窗
 -- ============================================================================
 function ActionModals.ShowDiplomacy(state, accent)
+    AudioManager.PlayUI("ui_modal_open")
     closeModal()
 
     local rows = {}
@@ -1291,6 +1299,7 @@ end
 -- 资产交易弹窗
 -- ============================================================================
 function ActionModals.ShowTrade(state, accent)
+    AudioManager.PlayUI("ui_modal_open")
     closeModal()
 
     local rows = {}
@@ -1503,6 +1512,7 @@ function ActionModals._ShowList(title, rows)
         width = "100%",
         maxHeight = 480,
         flexShrink = 1,
+        bounces = false,
         children = {
             UI.Panel {
                 width = "100%",
