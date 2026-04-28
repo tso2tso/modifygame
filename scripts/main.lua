@@ -454,7 +454,11 @@ end
 ---@param eventType string
 ---@param eventData UpdateEventData
 function HandleUpdate(eventType, eventData)
-    -- 回合制，无需每帧逻辑
+    local dt = 0
+    if eventData and eventData["TimeStep"] then
+        dt = eventData["TimeStep"]:GetFloat()
+    end
+    Tutorial.Update(dt)
 end
 
 ---@param eventType string

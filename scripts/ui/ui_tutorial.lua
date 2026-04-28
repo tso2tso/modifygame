@@ -20,6 +20,7 @@ local TEXT_DIM    = { 150, 145, 135, 255 }
 local TEXT_XDIM   = { 120, 115, 105, 255 }
 local CARD_BG     = { 28, 26, 22, 245 }
 local CARD_BORDER = { 212, 175, 55, 60 }
+local FADE_DURATION = 0.45
 
 -- ============================================================================
 -- 引导步骤
@@ -49,24 +50,65 @@ local STEPS = {
     {
         type  = "guide",
         icon  = "💰",
-        title = "资源管理",
-        text  = "克朗是你的流动资金，黄金是硬通储备。\n每季度你有有限的行动点(AP)来执行各项操作。\n合理分配资源，是生存的第一课。",
-        hint  = "↑ 顶栏显示你的核心资源与行动点",
-        highlight = { area = "top", height = 56 },
+        title = "现金与硬通货",
+        text  = "顶栏中部记录家族的核心资源：现金用于雇人、投资和应急；黄金是更稳的储备。\n先盯住现金，别让季度结算把你拖进破产。",
+        hint  = "↑ 看这里：现金、黄金、产能、声望都在顶栏资源组里",
+        highlight = { left = 170, right = 58, top = 10, height = 56, label = "资源组" },
+        card = "middle",
+    },
+    {
+        type  = "guide",
+        icon  = "🎰",
+        title = "广告幸运事件",
+        text  = "现金旁的转盘按钮是激励广告入口。完整观看后会触发一次幸运事件，直接获得一笔克朗。\n每季度次数有限，连续观看奖励会衰减，适合在缺钱或开局加速时使用。",
+        hint  = "↑ 点现金旁边的 🎰，观看广告后领取随机现金奖励",
+        highlight = { right = 165, top = 20, width = 34, height = 34, label = "广告" },
+        card = "middle",
+    },
+    {
+        type  = "guide",
+        icon  = "⚙️",
+        title = "行动点 AP",
+        text  = "第二行显示本季还剩多少 AP。大多数关键操作都会消耗 AP。\n右侧的「+」按钮可以花现金购买临时 AP，但每季度也有次数限制。",
+        hint  = "↑ AP 数字、圆点和 + 按钮决定你这一季还能做多少事",
+        highlight = { left = 10, right = 82, top = 78, height = 40, label = "AP 与加点" },
+        card = "middle",
+    },
+    {
+        type  = "guide",
+        icon  = "📜",
+        title = "先处理当前事件",
+        text  = "首页最上方是待处理事件。主线事件会影响矿权、战争与政治环境。\n看到「处理」按钮时，建议先读完事件再安排经营动作。",
+        hint  = "↓ 事件卡片通常在首页第一屏顶部",
+        highlight = { left = 12, right = 12, top = 138, height = 92, label = "事件流" },
+        card = "lower",
     },
     {
         type  = "guide",
         icon  = "⛏️",
-        title = "开局建议",
-        text  = "前往「产业」页升级矿山，这是你最稳定的收入来源。\n关注「市场」页的黄金价格波动，低买高卖。\n留意随机事件，每个选择都会影响家族命运。",
+        title = "矿山是开局核心",
+        text  = "焦点卡展示第一座矿山的产量、工人、安全和维护费用。\n前期优先让矿山稳定赚钱，再考虑扩张或冒险。",
+        hint  = "↓ 这里是首页的矿山焦点卡",
+        highlight = { left = 12, right = 12, top = 238, height = 138, label = "矿山焦点" },
+        card = "upper",
+    },
+    {
+        type  = "guide",
+        icon  = "🧭",
+        title = "快速操作入口",
+        text  = "情报、科技、外交、资产交易都在首页快速操作里。\n这些按钮会打开具体弹窗，是你每季度最常用的经营入口。",
+        hint  = "↓ 点这里进入本季的关键经营动作",
+        highlight = { left = 12, right = 12, top = 386, height = 132, label = "快速操作" },
+        card = "upper",
     },
     {
         type  = "guide",
         icon  = "🌍",
-        title = "外交与军事",
-        text  = "你并非孤军奋战——本地望族、外国资本都在争夺控制权。\n在「世界」页管理外交关系，在「军事」页保卫家业。\n乱世之中，合纵连横方能立于不败。",
-        hint  = "↓ 底部标签页切换不同模块",
-        highlight = { area = "bottom", height = 56 },
+        title = "底部标签页",
+        text  = "底部导航会进入更细的系统：家族安排成员，产业升级矿山，市场买卖黄金和股票，武装保卫矿区，世界页处理大国关系。",
+        hint  = "↓ 产业、市场、武装、世界都在底部标签栏",
+        highlight = { left = 0, right = 0, bottom = 0, height = 64, label = "底部导航" },
+        card = "middle",
     },
 }
 
@@ -78,6 +120,10 @@ local STEPS = {
 local uiRoot_ = nil
 ---@type table|nil 当前步骤的覆盖面板
 local stepPanel_ = nil
+---@type table|nil 淡出中的旧故事面板
+local fadingPanel_ = nil
+---@type table|nil 淡入淡出状态
+local fade_ = nil
 ---@type number
 local currentStep_ = 0
 ---@type function|nil
@@ -98,6 +144,8 @@ end
 function Tutorial.Start(onComplete)
     onComplete_ = onComplete
     currentStep_ = 0
+    fade_ = nil
+    fadingPanel_ = nil
 
     -- 预加载故事图片，避免切换时闪烁
     for _, step in ipairs(STEPS) do
@@ -109,11 +157,38 @@ function Tutorial.Start(onComplete)
     Tutorial._ShowNext()
 end
 
+--- 每帧更新，用于故事页之间的淡入淡出
+---@param dt number
+function Tutorial.Update(dt)
+    if not fade_ then return end
+
+    fade_.elapsed = fade_.elapsed + math.max(dt or 0, 0)
+    local t = math.min(fade_.elapsed / FADE_DURATION, 1)
+    local eased = 1 - (1 - t) * (1 - t)
+
+    if fade_.newPanel and fade_.newPanel.SetStyle then
+        fade_.newPanel:SetStyle({ opacity = eased })
+    end
+    if fade_.oldPanel and fade_.oldPanel.SetStyle then
+        fade_.oldPanel:SetStyle({ opacity = 1 - eased })
+    end
+
+    if t >= 1 then
+        if fade_.oldPanel then
+            fade_.oldPanel:Destroy()
+        end
+        fadingPanel_ = nil
+        fade_ = nil
+    end
+end
+
 -- ============================================================================
--- 步骤切换（先挂新面板再销毁旧面板，防止闪烁）
+-- 步骤切换
 -- ============================================================================
 
 function Tutorial._ShowNext()
+    if fade_ then return end
+
     currentStep_ = currentStep_ + 1
 
     if currentStep_ > #STEPS then
@@ -133,12 +208,26 @@ function Tutorial._ShowNext()
         newPanel = Tutorial._BuildGuideSlide(step, indicator, isLast)
     end
 
-    -- 先挂新面板，再销毁旧面板 → 无缝切换
+    local oldPanel = stepPanel_
+
     if uiRoot_ then
         uiRoot_:AddChild(newPanel)
     end
-    if stepPanel_ then
-        stepPanel_:Destroy()
+
+    if oldPanel and step.type == "story" then
+        fadingPanel_ = oldPanel
+        stepPanel_ = newPanel
+        newPanel:SetStyle({ opacity = 0 })
+        fade_ = {
+            oldPanel = oldPanel,
+            newPanel = newPanel,
+            elapsed = 0,
+        }
+        return
+    end
+
+    if oldPanel then
+        oldPanel:Destroy()
     end
     stepPanel_ = newPanel
 end
@@ -212,17 +301,61 @@ function Tutorial._BuildGuideSlide(step, indicator, isLast)
         local hl = step.highlight
         local frameProps = {
             position = "absolute",
-            left = 0, right = 0,
+            left = hl.left,
+            right = hl.right,
+            top = hl.top,
+            bottom = hl.bottom,
+            width = hl.width,
             height = hl.height or 56,
             borderColor = { 212, 175, 55, 160 },
             borderWidth = 2,
             backgroundColor = { 255, 255, 255, 12 },
+            borderRadius = 8,
+            pointerEvents = "none",
         }
         if hl.area == "top" then
+            frameProps.left = 0
+            frameProps.right = 0
             frameProps.top = 0
         elseif hl.area == "bottom" then
+            frameProps.left = 0
+            frameProps.right = 0
             frameProps.bottom = 0
         end
+
+        local frameChildren = {
+            UI.Panel {
+                position = "absolute",
+                left = 3, right = 3, top = 3, bottom = 3,
+                borderColor = { 255, 230, 170, 80 },
+                borderWidth = 1,
+                borderRadius = 6,
+                pointerEvents = "none",
+            },
+        }
+
+        if hl.label then
+            table.insert(frameChildren, UI.Panel {
+                position = "absolute",
+                left = 8,
+                top = -10,
+                paddingHorizontal = 6,
+                paddingVertical = 2,
+                borderRadius = 3,
+                backgroundColor = { 212, 175, 55, 230 },
+                children = {
+                    UI.Label {
+                        text = hl.label,
+                        fontSize = 10,
+                        fontWeight = "bold",
+                        fontColor = { 18, 16, 14, 255 },
+                        pointerEvents = "none",
+                    },
+                },
+            })
+        end
+
+        frameProps.children = frameChildren
         table.insert(children, UI.Panel(frameProps))
     end
 
@@ -286,6 +419,16 @@ function Tutorial._BuildGuideSlide(step, indicator, isLast)
         children = cardChildren,
     }
 
+    local topSpacer = 1
+    local bottomSpacer = 1
+    if step.card == "upper" then
+        topSpacer = 0.25
+        bottomSpacer = 1.75
+    elseif step.card == "lower" then
+        topSpacer = 1.75
+        bottomSpacer = 0.25
+    end
+
     -- 布局容器
     local layout = UI.Panel {
         position = "absolute",
@@ -294,11 +437,11 @@ function Tutorial._BuildGuideSlide(step, indicator, isLast)
         paddingHorizontal = 24,
         children = {
             -- 上部弹性空间
-            UI.Panel { flexGrow = 1 },
+            UI.Panel { flexGrow = topSpacer },
             -- 卡片
             card,
             -- 下部弹性空间
-            UI.Panel { flexGrow = 1 },
+            UI.Panel { flexGrow = bottomSpacer },
             -- 按钮行
             Tutorial._BuildButtons(indicator, isLast),
             -- 底部留白（给 Tab 栏留空间）
@@ -369,12 +512,19 @@ end
 -- ============================================================================
 
 function Tutorial._Finish()
+    fade_ = nil
+    if fadingPanel_ then
+        fadingPanel_:Destroy()
+        fadingPanel_ = nil
+    end
     if stepPanel_ then
         stepPanel_:Destroy()
         stepPanel_ = nil
     end
-    if onComplete_ then
-        onComplete_()
+    local complete = onComplete_
+    onComplete_ = nil
+    if complete then
+        complete()
     end
 end
 
