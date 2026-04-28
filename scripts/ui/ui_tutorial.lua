@@ -53,7 +53,7 @@ local STEPS = {
         title = "现金与硬通货",
         text  = "顶栏中部记录家族的核心资源：现金用于雇人、投资和应急；黄金是更稳的储备。\n先盯住现金，别让季度结算把你拖进破产。",
         hint  = "↑ 看这里：现金、黄金、产能、声望都在顶栏资源组里",
-        highlight = { left = 170, right = 58, top = 10, height = 56, label = "资源组" },
+        highlight = { left = 188, right = 58, top = 12, height = 48 },
         card = "middle",
     },
     {
@@ -62,7 +62,7 @@ local STEPS = {
         title = "广告幸运事件",
         text  = "现金旁的转盘按钮是激励广告入口。完整观看后会触发一次幸运事件，直接获得一笔克朗。\n每季度次数有限，连续观看奖励会衰减，适合在缺钱或开局加速时使用。",
         hint  = "↑ 点现金旁边的 🎰，观看广告后领取随机现金奖励",
-        highlight = { right = 165, top = 20, width = 34, height = 34, label = "广告" },
+        highlight = { right = 170, top = 22, width = 30, height = 30 },
         card = "middle",
     },
     {
@@ -71,7 +71,7 @@ local STEPS = {
         title = "行动点 AP",
         text  = "第二行显示本季还剩多少 AP。大多数关键操作都会消耗 AP。\n右侧的「+」按钮可以花现金购买临时 AP，但每季度也有次数限制。",
         hint  = "↑ AP 数字、圆点和 + 按钮决定你这一季还能做多少事",
-        highlight = { left = 10, right = 82, top = 78, height = 40, label = "AP 与加点" },
+        highlight = { left = 10, right = 58, top = 76, height = 48 },
         card = "middle",
     },
     {
@@ -80,7 +80,7 @@ local STEPS = {
         title = "先处理当前事件",
         text  = "首页最上方是待处理事件。主线事件会影响矿权、战争与政治环境。\n看到「处理」按钮时，建议先读完事件再安排经营动作。",
         hint  = "↓ 事件卡片通常在首页第一屏顶部",
-        highlight = { left = 12, right = 12, top = 138, height = 92, label = "事件流" },
+        highlight = { left = 10, right = 10, top = 136, height = 112 },
         card = "lower",
     },
     {
@@ -89,7 +89,7 @@ local STEPS = {
         title = "矿山是开局核心",
         text  = "焦点卡展示第一座矿山的产量、工人、安全和维护费用。\n前期优先让矿山稳定赚钱，再考虑扩张或冒险。",
         hint  = "↓ 这里是首页的矿山焦点卡",
-        highlight = { left = 12, right = 12, top = 238, height = 138, label = "矿山焦点" },
+        highlight = { left = 10, right = 10, top = 248, height = 228 },
         card = "upper",
     },
     {
@@ -98,7 +98,7 @@ local STEPS = {
         title = "快速操作入口",
         text  = "情报、科技、外交、资产交易都在首页快速操作里。\n这些按钮会打开具体弹窗，是你每季度最常用的经营入口。",
         hint  = "↓ 点这里进入本季的关键经营动作",
-        highlight = { left = 12, right = 12, top = 386, height = 132, label = "快速操作" },
+        highlight = { left = 10, right = 10, top = 512, height = 132 },
         card = "upper",
     },
     {
@@ -107,7 +107,7 @@ local STEPS = {
         title = "底部标签页",
         text  = "底部导航会进入更细的系统：家族安排成员，产业升级矿山，市场买卖黄金和股票，武装保卫矿区，世界页处理大国关系。",
         hint  = "↓ 产业、市场、武装、世界都在底部标签栏",
-        highlight = { left = 0, right = 0, bottom = 0, height = 64, label = "底部导航" },
+        highlight = { left = 0, right = 0, bottom = 0, height = 64 },
         card = "middle",
     },
 }
@@ -323,7 +323,7 @@ function Tutorial._BuildGuideSlide(step, indicator, isLast)
             frameProps.bottom = 0
         end
 
-        local frameChildren = {
+        frameProps.children = {
             UI.Panel {
                 position = "absolute",
                 left = 3, right = 3, top = 3, bottom = 3,
@@ -333,29 +333,6 @@ function Tutorial._BuildGuideSlide(step, indicator, isLast)
                 pointerEvents = "none",
             },
         }
-
-        if hl.label then
-            table.insert(frameChildren, UI.Panel {
-                position = "absolute",
-                left = 8,
-                top = -10,
-                paddingHorizontal = 6,
-                paddingVertical = 2,
-                borderRadius = 3,
-                backgroundColor = { 212, 175, 55, 230 },
-                children = {
-                    UI.Label {
-                        text = hl.label,
-                        fontSize = 10,
-                        fontWeight = "bold",
-                        fontColor = { 18, 16, 14, 255 },
-                        pointerEvents = "none",
-                    },
-                },
-            })
-        end
-
-        frameProps.children = frameChildren
         table.insert(children, UI.Panel(frameProps))
     end
 
