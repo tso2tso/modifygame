@@ -307,6 +307,15 @@ end
 
 function MilitaryPage.Refresh(root, state)
     stateRef_ = state
+    local content = root and root:FindById("militaryContent")
+    if not content then return false end
+
+    local nextContent = MilitaryPage._BuildContent(state)
+    content:ClearChildren()
+    for _, child in ipairs(nextContent:GetChildren()) do
+        content:AddChild(child)
+    end
+    return true
 end
 
 return MilitaryPage

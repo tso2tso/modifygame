@@ -1644,6 +1644,12 @@ end
 
 function WorldPage.Refresh(root, state)
     stateRef_ = state
+    if root then
+        contentRoot_ = contentRoot_ or root:FindById("worldContent")
+        tabContentPanel_ = tabContentPanel_ or root:FindById("worldTabContent")
+    end
+    if not contentRoot_ or not tabContentPanel_ then return false end
+
     if mapWidget_ then
         mapWidget_:SetRegions(state.regions)
         mapWidget_:UpdateUnlocks(state)
@@ -1655,7 +1661,11 @@ function WorldPage.Refresh(root, state)
     -- 如果当前在地图页且有选中节点，刷新抽屉
     if activeSubTab_ == "map" and selectedNodeId_ then
         WorldPage._RefreshDrawer(state)
+    else
+        WorldPage._RefreshTabBar()
+        WorldPage._SwitchSubTab(state, activeSubTab_)
     end
+    return true
 end
 
 return WorldPage
