@@ -23,14 +23,6 @@ local C = Config.COLORS
 local F = Config.FONT
 local S = Config.SIZE
 
-local PAGE_MODULES = {
-    family = FamilyPage,
-    industry = IndustryPage,
-    market = MarketPage,
-    military = MilitaryPage,
-    world = WorldPage,
-}
-
 local UIManager = {}
 
 ---@type table UI 根控件
@@ -318,33 +310,26 @@ function UIManager._ShowView(viewId)
     if viewId == "dashboard" then
         if dashboardPage_ and dashboardPage_._dirty then
             dashboardPage_._dirty = false
-            local refreshed = Dashboard.Refresh(dashboardPage_, stateRef_)
-            if not refreshed then
-                dashboardPage_:ClearChildren()
-                dashboardPage_:AddChild(Dashboard.Create(stateRef_, {
-                    onEndTurn = onEndTurn_,
-                    onProcessEvent = function(index)
-                        if onProcessEvent_ then onProcessEvent_(index) end
-                    end,
-                    onQuickAction = function(actionId)
-                        UIManager._OnQuickAction(actionId)
-                    end,
-                    onStateChanged = function()
-                        UIManager.RefreshAll(stateRef_)
-                    end,
-                }))
-            end
+            dashboardPage_:ClearChildren()
+            dashboardPage_:AddChild(Dashboard.Create(stateRef_, {
+                onEndTurn = onEndTurn_,
+                onProcessEvent = function(index)
+                    if onProcessEvent_ then onProcessEvent_(index) end
+                end,
+                onQuickAction = function(actionId)
+                    UIManager._OnQuickAction(actionId)
+                end,
+                onStateChanged = function()
+                    UIManager.RefreshAll(stateRef_)
+                end,
+            }))
         end
     else
         local page = pages_[viewId]
         if page and page._dirty then
             page._dirty = false
-            local pageModule = PAGE_MODULES[viewId]
-            local refreshed = pageModule and pageModule.Refresh and pageModule.Refresh(page, stateRef_)
-            if not refreshed then
-                page:ClearChildren()
-                page:AddChild(UIManager._CreatePageContent(viewId, stateRef_))
-            end
+            page:ClearChildren()
+            page:AddChild(UIManager._CreatePageContent(viewId, stateRef_))
         end
     end
 

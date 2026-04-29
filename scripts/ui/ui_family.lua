@@ -476,15 +476,6 @@ end
 ---@param state table
 function FamilyPage.Refresh(root, state)
     stateRef_ = state
-    local content = root and root:FindById("familyContent")
-    if not content then return false end
-
-    local nextContent = FamilyPage._BuildContent(state)
-    content:ClearChildren()
-    for _, child in ipairs(nextContent:GetChildren()) do
-        content:AddChild(child)
-    end
-    return true
 end
 
 return FamilyPage

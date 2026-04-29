@@ -1237,15 +1237,6 @@ end
 
 function MarketPage.Refresh(root, state)
     stateRef_ = state
-    local content = root and root:FindById("marketContent")
-    if not content then return false end
-
-    local nextContent = MarketPage._BuildContent(state)
-    content:ClearChildren()
-    for _, child in ipairs(nextContent:GetChildren()) do
-        content:AddChild(child)
-    end
-    return true
 end
 
 return MarketPage

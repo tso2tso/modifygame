@@ -35,7 +35,8 @@ function Dashboard.Create(state, callbacks)
     return Dashboard._BuildContent(state)
 end
 
-function Dashboard._BuildChildren(state)
+--- 构建全部内容
+function Dashboard._BuildContent(state)
     local era = Config.GetEraByYear(state.year)
     local children = {}
 
@@ -62,30 +63,13 @@ function Dashboard._BuildChildren(state)
     -- 结束回合
     table.insert(children, Dashboard._EndTurnButton(state, era))
 
-    return children
-end
-
---- 构建全部内容
-function Dashboard._BuildContent(state)
     return UI.Panel {
         id = "dashboardContent",
         width = "100%",
         flexDirection = "column",
         gap = S.section_gap,
-        children = Dashboard._BuildChildren(state),
+        children = children,
     }
-end
-
-function Dashboard.Refresh(root, state)
-    stateRef_ = state
-    local content = root and root:FindById("dashboardContent")
-    if not content then return false end
-
-    content:ClearChildren()
-    for _, child in ipairs(Dashboard._BuildChildren(state)) do
-        content:AddChild(child)
-    end
-    return true
 end
 
 -- ============================================================================

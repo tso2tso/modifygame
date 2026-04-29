@@ -756,15 +756,6 @@ end
 ---@param state table
 function IndustryPage.Refresh(root, state)
     stateRef_ = state
-    local content = root and root:FindById("industryContent")
-    if not content then return false end
-
-    local nextContent = IndustryPage._BuildContent(state)
-    content:ClearChildren()
-    for _, child in ipairs(nextContent:GetChildren()) do
-        content:AddChild(child)
-    end
-    return true
 end
 
 return IndustryPage
