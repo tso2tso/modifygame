@@ -24,6 +24,8 @@ local Dashboard = {}
 local stateRef_ = nil
 ---@type table 回调集合
 local callbacks_ = {}
+---@type table|nil 仪表盘内容面板引用（用于就地重建）
+local contentPanel_ = nil
 
 --- 创建仪表盘内容
 ---@param state table
@@ -32,43 +34,71 @@ local callbacks_ = {}
 function Dashboard.Create(state, callbacks)
     stateRef_ = state
     callbacks_ = callbacks or {}
-    return Dashboard._BuildContent(state)
+    contentPanel_ = Dashboard._BuildContent(state)
+    return contentPanel_
 end
 
---- 构建全部内容
-function Dashboard._BuildContent(state)
+--- 就地重建仪表盘内容（不替换 ScrollView 的子节点，仅替换内容面板的子节点）
+--- 这样 ScrollView 的原生滚动偏移不会被重置
+---@return boolean ok
+function Dashboard.RebuildContent(state, callbacks)
+    stateRef_ = state
+    callbacks_ = callbacks or {}
+    if not contentPanel_ then return false end
+
+    local newChildren = Dashboard._BuildChildrenList(state)
+
+    -- 快照旧子节点
+    local oldChildren = contentPanel_:GetChildren()
+    local oldList = {}
+    if oldChildren then
+        for _, c in ipairs(oldChildren) do
+            table.insert(oldList, c)
+        end
+    end
+    -- 先添加新子节点（容器始终有内容）
+    for _, child in ipairs(newChildren) do
+        contentPanel_:AddChild(child)
+    end
+    -- 再销毁旧子节点
+    for _, c in ipairs(oldList) do
+        c:Destroy()
+    end
+    return true
+end
+
+--- 构建子节点列表（不含包装面板）
+function Dashboard._BuildChildrenList(state)
     local era = Config.GetEraByYear(state.year)
     local children = {}
 
-    -- 本季动态（战斗结果、AI行动、警告）
     local msgSection = Dashboard._TurnMessagesSection(state, era)
     if msgSection then
         table.insert(children, msgSection)
     end
-    -- 合作度状态栏（大国系统激活后显示）
     local collabBar = Dashboard._CollaborationBar(state)
     if collabBar then
         table.insert(children, collabBar)
     end
-    -- 事件流
     table.insert(children, Dashboard._EventSection(state, era))
-    -- 焦点卡片（纯展示，无操作按钮）
     if #state.mines > 0 then
         table.insert(children, Dashboard._FocusCard(state, state.mines[1], era))
     end
-    -- 快速操作（仅消耗 AP 的 4 项）
     table.insert(children, Dashboard._QuickActions(state, era))
-    -- 本季概览（紧凑单行）
     table.insert(children, Dashboard._SeasonOverview(state))
-    -- 结束回合
     table.insert(children, Dashboard._EndTurnButton(state, era))
 
+    return children
+end
+
+--- 构建全部内容（包装面板 + 子节点）
+function Dashboard._BuildContent(state)
     return UI.Panel {
         id = "dashboardContent",
         width = "100%",
         flexDirection = "column",
         gap = S.section_gap,
-        children = children,
+        children = Dashboard._BuildChildrenList(state),
     }
 end
 

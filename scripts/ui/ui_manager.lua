@@ -329,7 +329,7 @@ function UIManager._ShowView(viewId)
     if viewId == "dashboard" then
         if dashboardPage_ and dashboardPage_._dirty then
             dashboardPage_._dirty = false
-            UIManager._SwapScrollContent(dashboardPage_, Dashboard.Create(stateRef_, {
+            local dashCallbacks = {
                 onEndTurn = onEndTurn_,
                 onProcessEvent = function(index)
                     if onProcessEvent_ then onProcessEvent_(index) end
@@ -340,7 +340,14 @@ function UIManager._ShowView(viewId)
                 onStateChanged = function()
                     UIManager.RefreshAll(stateRef_)
                 end,
-            }))
+            }
+            -- 就地重建：仅替换内容面板的子节点，不动 ScrollView 的子树
+            -- 这样 ScrollView 的原生滚动偏移不会被重置
+            if not Dashboard.RebuildContent(stateRef_, dashCallbacks) then
+                -- 回退：首次创建或引用丢失时做完整重建
+                UIManager._SwapScrollContent(dashboardPage_,
+                    Dashboard.Create(stateRef_, dashCallbacks))
+            end
         end
     else
         local page = pages_[viewId]
