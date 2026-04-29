@@ -103,9 +103,6 @@ function UIManager.Create(state, callbacks)
                 onStateChanged = function()
                     UIManager.RefreshAll(stateRef_)
                 end,
-                onTopBarRefresh = function()
-                    UIManager.RefreshTopBarOnly(stateRef_)
-                end,
             }),
 
             -- 内容区域（仪表盘 + 深度页共享）
@@ -158,9 +155,6 @@ function UIManager._CreateContentArea(state)
                 onStateChanged = function()
                     UIManager.RefreshAll(stateRef_)
                 end,
-                onTopBarRefresh = function()
-                    UIManager.RefreshTopBarOnly(stateRef_)
-                end,
             }),
         },
     }
@@ -201,9 +195,6 @@ function UIManager._CreatePageContent(tabId, state)
     local callbacks = {
         onStateChanged = function()
             UIManager.RefreshAll(stateRef_)
-        end,
-        onTopBarRefresh = function()
-            UIManager.RefreshTopBarOnly(stateRef_)
         end,
         onSwitchTab = function(targetTabId)
             UIManager.SwitchTab(targetTabId)
@@ -348,9 +339,6 @@ function UIManager._ShowView(viewId)
                 end,
                 onStateChanged = function()
                     UIManager.RefreshAll(stateRef_)
-                end,
-                onTopBarRefresh = function()
-                    UIManager.RefreshTopBarOnly(stateRef_)
                 end,
             }))
         end
@@ -512,14 +500,6 @@ function UIManager.RefreshAll(state)
     refreshPending_ = true
 
     settingsDrawer_ = nil
-end
-
---- 轻量刷新：仅更新 TopBar，不触发页面重建
---- 用于雇佣工人、购买 AP 等高频操作，避免 ScrollView 重建导致的跳顶闪烁
-function UIManager.RefreshTopBarOnly(state)
-    stateRef_ = state or stateRef_
-    if not uiRoot_ then return end
-    TopBar.Refresh(uiRoot_, stateRef_)
 end
 
 --- 每帧调用：如果有待处理的延迟刷新，执行实际页面重建
