@@ -698,7 +698,10 @@ function Dashboard._FocusCard(state, mine, era)
                         borderRadius = S.radius_btn,
                         onClick = function(self)
                             self.props.disabled = true
-                            Actions.HireWorkers(stateRef_, 5, callbacks_.onStateChanged)
+                            local ok = Actions.HireWorkers(stateRef_, 5)
+                            if ok and callbacks_.onTopBarRefresh then
+                                callbacks_.onTopBarRefresh()
+                            end
                         end,
                     },
                 },

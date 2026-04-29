@@ -24,14 +24,17 @@ local IndustryPage = {}
 local stateRef_ = nil
 ---@type function|nil 状态变化回调
 local onStateChanged_ = nil
+---@type function|nil 轻量刷新回调（仅 TopBar）
+local onTopBarRefresh_ = nil
 
 --- 创建产业页完整内容
 ---@param state table
----@param callbacks table { onStateChanged = function }
+---@param callbacks table { onStateChanged = function, onTopBarRefresh = function }
 ---@return table widget
 function IndustryPage.Create(state, callbacks)
     stateRef_ = state
     onStateChanged_ = callbacks and callbacks.onStateChanged
+    onTopBarRefresh_ = callbacks and callbacks.onTopBarRefresh
 
     return IndustryPage._BuildContent(state)
 end
@@ -423,7 +426,10 @@ function IndustryPage._CreateWorkerCard(state)
                         borderRadius = S.radius_btn,
                         onClick = function(self)
                             self.props.disabled = true
-                            Actions.HireWorkers(stateRef_, 5, onStateChanged_)
+                            local ok = Actions.HireWorkers(stateRef_, 5)
+                            if ok and onTopBarRefresh_ then
+                                onTopBarRefresh_()
+                            end
                         end,
                     },
                     UI.Button {

@@ -103,6 +103,9 @@ function UIManager.Create(state, callbacks)
                 onStateChanged = function()
                     UIManager.RefreshAll(stateRef_)
                 end,
+                onTopBarRefresh = function()
+                    UIManager.RefreshTopBarOnly(stateRef_)
+                end,
             }),
 
             -- 内容区域（仪表盘 + 深度页共享）
@@ -155,6 +158,9 @@ function UIManager._CreateContentArea(state)
                 onStateChanged = function()
                     UIManager.RefreshAll(stateRef_)
                 end,
+                onTopBarRefresh = function()
+                    UIManager.RefreshTopBarOnly(stateRef_)
+                end,
             }),
         },
     }
@@ -195,6 +201,9 @@ function UIManager._CreatePageContent(tabId, state)
     local callbacks = {
         onStateChanged = function()
             UIManager.RefreshAll(stateRef_)
+        end,
+        onTopBarRefresh = function()
+            UIManager.RefreshTopBarOnly(stateRef_)
         end,
         onSwitchTab = function(targetTabId)
             UIManager.SwitchTab(targetTabId)
@@ -297,21 +306,22 @@ function UIManager.BackToDashboard()
     UIManager._ShowView("dashboard")
 end
 
---- 保存 ScrollView 内部滚动状态（offset、velocity 等）
-function UIManager._SaveScrollState(scrollView)
-    if not scrollView or not scrollView.state then return nil end
-    local saved = {}
-    for k, v in pairs(scrollView.state) do
-        saved[k] = v
+--- 交换 ScrollView 内容：先添加新内容，再销毁旧内容
+--- 确保 ScrollView 始终有子节点，防止原生滚动偏移被重置（避免跳顶闪烁）
+function UIManager._SwapScrollContent(scrollView, newContent)
+    -- 快照旧子节点引用（复制列表，避免迭代中修改）
+    local oldChildren = scrollView:GetChildren()
+    local oldList = {}
+    if oldChildren then
+        for _, c in ipairs(oldChildren) do
+            table.insert(oldList, c)
+        end
     end
-    return saved
-end
-
---- 恢复 ScrollView 内部滚动状态，防止 ClearChildren 导致的跳顶闪烁
-function UIManager._RestoreScrollState(scrollView, saved)
-    if not scrollView or not scrollView.state or not saved then return end
-    for k, v in pairs(saved) do
-        scrollView.state[k] = v
+    -- 先插入新内容（ScrollView 始终非空）
+    scrollView:AddChild(newContent)
+    -- 再销毁旧内容
+    for _, c in ipairs(oldList) do
+        c:Destroy()
     end
 end
 
@@ -328,9 +338,7 @@ function UIManager._ShowView(viewId)
     if viewId == "dashboard" then
         if dashboardPage_ and dashboardPage_._dirty then
             dashboardPage_._dirty = false
-            local scrollState = UIManager._SaveScrollState(dashboardPage_)
-            dashboardPage_:ClearChildren()
-            dashboardPage_:AddChild(Dashboard.Create(stateRef_, {
+            UIManager._SwapScrollContent(dashboardPage_, Dashboard.Create(stateRef_, {
                 onEndTurn = onEndTurn_,
                 onProcessEvent = function(index)
                     if onProcessEvent_ then onProcessEvent_(index) end
@@ -341,17 +349,16 @@ function UIManager._ShowView(viewId)
                 onStateChanged = function()
                     UIManager.RefreshAll(stateRef_)
                 end,
+                onTopBarRefresh = function()
+                    UIManager.RefreshTopBarOnly(stateRef_)
+                end,
             }))
-            UIManager._RestoreScrollState(dashboardPage_, scrollState)
         end
     else
         local page = pages_[viewId]
         if page and page._dirty then
             page._dirty = false
-            local scrollState = UIManager._SaveScrollState(page)
-            page:ClearChildren()
-            page:AddChild(UIManager._CreatePageContent(viewId, stateRef_))
-            UIManager._RestoreScrollState(page, scrollState)
+            UIManager._SwapScrollContent(page, UIManager._CreatePageContent(viewId, stateRef_))
         end
     end
 
@@ -505,6 +512,14 @@ function UIManager.RefreshAll(state)
     refreshPending_ = true
 
     settingsDrawer_ = nil
+end
+
+--- 轻量刷新：仅更新 TopBar，不触发页面重建
+--- 用于雇佣工人、购买 AP 等高频操作，避免 ScrollView 重建导致的跳顶闪烁
+function UIManager.RefreshTopBarOnly(state)
+    stateRef_ = state or stateRef_
+    if not uiRoot_ then return end
+    TopBar.Refresh(uiRoot_, stateRef_)
 end
 
 --- 每帧调用：如果有待处理的延迟刷新，执行实际页面重建

@@ -21,8 +21,10 @@ local TopBar = {}
 local onSettings_ = nil
 ---@type function|nil
 local onHome_ = nil
----@type function|nil 状态变化回调（AP 购买后通知 UIManager 重建）
+---@type function|nil 状态变化回调（重操作：结束回合等触发页面重建）
 local onStateChanged_ = nil
+---@type function|nil 轻量刷新回调（仅 TopBar，AP 购买等高频操作）
+local onTopBarRefresh_ = nil
 ---@type table 游戏状态引用（用于 + 按钮）
 local stateRef_ = nil
 
@@ -38,6 +40,7 @@ function TopBar.Create(state, callbacks)
     onSettings_ = callbacks and callbacks.onSettings
     onHome_ = callbacks and callbacks.onHome
     onStateChanged_ = callbacks and callbacks.onStateChanged
+    onTopBarRefresh_ = callbacks and callbacks.onTopBarRefresh
     stateRef_ = state
 
     local era = Config.GetEraByYear(state.year)
@@ -649,7 +652,8 @@ function TopBar._OnBuyAP()
     stateRef_.ap.bonus_used = used + 1
     GameState.AddLog(stateRef_, string.format("购买 1 AP（花费 %d）", cfg.cost_per_ap))
     UI.Toast.Show("+1 AP", { variant = "success", duration = 1.2 })
-    if onStateChanged_ then onStateChanged_() end
+    if onTopBarRefresh_ then onTopBarRefresh_()
+    elseif onStateChanged_ then onStateChanged_() end
 end
 
 -- ============================================================================
