@@ -168,8 +168,9 @@ function IndustryPage._CreateMineCard(state, mine)
     -- 升级费用
     local upgradeCost = math.floor(BM.upgrade_cost * mine.level * GameState.GetAssetPriceFactor(state))
     local reserveDepleted = goldReserve <= 0 and silverReserve <= 0
+    local availAP = state.ap.current + (state.ap.temp or 0)
     local canUpgrade = mine.level < BM.max_level and state.cash >= upgradeCost
-        and state.ap.current >= 1 and not reserveDepleted
+        and availAP >= 1 and not reserveDepleted
 
     return UI.Panel {
         id = "mineCard_" .. mine.id,
@@ -312,6 +313,7 @@ function IndustryPage._CreateMineCard(state, mine)
                         fontColor = canUpgrade and C.bg_base or C.text_muted,
                         borderRadius = S.radius_btn,
                         onClick = function(self)
+                            self.props.disabled = true
                             Actions.UpgradeMine(stateRef_, mine, onStateChanged_)
                         end,
                     },
@@ -415,11 +417,12 @@ function IndustryPage._CreateWorkerCard(state)
                         height = S.btn_small_height,
                         flexGrow = 1,
                         flexBasis = 0,
-                        variant = (state.cash >= hireCost * 5 and state.ap.current >= 1)
+                        variant = (state.cash >= hireCost * 5 and (state.ap.current + (state.ap.temp or 0)) >= 1)
                             and "primary" or "outlined",
-                        disabled = state.cash < hireCost * 5 or state.ap.current < 1,
+                        disabled = state.cash < hireCost * 5 or (state.ap.current + (state.ap.temp or 0)) < 1,
                         borderRadius = S.radius_btn,
                         onClick = function(self)
+                            self.props.disabled = true
                             Actions.HireWorkers(stateRef_, 5, onStateChanged_)
                         end,
                     },
@@ -434,6 +437,7 @@ function IndustryPage._CreateWorkerCard(state)
                         disabled = state.workers.hired < 5,
                         borderRadius = S.radius_btn,
                         onClick = function(self)
+                            self.props.disabled = true
                             IndustryPage._OnFireWorkers(5)
                         end,
                     },
@@ -506,6 +510,7 @@ function IndustryPage._CreateActionCard(state)
         fontColor = canSell and C.bg_base or C.text_muted,
         borderRadius = S.radius_btn,
         onClick = function(self)
+            self.props.disabled = true
             IndustryPage._OnSellGold(sellQty)
         end,
     }

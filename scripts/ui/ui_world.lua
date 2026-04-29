@@ -409,7 +409,8 @@ function WorldPage._CreateNodeDrawer(state, region)
         paddingVertical = 6,
         flexGrow = 1,
         disabled = not canInfiltrate,
-        onClick = function()
+        onClick = function(self)
+            self.props.disabled = true
             WorldPage._DoPoliticalInfiltration(state, region)
         end,
     })
@@ -839,7 +840,7 @@ function WorldPage._CreateGrandPowerCard(state, power)
             -- 姿态分组标题
             local btnRow = {}
             for _, act in ipairs(group) do
-                local enabled = act.available and state.ap.current >= act.ap_cost
+                local enabled = act.available and (state.ap.current + (state.ap.temp or 0)) >= act.ap_cost
                 local btnColor = enabled and meta.color or C.text_muted
 
                 table.insert(btnRow, UI.Button {
@@ -853,7 +854,8 @@ function WorldPage._CreateGrandPowerCard(state, power)
                     paddingHorizontal = 8,
                     paddingVertical = 5,
                     flexShrink = 1,
-                    onClick = function()
+                    onClick = function(self)
+                        self.props.disabled = true
                         if not enabled then
                             local reason = act.reason or "行动点不足"
                             UI.Toast.Show(reason, { variant = "error", duration = 1.5 })
@@ -865,7 +867,6 @@ function WorldPage._CreateGrandPowerCard(state, power)
                         else
                             UI.Toast.Show(msg, { variant = "error", duration = 1.5 })
                         end
-                        -- 刷新页面
                         if callbacksRef_ and callbacksRef_.onStateChanged then
                             callbacksRef_.onStateChanged()
                         end
@@ -985,7 +986,7 @@ function WorldPage._BuildActionSection(state, actionChildren)
     local sectionChildren = {
         UI.Divider { color = C.divider },
         UI.Label {
-            text = "可用行动 (AP:" .. state.ap.current .. ")",
+            text = "可用行动 (AP:" .. (state.ap.current + (state.ap.temp or 0)) .. ")",
             fontSize = F.body_minor,
             fontWeight = "bold",
             fontColor = C.text_secondary,

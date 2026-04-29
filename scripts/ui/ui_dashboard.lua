@@ -591,7 +591,7 @@ function Dashboard._FocusCard(state, mine, era)
     local BW = Balance.WORKERS
     local hireCost = math.floor(BW.hire_cost * GameState.GetLaborCostFactor(state)
         * (1 - GameState.GetInfluenceRecruitDiscount(state)))
-    local canHire = state.cash >= hireCost * 5 and state.ap.current >= 1
+    local canHire = state.cash >= hireCost * 5 and (state.ap.current + (state.ap.temp or 0)) >= 1
 
     return UI.Panel {
         id = "focusCard",
@@ -697,6 +697,7 @@ function Dashboard._FocusCard(state, mine, era)
                         disabled = not canHire,
                         borderRadius = S.radius_btn,
                         onClick = function(self)
+                            self.props.disabled = true
                             Actions.HireWorkers(stateRef_, 5, callbacks_.onStateChanged)
                         end,
                     },

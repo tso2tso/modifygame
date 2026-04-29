@@ -19,6 +19,8 @@ local TopBar = {}
 
 ---@type function|nil
 local onSettings_ = nil
+---@type function|nil
+local onHome_ = nil
 ---@type function|nil 状态变化回调（AP 购买后通知 UIManager 重建）
 local onStateChanged_ = nil
 ---@type table 游戏状态引用（用于 + 按钮）
@@ -34,6 +36,7 @@ local stateRef_ = nil
 ---@return table widget
 function TopBar.Create(state, callbacks)
     onSettings_ = callbacks and callbacks.onSettings
+    onHome_ = callbacks and callbacks.onHome
     onStateChanged_ = callbacks and callbacks.onStateChanged
     stateRef_ = state
 
@@ -105,49 +108,13 @@ function TopBar._CreateInfoRow(state, era)
         alignItems = "center",
         paddingHorizontal = S.page_padding,
         children = {
-            -- 年份 + 日期/时代（左侧时间信息区）
-            UI.Panel {
-                flexDirection = "column",
-                flexShrink = 0,
-                width = 160,
-                gap = 2,
-                children = {
-                    UI.Label {
-                        id = "yearLabel",
-                        text = yearText,
-                        fontSize = F.page_title,
-                        fontWeight = "bold",
-                        fontColor = era.accent,
-                    },
-                    UI.Panel {
-                        flexDirection = "row",
-                        alignItems = "center",
-                        gap = 6,
-                        children = {
-                            UI.Label {
-                                id = "dateLabel",
-                                text = dateText,
-                                fontSize = F.body_minor,
-                                fontColor = C.text_secondary,
-                            },
-                            UI.Label {
-                                id = "eraLabel",
-                                text = era.label,
-                                fontSize = 10,
-                                fontColor = { era.accent[1], era.accent[2], era.accent[3], 180 },
-                            },
-                        },
-                    },
-                },
-            },
-
-            -- §4.1 中部核心资源：压成一个内嵌资源组，减少窄屏横向挤压
+            -- §4.1 左侧核心资源组
             UI.Panel {
                 flexGrow = 1,
                 flexShrink = 1,
                 flexDirection = "row",
                 alignItems = "center",
-                justifyContent = "flex-end",
+                justifyContent = "flex-start",
                 gap = 4,
                 children = {
                     UI.Panel {
@@ -202,6 +169,42 @@ function TopBar._CreateInfoRow(state, era)
                         return TopBar._ResourceCell("netWorthCell", "🏦",
                             Config.FormatNumber(netWorth), nwColor, "净资产", true)
                     end)(),
+                },
+            },
+
+            -- 年份 + 日期/时代（右侧时间信息区）
+            UI.Panel {
+                flexDirection = "column",
+                flexShrink = 0,
+                alignItems = "flex-end",
+                gap = 2,
+                children = {
+                    UI.Label {
+                        id = "yearLabel",
+                        text = yearText,
+                        fontSize = F.page_title,
+                        fontWeight = "bold",
+                        fontColor = era.accent,
+                    },
+                    UI.Panel {
+                        flexDirection = "row",
+                        alignItems = "center",
+                        gap = 6,
+                        children = {
+                            UI.Label {
+                                id = "dateLabel",
+                                text = dateText,
+                                fontSize = F.body_minor,
+                                fontColor = C.text_secondary,
+                            },
+                            UI.Label {
+                                id = "eraLabel",
+                                text = era.label,
+                                fontSize = 10,
+                                fontColor = { era.accent[1], era.accent[2], era.accent[3], 180 },
+                            },
+                        },
+                    },
                 },
             },
         },
@@ -442,6 +445,31 @@ function TopBar._CreateAPRow(state, era)
                 },
             },
 
+            -- 🏠 主页按钮（返回首页仪表盘，与设置按钮同尺寸 36×36）
+            UI.Panel {
+                width = 36, height = 36,
+                borderRadius = S.radius_btn,
+                backgroundColor = C.paper_dark,
+                borderWidth = 1,
+                borderColor = era.accent,
+                justifyContent = "center",
+                alignItems = "center",
+                marginRight = S.spacing_sm,
+                pointerEvents = "auto",
+                onPointerUp = Config.TapGuard(function(self)
+                    if onHome_ then onHome_() end
+                end),
+                children = {
+                    UI.Label {
+                        text = "🏠",
+                        fontSize = 15,
+                        fontColor = era.accent,
+                        textAlign = "center",
+                        pointerEvents = "none",
+                    },
+                },
+            },
+
             -- §4.2 安全等级胶囊："安全等级" 文字 + 🛡 + 等级
             UI.Panel {
                 flexDirection = "column",
@@ -547,33 +575,54 @@ function TopBar.Refresh(root, state)
         apLabel:SetText(string.format("%d / %d", totalAvail, state.ap.max))
     end
 
-    -- 刷新 AP 圆点（含临时 AP）
+    -- 刷新 AP 圆点（增量更新：复用已有圆点，避免 ClearChildren 闪烁）
     local apDots = root:FindById("apDots")
     if apDots then
-        apDots:ClearChildren()
         local apMax = state.ap.max
         local tempAP = state.ap.temp or 0
-        local totalDots = apMax + tempAP  -- 临时 AP 额外显示圆点
+        local totalDots = apMax + tempAP
+
+        local existing = apDots:GetChildren()
+        local existCount = existing and #existing or 0
+
+        -- 移除多余圆点（从末尾开始）
+        while existCount > totalDots do
+            existing[existCount]:Destroy()
+            existCount = existCount - 1
+        end
+
+        -- 更新已有圆点 + 添加缺少的圆点
         for i = 1, totalDots do
             local isFilled = (i <= totalAvail)
-            local isTemp = (i > apMax)  -- 超出 max 的属于临时 AP
+            local isTemp = (i > apMax)
             local emptyBorder = { era.accent[1], era.accent[2], era.accent[3], 89 }
             local fillColor
             if isFilled then
                 fillColor = isTemp
-                    and { era.accent[1], era.accent[2], era.accent[3], 160 }  -- 临时 AP 半透明
+                    and { era.accent[1], era.accent[2], era.accent[3], 160 }
                     or era.accent
             else
                 fillColor = { 0, 0, 0, 0 }
             end
-            apDots:AddChild(UI.Panel {
-                width = S.ap_dot_size,
-                height = S.ap_dot_size,
-                borderRadius = S.ap_dot_size / 2,
-                backgroundColor = fillColor,
-                borderWidth = isFilled and 0 or 1,
-                borderColor = emptyBorder,
-            })
+
+            if i <= existCount then
+                -- 复用已有圆点，只更新样式
+                existing[i]:SetStyle({
+                    backgroundColor = fillColor,
+                    borderWidth = isFilled and 0 or 1,
+                    borderColor = emptyBorder,
+                })
+            else
+                -- 新增圆点
+                apDots:AddChild(UI.Panel {
+                    width = S.ap_dot_size,
+                    height = S.ap_dot_size,
+                    borderRadius = S.ap_dot_size / 2,
+                    backgroundColor = fillColor,
+                    borderWidth = isFilled and 0 or 1,
+                    borderColor = emptyBorder,
+                })
+            end
         end
     end
 end

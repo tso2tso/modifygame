@@ -458,6 +458,8 @@ function HandleUpdate(eventType, eventData)
     if eventData and eventData["TimeStep"] then
         dt = eventData["TimeStep"]:GetFloat()
     end
+    -- 延迟页面刷新：在 onClick 回调栈外执行 ClearChildren+rebuild，防止按钮闪烁
+    UIManager.FlushPendingRefresh()
     Tutorial.Update(dt)
 end
 

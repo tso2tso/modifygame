@@ -1316,7 +1316,7 @@ function ActionModals.ShowTrade(state, accent)
             #state.mines, maxMines),
         accent,
         function() ActionModals._TradeNewMine(state) end,
-        minesFull or state.cash < newMineCost or state.ap.current < Balance.TRADE.new_mine.ap
+        minesFull or state.cash < newMineCost or (state.ap.current + (state.ap.temp or 0)) < Balance.TRADE.new_mine.ap
     ))
 
     -- 出售矿山
@@ -1408,7 +1408,7 @@ function ActionModals._TradeNewMine(state)
             { variant = "warning", duration = 1.5 })
         return
     end
-    if state.cash < cashCost or state.ap.current < cfg.ap then
+    if state.cash < cashCost or (state.ap.current + (state.ap.temp or 0)) < cfg.ap then
         UI.Toast.Show("资源不足", { variant = "error", duration = 1.2 })
         return
     end

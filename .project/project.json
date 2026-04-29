@@ -5,30 +5,46 @@
     "id": "977458462"
   },
   "entry": "main.lua",
-  "version": "1.0.1",
+  "version": "1.0.6",
   "taptap_publish": {
-    "title": "百年萨拉热窝：黄金家族",
-    "description": "1904-2014，横跨百年的历史策略经营游戏。经营矿山、投资股市、扩张势力，在巴尔干风云中书写家族传奇。",
+    "title": "萨拉热窝：黄金家族",
+    "description": "你将从一块不起眼的矿权开始，建立属于自己的家族基业。开采资源、扩张产业、操控市场，在利润与风险之间寻找平衡。但财富从来不是终点——它只是你踏入更大棋局的门票。\n\n随着时间推进，你将亲历一个剧变的时代：\n帝国扩张、民族冲突、金融动荡、革命浪潮接踵而至。每一次重大历史事件，都不只是背景，而是你必须应对的现实。\n\n你可以专注工业，成为垄断一方的资本巨头；\n也可以涉足政治，在权力之间斡旋博弈；\n甚至暗中布局，在混乱中左右局势走向。\n\n但请记住——\n家族的命运，从来不只取决于财富。\n\n信任、声望、风险、选择……\n你的一切决策，都将在时间中留下代价。\n\n当时代落幕时，留下的将不仅是资产负债表，\n而是一个家族的兴衰史。",
     "category": "strategy",
     "screen_orientation": "portrait",
     "collection_type": "sce",
-    "trial_note": "历史策略经营游戏，竖屏操作",
+    "trial_note": "我是《文明6》的老玩家，当初会动手做这个游戏，其实就是被那种“再来一回合”的感觉勾住了。我想把这种决策带来的上头感，放进一个更小、更集中，但不那么可控的世界里。\n\n所以我把时间往前推到了第一次世界大战之前。\n\n这个背景不是装饰，它会真的反过来影响你。两次世界大战不会只是新闻，它们会直接砸到你的经营上：矿山停摆、工人流失、现金流断裂。很多时候你前面好不容易攒起来的优势，一季就能被打散。那种“明明要稳了，但世界不讲道理”的感觉，是我刻意保留下来的，也是这个游戏最核心的一部分乐趣。\n\n系统上，我堆了不少我自己想玩的东西：资源体系、通货膨胀、贷款利率、控制度、影响力，还有一整套会互相牵扯的随机事件。它们叠在一起之后，游戏的走向就不再是完全可预测的，甚至说实话——有时候连我自己也没法完全掌控中后期的数值会长成什么样。\n\n这件事有好有坏。\n\n好的一面是，每一局都会有点不一样，你得根据局势临时做判断；坏的一面是，它确实可能在某些时候变得过于失控，或者不够公平。这部分我还在不断调，也很清楚光靠我一个人是调不完的。\n\n所以我挺希望你能把它当成一个还在生长的东西来玩。\n\n如果你在某个阶段觉得“这里不合理”“这里其实可以更有意思”，哪怕只是一个很细的小反馈，对我来说都很有价值。这个游戏现在的骨架已经在了，但血肉还远远不够，比如我们现在的家族系统只有个雏形，需要更多真实的游玩体验把它一点点填起来。\n\n最后还是那句话——\n\n希望你能从里面找到属于自己的那种“再来一回合”。如果哪一局你是在快崩的时候硬扛回来，或者在一堆不确定里赌对了一次，那大概就是我最想做出来的体验了。祝你玩得开心。",
     "app_platforms": "1,2",
     "developer_id": 395178,
     "app_id": 848940,
-    "miniapp_id": "tapmcxw9rwffmgvboe"
+    "miniapp_id": "tapmcxw9rwffmgvboe",
+    "gameplay_demo_video_source": "https://tapcode-sce.spark.xd.com/videos/p_nknd/1777442371550-rec_2937dd4e-d3fe-4382-a883-025e420c29c7.mp4"
   },
   "assets": {
     "icon": "./game_material/icon.png",
-    "screenshots": [],
-    "promotional_image": "",
-    "icon_url": "https://tapcode-sce.spark.xd.com/assets/game_material/p_nknd/icon.png"
+    "screenshots": [
+      "./game_material/screenshot_1.png",
+      "./game_material/screenshot_2.png",
+      "./game_material/screenshot_3.png"
+    ],
+    "promotional_image": "./game_material/promotional.png",
+    "icon_url": "https://tapcode-sce.spark.xd.com/assets/game_material/p_nknd/icon.png",
+    "screenshot_urls": [
+      "https://tapcode-sce.spark.xd.com/assets/game_material/p_nknd/screenshot_1.png",
+      "https://tapcode-sce.spark.xd.com/assets/game_material/p_nknd/screenshot_2.png",
+      "https://tapcode-sce.spark.xd.com/assets/game_material/p_nknd/screenshot_3.png"
+    ],
+    "promotional_image_url": "https://tapcode-sce.spark.xd.com/assets/game_material/p_nknd/promotional.png",
+    "cover_horizontal": "./game_material/cover_horizontal.png",
+    "cover_horizontal_url": "https://tapcode-sce.spark.xd.com/assets/game_material/p_nknd/cover_horizontal.png",
+    "cover_vertical": "./game_material/cover_vertical.png",
+    "cover_vertical_url": "https://tapcode-sce.spark.xd.com/assets/game_material/p_nknd/cover_vertical.png"
   },
   "test_qrcode": {
-    "url": "https://tapcode-sce.spark.xd.com/qrcode/p_nknd_1777171164764.png",
-    "generated_at": "2026-04-26T02:39:24.924Z"
+    "url": "https://tapcode-sce.spark.xd.com/qrcode/p_nknd_1777454263592.png",
+    "generated_at": "2026-04-29T09:17:43.709Z"
   },
   "metadata": {
-    "updated_at": "2026-04-27T14:16:56.304Z"
+    "updated_at": "2026-04-29T09:17:43.709Z",
+    "promo_dependent_hash": "4aa59da8d690510fff1690275644810a"
   }
 }

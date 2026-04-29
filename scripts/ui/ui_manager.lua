@@ -43,6 +43,9 @@ local onNewGame_ = nil
 local onProcessEvent_ = nil
 ---@type table|nil 设置 Drawer 实例
 local settingsDrawer_ = nil
+---@type boolean 是否有延迟刷新等待执行
+local refreshPending_ = false
+
 
 --- 初始化 UI 系统
 function UIManager.InitUI()
@@ -93,6 +96,9 @@ function UIManager.Create(state, callbacks)
             TopBar.Create(state, {
                 onSettings = function()
                     UIManager._OpenSettings()
+                end,
+                onHome = function()
+                    UIManager.BackToDashboard()
                 end,
                 onStateChanged = function()
                     UIManager.RefreshAll(stateRef_)
@@ -300,6 +306,33 @@ function UIManager._ShowView(viewId)
         page:SetVisible(id == viewId)
     end
 
+    -- 切换到脏页面时按需重建
+    if viewId == "dashboard" then
+        if dashboardPage_ and dashboardPage_._dirty then
+            dashboardPage_._dirty = false
+            dashboardPage_:ClearChildren()
+            dashboardPage_:AddChild(Dashboard.Create(stateRef_, {
+                onEndTurn = onEndTurn_,
+                onProcessEvent = function(index)
+                    if onProcessEvent_ then onProcessEvent_(index) end
+                end,
+                onQuickAction = function(actionId)
+                    UIManager._OnQuickAction(actionId)
+                end,
+                onStateChanged = function()
+                    UIManager.RefreshAll(stateRef_)
+                end,
+            }))
+        end
+    else
+        local page = pages_[viewId]
+        if page and page._dirty then
+            page._dirty = false
+            page:ClearChildren()
+            page:AddChild(UIManager._CreatePageContent(viewId, stateRef_))
+        end
+    end
+
     -- 更新 Tab 高亮样式（§4.7 指示线 + 背景 + 图标/文字颜色）
     local eraAccent = Config.GetEraAccent(stateRef_)
     if uiRoot_ then
@@ -437,42 +470,45 @@ end
 -- 刷新
 -- ============================================================================
 
+--- 外部调用入口：即时刷新 TopBar（轻量），页面重建延迟到下一帧
 function UIManager.RefreshAll(state)
-    stateRef_ = state
+    stateRef_ = state or stateRef_
     if not uiRoot_ then return end
 
-    TopBar.Refresh(uiRoot_, state)
+    -- 即时刷新 TopBar —— 资源变化立刻可见
+    TopBar.Refresh(uiRoot_, stateRef_)
 
-    -- 重建仪表盘
+    -- 标记延迟刷新，下一帧再重建页面树（避免在 onClick 调用栈内
+    -- 执行 ClearChildren+rebuild 导致按钮闪烁）
+    refreshPending_ = true
+
+    settingsDrawer_ = nil
+end
+
+--- 每帧调用：如果有待处理的延迟刷新，执行实际页面重建
+function UIManager.FlushPendingRefresh()
+    if not refreshPending_ then return end
+    refreshPending_ = false
+    UIManager._DoPageRefresh()
+end
+
+--- 内部：标记所有页面为脏，然后通过 _ShowView 按需重建当前可见页面
+--- TopBar 已在 RefreshAll 中即时增量刷新（无 ClearChildren），页面在此处重建
+function UIManager._DoPageRefresh()
+    if not uiRoot_ then return end
+
+    -- 1. 先标记所有页面为脏
     if dashboardPage_ then
-        dashboardPage_:ClearChildren()
-        local dashContent = Dashboard.Create(state, {
-            onEndTurn = onEndTurn_,
-            onProcessEvent = function(index)
-                if onProcessEvent_ then
-                    onProcessEvent_(index)
-                end
-            end,
-            onQuickAction = function(actionId)
-                UIManager._OnQuickAction(actionId)
-            end,
-            onStateChanged = function()
-                UIManager.RefreshAll(stateRef_)
-            end,
-        })
-        dashboardPage_:AddChild(dashContent)
+        dashboardPage_._dirty = true
     end
-
-    -- 重建深度页
     for _, tabId in ipairs({ "family", "industry", "market", "military", "world" }) do
-        local page = pages_[tabId]
-        if page then
-            page:ClearChildren()
-            page:AddChild(UIManager._CreatePageContent(tabId, state))
+        if pages_[tabId] then
+            pages_[tabId]._dirty = true
         end
     end
 
-    settingsDrawer_ = nil
+    -- 2. 通过 _ShowView 重建当前可见页面（_ShowView 内部检查 _dirty 标记）
+    UIManager._ShowView(activeView_)
 end
 
 function UIManager.GetRoot()

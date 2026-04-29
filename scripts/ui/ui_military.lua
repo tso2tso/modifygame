@@ -178,11 +178,12 @@ function MilitaryPage._BuildContent(state)
                                 height = S.btn_small_height,
                                 flexGrow = 1,
                                 flexBasis = 0,
-                                variant = (state.cash >= recruitCost * 3 and state.ap.current >= 1)
+                                variant = (state.cash >= recruitCost * 3 and (state.ap.current + (state.ap.temp or 0)) >= 1)
                                     and "primary" or "outlined",
-                                disabled = state.cash < recruitCost * 3 or state.ap.current < 1,
+                                disabled = state.cash < recruitCost * 3 or (state.ap.current + (state.ap.temp or 0)) < 1,
                                 borderRadius = S.radius_btn,
                                 onClick = function(self)
+                                    self.props.disabled = true
                                     MilitaryPage._OnRecruit(3)
                                 end,
                             },
@@ -196,6 +197,7 @@ function MilitaryPage._BuildContent(state)
                                 disabled = mil.guards < 3,
                                 borderRadius = S.radius_btn,
                                 onClick = function(self)
+                                    self.props.disabled = true
                                     MilitaryPage._OnDisband(3)
                                 end,
                             },
@@ -207,11 +209,12 @@ function MilitaryPage._BuildContent(state)
                         fontSize = F.body_minor,
                         height = S.btn_small_height,
                         width = "100%",
-                        variant = (state.cash >= 20 * BMI.supply_cost and state.ap.current >= 1)
+                        variant = (state.cash >= 20 * BMI.supply_cost and (state.ap.current + (state.ap.temp or 0)) >= 1)
                             and "primary" or "outlined",
-                        disabled = state.cash < 20 * BMI.supply_cost or state.ap.current < 1,
+                        disabled = state.cash < 20 * BMI.supply_cost or (state.ap.current + (state.ap.temp or 0)) < 1,
                         borderRadius = S.radius_btn,
                         onClick = function(self)
+                            self.props.disabled = true
                             MilitaryPage._OnResupply(20)
                         end,
                     },

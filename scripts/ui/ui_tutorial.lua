@@ -47,13 +47,15 @@ local STEPS = {
         text  = "两次世界大战、经济危机、政治动荡…\n你能否在五十年的风雨中守住家业，走向辉煌？",
     },
     -- ── 遮罩式操作引导（半透明遮罩 + 高亮框 + 提示卡片） ──
+    -- highlight.targetId: 通过 FindById 动态获取目标元素的绝对位置和尺寸
+    -- highlight.pad: 高亮框向外扩展的像素（可选，默认 4）
     {
         type  = "guide",
         icon  = "💰",
         title = "现金与硬通货",
         text  = "顶栏中部记录家族的核心资源：现金用于雇人、投资和应急；黄金是更稳的储备。\n先盯住现金，别让季度结算把你拖进破产。",
         hint  = "↑ 看这里：现金、黄金、产能、声望都在顶栏资源组里",
-        highlight = { left = 188, right = 58, top = 12, height = 48 },
+        highlight = { targetId = "topInfoRow", pad = 2 },
         card = "middle",
     },
     {
@@ -62,7 +64,7 @@ local STEPS = {
         title = "广告幸运事件",
         text  = "现金旁的转盘按钮是激励广告入口。完整观看后会触发一次幸运事件，直接获得一笔克朗。\n每季度次数有限，连续观看奖励会衰减，适合在缺钱或开局加速时使用。",
         hint  = "↑ 点现金旁边的 🎰，观看广告后领取随机现金奖励",
-        highlight = { right = 170, top = 22, width = 30, height = 30 },
+        highlight = { targetId = "luckyAdBtn", pad = 6 },
         card = "middle",
     },
     {
@@ -71,7 +73,7 @@ local STEPS = {
         title = "行动点 AP",
         text  = "第二行显示本季还剩多少 AP。大多数关键操作都会消耗 AP。\n右侧的「+」按钮可以花现金购买临时 AP，但每季度也有次数限制。",
         hint  = "↑ AP 数字、圆点和 + 按钮决定你这一季还能做多少事",
-        highlight = { left = 10, right = 58, top = 76, height = 48 },
+        highlight = { targetId = "apRow", pad = 2 },
         card = "middle",
     },
     {
@@ -80,7 +82,7 @@ local STEPS = {
         title = "先处理当前事件",
         text  = "首页最上方是待处理事件。主线事件会影响矿权、战争与政治环境。\n看到「处理」按钮时，建议先读完事件再安排经营动作。",
         hint  = "↓ 事件卡片通常在首页第一屏顶部",
-        highlight = { left = 10, right = 10, top = 136, height = 112 },
+        highlight = { targetId = "eventSection", pad = 4 },
         card = "lower",
     },
     {
@@ -89,7 +91,7 @@ local STEPS = {
         title = "矿山是开局核心",
         text  = "焦点卡展示第一座矿山的产量、工人、安全和维护费用。\n前期优先让矿山稳定赚钱，再考虑扩张或冒险。",
         hint  = "↓ 这里是首页的矿山焦点卡",
-        highlight = { left = 10, right = 10, top = 248, height = 228 },
+        highlight = { targetId = "focusCard", pad = 4 },
         card = "upper",
     },
     {
@@ -98,7 +100,7 @@ local STEPS = {
         title = "快速操作入口",
         text  = "情报、科技、外交、资产交易都在首页快速操作里。\n这些按钮会打开具体弹窗，是你每季度最常用的经营入口。",
         hint  = "↓ 点这里进入本季的关键经营动作",
-        highlight = { left = 10, right = 10, top = 512, height = 132 },
+        highlight = { targetId = "quickActions", pad = 4 },
         card = "upper",
     },
     {
@@ -107,7 +109,7 @@ local STEPS = {
         title = "底部标签页",
         text  = "底部导航会进入更细的系统：家族安排成员，产业升级矿山，市场买卖黄金和股票，武装保卫矿区，世界页处理大国关系。",
         hint  = "↓ 产业、市场、武装、世界都在底部标签栏",
-        highlight = { left = 0, right = 0, bottom = 0, height = 64 },
+        highlight = { targetId = "bottomNav", pad = 2 },
         card = "middle",
     },
 }
@@ -296,32 +298,45 @@ end
 function Tutorial._BuildGuideSlide(step, indicator, isLast)
     local children = {}
 
-    -- 高亮框：在目标区域加亮色边框，透过遮罩凸显
+    -- 高亮框：动态查询目标 UI 元素的绝对位置，自适应不同屏幕
     if step.highlight then
         local hl = step.highlight
-        local frameProps = {
-            position = "absolute",
-            left = hl.left,
-            right = hl.right,
-            top = hl.top,
-            bottom = hl.bottom,
-            width = hl.width,
-            height = hl.height or 56,
-            borderColor = { 212, 175, 55, 160 },
-            borderWidth = 2,
-            backgroundColor = { 255, 255, 255, 12 },
-            borderRadius = 8,
-            pointerEvents = "none",
-        }
-        if hl.area == "top" then
-            frameProps.left = 0
-            frameProps.right = 0
-            frameProps.top = 0
-        elseif hl.area == "bottom" then
-            frameProps.left = 0
-            frameProps.right = 0
-            frameProps.bottom = 0
+        local frameProps = nil
+
+        if hl.targetId and uiRoot_ then
+            -- 通过 id 动态获取目标元素的实际位置和尺寸
+            local target = uiRoot_:FindById(hl.targetId)
+            if target then
+                local layout = target:GetAbsoluteLayout()
+                local pad = hl.pad or 4
+                frameProps = {
+                    position = "absolute",
+                    left = layout.x - pad,
+                    top = layout.y - pad,
+                    width = layout.w + pad * 2,
+                    height = layout.h + pad * 2,
+                }
+            end
         end
+
+        -- 兼容：如果没有 targetId 或找不到元素，回退到手动坐标
+        if not frameProps then
+            frameProps = {
+                position = "absolute",
+                left = hl.left,
+                right = hl.right,
+                top = hl.top,
+                bottom = hl.bottom,
+                width = hl.width,
+                height = hl.height or 56,
+            }
+        end
+
+        frameProps.borderColor = { 212, 175, 55, 160 }
+        frameProps.borderWidth = 2
+        frameProps.backgroundColor = { 255, 255, 255, 12 }
+        frameProps.borderRadius = 8
+        frameProps.pointerEvents = "none"
 
         frameProps.children = {
             UI.Panel {
