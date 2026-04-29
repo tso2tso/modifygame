@@ -735,9 +735,9 @@ function Dashboard._FocusCard(state, mine, era)
                         variant = canHire and "primary" or "outlined",
                         disabled = not canHire,
                         borderRadius = S.radius_btn,
-                        onPointerUp = Config.TapGuard(function(self)
+                        onClick = function(self)
                             Actions.HireWorkers(stateRef_, 5, callbacks_.onLightRefresh)
-                        end),
+                        end,
                     },
                 },
             },
