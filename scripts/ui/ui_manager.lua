@@ -297,6 +297,24 @@ function UIManager.BackToDashboard()
     UIManager._ShowView("dashboard")
 end
 
+--- 保存 ScrollView 内部滚动状态（offset、velocity 等）
+function UIManager._SaveScrollState(scrollView)
+    if not scrollView or not scrollView.state then return nil end
+    local saved = {}
+    for k, v in pairs(scrollView.state) do
+        saved[k] = v
+    end
+    return saved
+end
+
+--- 恢复 ScrollView 内部滚动状态，防止 ClearChildren 导致的跳顶闪烁
+function UIManager._RestoreScrollState(scrollView, saved)
+    if not scrollView or not scrollView.state or not saved then return end
+    for k, v in pairs(saved) do
+        scrollView.state[k] = v
+    end
+end
+
 function UIManager._ShowView(viewId)
     -- 隐藏所有页面
     if dashboardPage_ then
@@ -310,6 +328,7 @@ function UIManager._ShowView(viewId)
     if viewId == "dashboard" then
         if dashboardPage_ and dashboardPage_._dirty then
             dashboardPage_._dirty = false
+            local scrollState = UIManager._SaveScrollState(dashboardPage_)
             dashboardPage_:ClearChildren()
             dashboardPage_:AddChild(Dashboard.Create(stateRef_, {
                 onEndTurn = onEndTurn_,
@@ -323,13 +342,16 @@ function UIManager._ShowView(viewId)
                     UIManager.RefreshAll(stateRef_)
                 end,
             }))
+            UIManager._RestoreScrollState(dashboardPage_, scrollState)
         end
     else
         local page = pages_[viewId]
         if page and page._dirty then
             page._dirty = false
+            local scrollState = UIManager._SaveScrollState(page)
             page:ClearChildren()
             page:AddChild(UIManager._CreatePageContent(viewId, stateRef_))
+            UIManager._RestoreScrollState(page, scrollState)
         end
     end
 
