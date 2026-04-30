@@ -181,11 +181,10 @@ function EventModal.Show(event, onChoose, state)
     }
 
     -- 用 ScrollView 包裹内容，防止选项溢出不可选
-    -- flexBasis=0 + flexGrow=1：让 ScrollView 不按内容撑开，而是占满剩余空间后滚动
     local scrollContent = UI.ScrollView {
         width = "100%",
-        flexGrow = 1,
-        flexBasis = 0,
+        maxHeight = 480,
+        flexShrink = 1,
         scrollY = true,
         bounces = false,
         children = { contentPanel },
