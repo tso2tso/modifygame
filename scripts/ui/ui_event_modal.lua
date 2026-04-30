@@ -220,8 +220,10 @@ function EventModal._FormatEffects(effects, state)
         if effects.gold < 0 then hasNegative = true end
     end
     if effects.workers_bonus then
-        table.insert(hints, string.format("👷 +%d 工人", effects.workers_bonus))
-        hasPositive = true
+        local prefix = effects.workers_bonus >= 0 and "+" or ""
+        table.insert(hints, string.format("👷 %s%d 工人", prefix, effects.workers_bonus))
+        if effects.workers_bonus > 0 then hasPositive = true end
+        if effects.workers_bonus < 0 then hasNegative = true end
     end
     if effects.security_bonus then
         local prefix = effects.security_bonus >= 0 and "+" or ""
