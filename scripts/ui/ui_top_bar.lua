@@ -654,8 +654,9 @@ function TopBar._OnBuyAP()
     stateRef_.ap.bonus_used = used + 1
     GameState.AddLog(stateRef_, string.format("购买 1 AP（花费 %d）", apCost))
     UI.Toast.Show("+1 AP", { variant = "success", duration = 1.2 })
-    if onLightRefresh_ then onLightRefresh_()
-    elseif onStateChanged_ then onStateChanged_() end
+    -- 全量刷新：购买 AP 后需要更新当前页面的按钮 disabled 状态
+    -- （LightRefresh 只刷新 TopBar+Dashboard，不会更新军事/产业等页面按钮）
+    if onStateChanged_ then onStateChanged_() end
 end
 
 -- ============================================================================

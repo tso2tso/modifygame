@@ -35,19 +35,20 @@ function Start()
     -- 1. 初始化 UI 系统
     UIManager.InitUI()
 
-    -- 1.1 移动端去重：抑制引擎模拟的鼠标事件，避免 Widget 内置 OnClick 双触发
-    --     在移动端，引擎对同一次触摸同时发送 Touch* 和 Mouse* 事件，
+    -- 1.1 触控设备去重：抑制引擎模拟的鼠标事件，避免 Widget 内置 OnClick 双触发
+    --     在触控设备上，引擎对同一次触摸同时发送 Touch* 和 Mouse* 事件，
     --     UI 框架两组都订阅，导致 Dropdown 等组件的 OnClick 被调用两次（开→关）。
     --     此处将 UI 的鼠标处理函数替换为空操作，只保留触摸路径。
+    --     Web 端触屏设备同样存在此问题，因此 Web 也需要去重。
     local plat = GetPlatform and GetPlatform() or ""
-    if plat == "Android" or plat == "iOS" then
+    if plat == "Android" or plat == "iOS" or plat == "Web" then
         local noop = function() end
         UI.HandleMouseDown = noop
         UI.HandleMouseUp   = noop
         UI.HandleMouseMove = noop
-        print("[Touch] 移动端：已抑制模拟鼠标事件，使用纯触摸路径")
+        print("[Touch] " .. plat .. "：已抑制模拟鼠标事件，使用纯触摸路径")
     else
-        print("[Input] 桌面/Web端：使用鼠标事件路径")
+        print("[Input] 桌面端：使用鼠标事件路径")
     end
 
     -- 1.5 初始化音频系统
