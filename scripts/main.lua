@@ -266,8 +266,13 @@ function HandleEndTurn()
         state_.turn_messages = {}
     end
 
-    -- 检查游戏结束
+    -- 检查游戏结束（上一回合已结束但未结算的情况，如读档后）
     if GameState.IsGameOver(state_) then
+        print("[HandleEndTurn] 游戏已结束（早期检查）: bankrupt=" .. tostring(state_.bankrupt))
+        -- 同样尝试破产救济
+        if TryBankruptcyRescue(state_) then
+            return
+        end
         local ending = GameState.GetEndingInfo(state_)
         local msg = ending and ending.title or "百年家族史已书写完毕！"
         local variant = "info"
@@ -322,6 +327,202 @@ function ProcessNextEvent()
     end, state_)
 end
 
+-- ============================================================================
+-- 破产免死：统一入口，两处 IsGameOver 检查共用
+-- 返回 true 表示弹窗已展示（调用方应 return 等待玩家选择）
+-- 返回 false 表示不符合条件或弹窗失败，调用方继续正常结算
+-- ============================================================================
+function TryBankruptcyRescue(state)
+    if not state.bankrupt then
+        print("[破产免死] 跳过：非破产状态")
+        return false
+    end
+    local rescue = Balance.BANKRUPTCY_RESCUE
+    if not rescue then
+        print("[破产免死] 跳过：Balance.BANKRUPTCY_RESCUE 未定义")
+        return false
+    end
+    local used = state.bankrupt_ad_used or 0
+    if used >= rescue.max_uses_per_game then
+        print("[破产免死] 跳过：已用完次数 used=" .. used .. " max=" .. rescue.max_uses_per_game)
+        return false
+    end
+    print("[破产免死] 条件满足，尝试创建弹窗...")
+    local ok, err = pcall(function()
+        AudioManager.PlayEffect("danger_warning")
+        ShowBankruptcyRescueModal(state)
+    end)
+    if ok then
+        print("[破产免死] 弹窗创建成功")
+        return true
+    end
+    print("[破产免死] 弹窗创建失败，回退正常结算: " .. tostring(err))
+    return false
+end
+
+-- ============================================================================
+-- 破产免死弹窗：看广告获得紧急救济金，每局限一次
+-- ============================================================================
+function ShowBankruptcyRescueModal(state)
+    local rescue = Balance.BANKRUPTCY_RESCUE
+    local inflation = GameState.GetInflationFactor(state)
+    local rescueCash = math.floor(rescue.rescue_cash_base * inflation)
+    print("[破产免死] 弹窗创建: 救济金=" .. rescueCash .. " 通胀=" .. inflation)
+
+    local modal = UI.Modal {
+        title = "💀 家族濒临破产",
+        size = "md",
+        closeOnOverlay = false,
+        closeOnEscape = false,
+        showCloseButton = false,
+    }
+
+    local content = UI.Panel {
+        width = "100%",
+        flexDirection = "column",
+        gap = 12,
+        padding = 4,
+        children = {
+            UI.Label {
+                text = "债台高筑，家族即将走向毁灭……\n但命运给了你最后一次机会！",
+                fontSize = Config.FONT.body,
+                fontColor = Config.COLORS.text_primary,
+                whiteSpace = "normal",
+                lineHeight = 1.6,
+            },
+            UI.Panel {
+                width = "100%",
+                padding = 10,
+                backgroundColor = {45, 60, 45, 255},
+                borderRadius = Config.SIZE.radius_card,
+                borderWidth = 1,
+                borderColor = {80, 140, 80, 180},
+                flexDirection = "column",
+                gap = 4,
+                children = {
+                    UI.Label {
+                        text = "观看广告获得紧急救济",
+                        fontSize = Config.FONT.body,
+                        fontWeight = "bold",
+                        fontColor = {180, 230, 160, 255},
+                    },
+                    UI.Label {
+                        text = string.format("注入 %s 克朗紧急资金，清除破产状态", Config.FormatNumber(rescueCash)),
+                        fontSize = Config.FONT.body_minor,
+                        fontColor = Config.COLORS.text_secondary,
+                        whiteSpace = "normal",
+                    },
+                    UI.Label {
+                        text = "每局仅限一次机会",
+                        fontSize = Config.FONT.label,
+                        fontColor = {200, 170, 100, 255},
+                    },
+                },
+            },
+            -- 按钮区
+            UI.Panel {
+                width = "100%",
+                flexDirection = "column",
+                gap = 8,
+                children = {
+                    UI.Button {
+                        text = "观看广告，绝处逢生",
+                        variant = "primary",
+                        width = "100%",
+                        onClick = function(self)
+                            modal:Close()
+                            ---@diagnostic disable-next-line: undefined-global
+                            sdk:ShowRewardVideoAd(function(result)
+                                if not result.success then
+                                    if result.msg == "embed manual close" then
+                                        UI.Toast.Show("需完整观看广告才能获得救济",
+                                            { variant = "warning", duration = 1.5 })
+                                    else
+                                        UI.Toast.Show("广告播放失败: " .. (result.msg or "未知错误"),
+                                            { variant = "error", duration = 1.5 })
+                                    end
+                                    -- 广告失败/取消 → 走正常破产流程
+                                    ProceedBankruptcy(state)
+                                    return
+                                end
+                                -- 广告成功 → 救活
+                                ApplyBankruptcyRescue(state, rescueCash)
+                            end)
+                        end,
+                    },
+                    UI.Button {
+                        text = "放弃挣扎，接受命运",
+                        variant = "ghost",
+                        width = "100%",
+                        onClick = function(self)
+                            modal:Close()
+                            ProceedBankruptcy(state)
+                        end,
+                    },
+                },
+            },
+        },
+    }
+
+    modal:AddContent(content)
+    local root = UIManager.GetRoot()
+    if root then
+        root:AddChild(modal)
+    end
+    modal:Open()
+end
+
+--- 破产免死广告成功：清除破产、注入资金、重置计数器
+function ApplyBankruptcyRescue(state, rescueCash)
+    -- 清除破产标记
+    state.bankrupt = false
+
+    -- 注入紧急资金
+    state.cash = state.cash + rescueCash
+    state.total_income = (state.total_income or 0) + rescueCash
+
+    -- 重置违约/负净资产计数
+    local rescue = Balance.BANKRUPTCY_RESCUE
+    if rescue.clear_defaults then
+        state.loan_consecutive_defaults = 0
+    end
+    if rescue.clear_neg_nw then
+        state.negative_net_worth_turns = 0
+    end
+
+    -- 标记已使用
+    state.bankrupt_ad_used = (state.bankrupt_ad_used or 0) + 1
+
+    -- 日志
+    GameState.AddLog(state, string.format(
+        "🆘 破产免死：观看广告获得 %s 克朗紧急救济金，家族转危为安",
+        Config.FormatNumber(rescueCash)))
+
+    -- 存档
+    SaveLoad.Save(state)
+
+    -- 提示
+    UI.Toast.Show(string.format("🆘 紧急救济！\n+%s 克朗，家族暂时脱离破产危机",
+        Config.FormatNumber(rescueCash)),
+        { variant = "success", duration = 3 })
+    AudioManager.PlayEffect("event_trigger")
+
+    -- 刷新 UI
+    UIManager.RefreshAll(state)
+    print("[破产免死] 广告成功，注入 " .. Config.FormatNumber(rescueCash) .. " 克朗")
+end
+
+--- 玩家拒绝看广告或广告失败 → 正常破产流程
+function ProceedBankruptcy(state)
+    local ending = GameState.GetEndingInfo(state)
+    if ending then
+        AudioManager.PlayEffect("game_defeat")
+        UI.Toast.Show(ending.title, { variant = "error", duration = 3 })
+    end
+    AudioManager.StopBGM()
+    UIManager.ShowEnding(state)
+end
+
 --- 回合最终完成（事件全部处理后）
 function FinalizeEndTurn()
     local report = pendingReport_
@@ -353,6 +554,15 @@ function FinalizeEndTurn()
 
     -- 回合推进后立即展示胜利/失败结算，避免只在下一次点击时提示。
     if GameState.IsGameOver(state_) then
+        print("[FinalizeEndTurn] 游戏结束检测: bankrupt=" .. tostring(state_.bankrupt)
+            .. " year=" .. tostring(state_.year) .. " turn=" .. tostring(state_.turn))
+        -- ==================================================================
+        -- 破产免死广告：在展示结局前，给一次看广告续命的机会
+        -- ==================================================================
+        if TryBankruptcyRescue(state_) then
+            return  -- 弹窗已展示，等待玩家选择
+        end
+
         local ending = GameState.GetEndingInfo(state_)
         if ending then
             local variant = ending.variant == "failure" and "error" or "success"
@@ -370,14 +580,6 @@ function FinalizeEndTurn()
 
     if state_.victory and state_.victory.prompt_pending then
         UIManager.ShowVictoryPrompt(state_)
-        return
-    end
-
-    -- 破产检测（EndTurn 中可能触发）
-    if state_.bankrupt then
-        AudioManager.PlayEffect("danger_warning")
-        UI.Toast.Show("💀 家族破产！债台高筑，黄金王朝轰然倒塌…",
-            { variant = "error", duration = 5 })
         return
     end
 

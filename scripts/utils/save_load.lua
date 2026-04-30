@@ -299,6 +299,9 @@ function SaveLoad._SerializeState(state)
     data.lucky_ad_watched = state.lucky_ad_watched or 0
     data.lucky_ad_decay = state.lucky_ad_decay or 1.0
 
+    -- 破产免死广告
+    data.bankrupt_ad_used = state.bankrupt_ad_used or 0
+
     -- 音量设置
     data.audio_settings = state.audio_settings
 
@@ -397,6 +400,9 @@ function SaveLoad._DeserializeState(data)
     data.loan_consecutive_defaults = data.loan_consecutive_defaults or 0
     data.negative_net_worth_turns = data.negative_net_worth_turns or 0
     if data.bankrupt == nil then data.bankrupt = false end
+
+    -- 破产免死广告
+    data.bankrupt_ad_used = data.bankrupt_ad_used or 0
 
     -- 黄金自动出售（v0.4.0 新增保存）
     if data.gold_auto_sell == nil then data.gold_auto_sell = false end

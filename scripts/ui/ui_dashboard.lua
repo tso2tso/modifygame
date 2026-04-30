@@ -42,15 +42,36 @@ function Dashboard.RefreshDynamic(root, state)
     if not root then return end
 
     -- 1. 招募按钮：更新 disabled + text
+    local BW = Balance.WORKERS
+    local hireCost = math.floor(BW.hire_cost * GameState.GetLaborCostFactor(state)
+        * (1 - GameState.GetInfluenceRecruitDiscount(state)))
     local hireBtn = root:FindById("focusHireBtn")
     if hireBtn then
-        local BW = Balance.WORKERS
-        local hireCost = math.floor(BW.hire_cost * GameState.GetLaborCostFactor(state)
-            * (1 - GameState.GetInfluenceRecruitDiscount(state)))
         local canHire = state.cash >= hireCost * 5 and (state.ap.current + (state.ap.temp or 0)) >= 1
         hireBtn.props.disabled = not canHire
         if hireBtn.SetText then
             hireBtn:SetText(string.format("招募工人 +5    %d 克朗 / 1 AP", hireCost * 5))
+        end
+    end
+
+    -- 1.5 利用率 + 维护费：招募后实时更新
+    local utilLabel = root:FindById("focusUtil")
+    if utilLabel then
+        local totalIdealWorkers = 0
+        for _, m in ipairs(state.mines) do
+            totalIdealWorkers = totalIdealWorkers + m.level * 10
+        end
+        local utilization = math.floor(state.workers.hired / math.max(1, totalIdealWorkers) * 100)
+        local utilColor = Config.GetUtilColor(utilization)
+        utilLabel:SetText(utilization .. "%")
+        if utilLabel.SetFontColor then utilLabel:SetFontColor(utilColor) end
+    end
+    local maintLabel = root:FindById("focusMaint")
+    if maintLabel then
+        local workerExpense = state.workers.hired * state.workers.wage
+        maintLabel:SetText("-" .. Config.FormatNumber(workerExpense))
+        if maintLabel.SetFontColor then
+            maintLabel:SetFontColor(workerExpense > state.cash * 0.3 and C.accent_red or C.text_secondary)
         end
     end
 
@@ -712,11 +733,11 @@ function Dashboard._FocusCard(state, mine, era)
                 gap = 5,
                 children = {
                     Dashboard._StatusPill("⛏", "产量", output .. " 单位", accent),
-                    Dashboard._StatusPill("📊", "利用率", utilization .. "%", utilColor),
+                    Dashboard._StatusPill("📊", "利用率", utilization .. "%", utilColor, "focusUtil"),
                     Dashboard._StatusPill(moraleIcon, "工人", moraleText,
                         morale >= 60 and C.text_primary or C.accent_red),
                     Dashboard._StatusPill("💰", "维护", "-" .. Config.FormatNumber(workerExpense),
-                        workerExpense > state.cash * 0.3 and C.accent_red or C.text_secondary),
+                        workerExpense > state.cash * 0.3 and C.accent_red or C.text_secondary, "focusMaint"),
                 },
             },
 
@@ -746,7 +767,12 @@ function Dashboard._FocusCard(state, mine, era)
 end
 
 --- 状态胶囊（与安全等级大小一致的紧凑样式）
-function Dashboard._StatusPill(icon, label, value, valueColor)
+--- @param icon string 图标
+--- @param label string 标签
+--- @param value string 数值文本
+--- @param valueColor table 数值颜色
+--- @param valueId string|nil 可选：value Label 的 id，用于 RefreshDynamic 实时更新
+function Dashboard._StatusPill(icon, label, value, valueColor, valueId)
     return UI.Panel {
         flexGrow = 1,
         flexBasis = 0,
@@ -776,6 +802,7 @@ function Dashboard._StatusPill(icon, label, value, valueColor)
                         pointerEvents = "none",
                     },
                     UI.Label {
+                        id = valueId,
                         text = value,
                         fontSize = F.label,
                         fontWeight = "bold",
