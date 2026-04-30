@@ -25,8 +25,6 @@ local onStateChanged_ = nil
 local onNewGame_ = nil
 ---@type table|nil 存档操作卡片引用（用于局部刷新）
 local saveCardRef_ = nil
----@type table|nil 存档列表卡片引用（用于局部刷新）
-local slotsCardRef_ = nil
 
 --- 创建菜单页完整内容
 ---@param state table
@@ -37,16 +35,13 @@ function MenuPage.Create(state, callbacks)
     onStateChanged_ = callbacks and callbacks.onStateChanged
     onNewGame_ = callbacks and callbacks.onNewGame
     saveCardRef_ = nil
-    slotsCardRef_ = nil
     return MenuPage._BuildContent(state)
 end
 
 function MenuPage._BuildContent(state)
     local hasSave = SaveLoad.HasSave()
-    local slots = SaveLoad.ListSlots()
 
     saveCardRef_ = MenuPage._CreateSaveCard(state, hasSave)
-    slotsCardRef_ = MenuPage._CreateSlotsCard(state, slots)
 
     return UI.Panel {
         id = "menuContent",
@@ -60,11 +55,8 @@ function MenuPage._BuildContent(state)
             -- 音量设置卡片
             MenuPage._CreateAudioCard(),
 
-            -- 存档操作卡片
+            -- 存档操作卡片（含双槽位读档）
             saveCardRef_,
-
-            -- 存档列表卡片
-            slotsCardRef_,
 
             -- 游戏统计
             MenuPage._CreateStatsCard(state),
@@ -191,8 +183,115 @@ function MenuPage._CreateAudioCard()
     }
 end
 
+--- 格式化存档时间戳为可读文本
+function MenuPage._FormatTimestamp(ts)
+    if not ts or ts == 0 then return "未知时间" end
+    local d = os.date("*t", ts)
+    if not d then return "未知时间" end
+    return string.format("%d/%02d/%02d %02d:%02d", d.year, d.month, d.day, d.hour, d.min)
+end
+
+--- 创建存档槽位信息行（用于展示 auto/manual 槽位状态）
+function MenuPage._CreateSlotInfoRow(label, info, onLoad)
+    if not info then
+        return UI.Panel {
+            width = "100%",
+            padding = 8,
+            backgroundColor = C.bg_elevated,
+            borderRadius = S.radius_card,
+            flexDirection = "row",
+            alignItems = "center",
+            children = {
+                UI.Label {
+                    text = label,
+                    fontSize = F.body_minor,
+                    fontWeight = "bold",
+                    fontColor = C.text_muted,
+                    width = 70,
+                },
+                UI.Label {
+                    text = "空",
+                    fontSize = F.body_minor,
+                    fontColor = C.text_muted,
+                    flexGrow = 1,
+                },
+            },
+        }
+    end
+
+    local timeStr = MenuPage._FormatTimestamp(info.timestamp)
+    local turnStr = string.format("%d年Q%d  第%d回合", info.year, info.quarter, info.turn_count)
+    local cashStr = string.format("💰%d  🥇%d", info.cash, info.gold)
+
+    return UI.Panel {
+        width = "100%",
+        padding = 8,
+        backgroundColor = C.bg_elevated,
+        borderRadius = S.radius_card,
+        flexDirection = "column",
+        gap = 4,
+        children = {
+            UI.Panel {
+                width = "100%",
+                flexDirection = "row",
+                alignItems = "center",
+                gap = 6,
+                children = {
+                    UI.Label {
+                        text = label,
+                        fontSize = F.body_minor,
+                        fontWeight = "bold",
+                        fontColor = C.accent_gold,
+                        width = 70,
+                    },
+                    UI.Label {
+                        text = turnStr,
+                        fontSize = F.body_minor,
+                        fontColor = C.text_primary,
+                        flexGrow = 1,
+                        flexShrink = 1,
+                    },
+                    UI.Button {
+                        text = "读取",
+                        fontSize = F.label,
+                        height = 26,
+                        paddingHorizontal = 10,
+                        variant = "primary",
+                        borderRadius = S.radius_btn,
+                        onClick = onLoad,
+                    },
+                },
+            },
+            UI.Panel {
+                width = "100%",
+                flexDirection = "row",
+                justifyContent = "space-between",
+                children = {
+                    UI.Label {
+                        text = cashStr,
+                        fontSize = F.label,
+                        fontColor = C.text_secondary,
+                    },
+                    UI.Label {
+                        text = timeStr,
+                        fontSize = F.label,
+                        fontColor = C.text_muted,
+                    },
+                },
+            },
+        },
+    }
+end
+
 --- 存档操作卡片内部子元素列表
 function MenuPage._CreateSaveCardInner(state, hasSave)
+    local autoInfo = SaveLoad.GetSlotInfo(SaveLoad.SLOT_AUTO)
+    local manualInfo = SaveLoad.GetSlotInfo(SaveLoad.SLOT_MANUAL)
+    -- 兼容旧版 autosave
+    if not autoInfo then
+        autoInfo = SaveLoad.GetSlotInfo()
+    end
+
     return {
         UI.Label {
             text = "存档管理",
@@ -201,7 +300,7 @@ function MenuPage._CreateSaveCardInner(state, hasSave)
             fontColor = C.text_primary,
         },
         UI.Divider { color = C.divider },
-        -- 快速存档
+        -- 快速存档（存到 manual 槽）
         UI.Button {
             text = "快速存档",
             width = "100%",
@@ -215,19 +314,24 @@ function MenuPage._CreateSaveCardInner(state, hasSave)
                 MenuPage._OnQuickSave()
             end,
         },
-        -- 快速读档
-        UI.Button {
-            text = "快速读档",
-            width = "100%",
-            height = 36,
-            fontSize = F.body,
-            variant = "outlined",
-            disabled = not hasSave,
-            borderRadius = S.radius_btn,
-            onClick = function(self)
-                MenuPage._OnQuickLoad()
-            end,
+        UI.Divider { color = C.divider },
+        -- 双槽位读档
+        UI.Label {
+            text = "选择存档读取",
+            fontSize = F.body_minor,
+            fontWeight = "bold",
+            fontColor = C.text_secondary,
         },
+        MenuPage._CreateSlotInfoRow("自动存档", autoInfo, function(self)
+            MenuPage._OnLoadSlot(autoInfo and SaveLoad.SLOT_AUTO or nil)
+        end),
+        MenuPage._CreateSlotInfoRow("手动存档", manualInfo, function(self)
+            if manualInfo then
+                MenuPage._OnLoadSlot(SaveLoad.SLOT_MANUAL)
+            else
+                UI.Toast.Show("暂无手动存档", { variant = "warning", duration = 1.5 })
+            end
+        end),
         UI.Divider { color = C.divider },
         -- 新游戏
         UI.Button {
@@ -244,7 +348,7 @@ function MenuPage._CreateSaveCardInner(state, hasSave)
             end,
         },
         UI.Label {
-            text = "新游戏将覆盖当前进度（自动存档会保留）",
+            text = "新游戏将覆盖当前进度",
             fontSize = F.label,
             fontColor = C.text_muted,
             textAlign = "center",
@@ -265,94 +369,6 @@ function MenuPage._CreateSaveCard(state, hasSave)
         flexDirection = "column",
         gap = 8,
         children = MenuPage._CreateSaveCardInner(state, hasSave),
-    }
-end
-
---- 存档列表卡片内部子元素列表
-function MenuPage._CreateSlotsCardInner(state, slots)
-    local slotChildren = {
-        UI.Label {
-            text = "存档列表",
-            fontSize = F.subtitle,
-            fontWeight = "bold",
-            fontColor = C.text_primary,
-        },
-        UI.Divider { color = C.divider },
-    }
-
-    if #slots == 0 then
-        table.insert(slotChildren, UI.Label {
-            text = "暂无存档",
-            fontSize = F.body_minor,
-            fontColor = C.text_muted,
-            textAlign = "center",
-        })
-    else
-        for _, slot in ipairs(slots) do
-            table.insert(slotChildren, UI.Panel {
-                width = "100%",
-                padding = 8,
-                backgroundColor = C.bg_elevated,
-                borderRadius = S.radius_card,
-                flexDirection = "row",
-                alignItems = "center",
-                gap = 8,
-                children = {
-                    UI.Label {
-                        text = slot,
-                        fontSize = F.body,
-                        fontColor = C.text_primary,
-                        flexGrow = 1,
-                        flexShrink = 1,
-                    },
-                    UI.Button {
-                        text = "读取",
-                        fontSize = F.label,
-                        height = 26,
-                        paddingHorizontal = 10,
-                        variant = "primary",
-                        borderRadius = S.radius_btn,
-                        onClick = (function(slotName)
-                            return function(self)
-                                MenuPage._OnLoadSlot(slotName)
-                            end
-                        end)(slot),
-                    },
-                    UI.Button {
-                        text = "删除",
-                        fontSize = F.label,
-                        height = 26,
-                        paddingHorizontal = 10,
-                        variant = "outlined",
-                        fontColor = C.accent_red,
-                        borderColor = C.accent_red,
-                        borderRadius = S.radius_btn,
-                        onClick = (function(slotName)
-                            return function(self)
-                                MenuPage._OnDeleteSlot(slotName)
-                            end
-                        end)(slot),
-                    },
-                },
-            })
-        end
-    end
-
-    return slotChildren
-end
-
---- 存档列表卡片（容器 + 内容）
-function MenuPage._CreateSlotsCard(state, slots)
-    return UI.Panel {
-        width = "100%",
-        padding = S.card_padding,
-        backgroundColor = C.paper_dark,
-        borderRadius = S.radius_card,
-        borderWidth = 1,
-        borderColor = C.border_card,
-        flexDirection = "column",
-        gap = 6,
-        children = MenuPage._CreateSlotsCardInner(state, slots),
     }
 end
 
@@ -452,34 +468,18 @@ end
 -- 操作回调
 -- ============================================================================
 
---- 快速存档
+--- 快速存档（存到 manual 槽）
 function MenuPage._OnQuickSave()
     if not stateRef_ then return end
-    local ok = SaveLoad.Save(stateRef_)
+    local ok = SaveLoad.Save(stateRef_, SaveLoad.SLOT_MANUAL)
     if ok then
-        UI.Toast.Show("存档成功", { variant = "success", duration = 1.5 })
+        UI.Toast.Show("手动存档成功", { variant = "success", duration = 1.5 })
     else
         UI.Toast.Show("存档失败", { variant = "error", duration = 1.5 })
     end
     if onStateChanged_ then onStateChanged_() end
     -- 局部刷新存档卡片（不重建 Modal）
     MenuPage._RefreshSaveCards()
-end
-
---- 快速读档
-function MenuPage._OnQuickLoad()
-    local loaded = SaveLoad.Load()
-    if loaded then
-        loaded.ap.max = GameState.CalcMaxAP(loaded)
-        loaded.ap.current = math.min(loaded.ap.current, loaded.ap.max)
-
-        UI.Toast.Show("读档成功：" .. GameState.GetTurnText(loaded), { variant = "success", duration = 1.5 })
-        if onNewGame_ then
-            onNewGame_(loaded)
-        end
-    else
-        UI.Toast.Show("读档失败", { variant = "error", duration = 1.5 })
-    end
 end
 
 --- 读取指定存档
@@ -498,19 +498,6 @@ function MenuPage._OnLoadSlot(slotName)
     end
 end
 
---- 删除指定存档
-function MenuPage._OnDeleteSlot(slotName)
-    local ok = SaveLoad.Delete(slotName)
-    if ok then
-        UI.Toast.Show("已删除：" .. slotName, { variant = "warning", duration = 1.5 })
-    else
-        UI.Toast.Show("删除失败", { variant = "error", duration = 1.5 })
-    end
-    if onStateChanged_ then onStateChanged_() end
-    -- 局部刷新存档卡片（不重建 Modal）
-    MenuPage._RefreshSaveCards()
-end
-
 --- 新游戏
 function MenuPage._OnNewGame()
     local newState = GameState.CreateNew()
@@ -527,21 +514,12 @@ end
 function MenuPage._RefreshSaveCards()
     if not stateRef_ then return end
     local hasSave = SaveLoad.HasSave()
-    local slots = SaveLoad.ListSlots()
 
-    -- 替换存档操作卡片内容
+    -- 替换存档操作卡片内容（含双槽位读档）
     if saveCardRef_ then
         saveCardRef_:ClearChildren()
         for _, child in ipairs(MenuPage._CreateSaveCardInner(stateRef_, hasSave)) do
             saveCardRef_:AddChild(child)
-        end
-    end
-
-    -- 替换存档列表卡片内容
-    if slotsCardRef_ then
-        slotsCardRef_:ClearChildren()
-        for _, child in ipairs(MenuPage._CreateSlotsCardInner(stateRef_, slots)) do
-            slotsCardRef_:AddChild(child)
         end
     end
 end

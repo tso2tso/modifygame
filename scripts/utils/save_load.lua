@@ -9,6 +9,10 @@ local SAVE_VERSION = "0.4.0"
 local SAVE_DIR  = "saves"
 local SAVE_FILE = "saves/autosave.json"
 
+-- 双槽位常量
+SaveLoad.SLOT_AUTO   = "auto"
+SaveLoad.SLOT_MANUAL = "manual"
+
 --- 保存游戏状态到文件
 ---@param state table 完整游戏状态
 ---@param slotName string|nil 存档槽名（默认 autosave）
@@ -120,6 +124,36 @@ function SaveLoad.Delete(slotName)
         end
     end
     return false
+end
+
+--- 获取存档元信息（不完整反序列化，用于 UI 展示）
+---@param slotName string|nil
+---@return table|nil info { slot, timestamp, year, quarter, turn_count, cash, gold }
+function SaveLoad.GetSlotInfo(slotName)
+    local filename = slotName
+        and (SAVE_DIR .. "/" .. slotName .. ".json")
+        or SAVE_FILE
+    if not fileSystem:FileExists(filename) then return nil end
+    local file = File(filename, FILE_READ)
+    if not file:IsOpen() then return nil end
+    local content = file:ReadString()
+    file:Close()
+    if not content or #content < 10 then return nil end
+    if content:find('"_deleted"') then return nil end
+
+    local ok, saveData = pcall(cjson.decode, content)
+    if not ok or not saveData or not saveData.state then return nil end
+
+    local s = saveData.state
+    return {
+        slot = slotName or "autosave",
+        timestamp = saveData.timestamp or 0,
+        year = s.year or 1904,
+        quarter = s.quarter or 1,
+        turn_count = s.turn_count or 0,
+        cash = s.cash or 0,
+        gold = s.gold or 0,
+    }
 end
 
 --- 列出所有有效存档槽（排除已删除的）

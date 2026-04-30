@@ -77,8 +77,9 @@ function Start()
         _origToastShow(msg, opts)
     end
 
-    -- 2. 尝试读取存档，否则新建游戏
-    local loaded = SaveLoad.Load()
+    -- 2. 尝试读取存档（优先 auto 槽，兼容旧 autosave）
+    local loaded = SaveLoad.Load(SaveLoad.SLOT_AUTO)
+        or SaveLoad.Load()  -- 兼容旧版 autosave.json
     if loaded then
         state_ = loaded
         print(string.format("读档成功：%s，现金 %d，黄金 %d",
@@ -132,6 +133,15 @@ function Start()
     SubscribeToEvent("Update", "HandleUpdate")
     SubscribeToEvent("KeyDown", "HandleKeyDown")
 
+    -- 5.0 切后台自动存档（移动端最可靠的保存时机）
+    SubscribeToEvent("AppMinimized", function()
+        if state_ then
+            state_.audio_settings = AudioManager.GetSettings()
+            SaveLoad.Save(state_, SaveLoad.SLOT_AUTO)
+            print("[AppMinimized] 切后台，已自动存档到 auto 槽")
+        end
+    end)
+
     -- 5.1 全局触控按下位置跟踪（供 Config.TapGuard 滑动/点击区分）
     SubscribeToEvent("MouseButtonDown", function()
         Config.TapDown()
@@ -151,7 +161,7 @@ function Start()
                     Events.Enqueue(state_, startEvents)
                     UIManager.RefreshAll(state_)
                 end
-                SaveLoad.Save(state_)
+                SaveLoad.Save(state_, SaveLoad.SLOT_AUTO)
             end)
         else
             local startEvents = Events.CheckEvents(state_)
@@ -168,7 +178,7 @@ end
 function Stop()
     if state_ then
         state_.audio_settings = AudioManager.GetSettings()
-        SaveLoad.Save(state_)
+        SaveLoad.Save(state_, SaveLoad.SLOT_AUTO)
     end
     UI.Shutdown()
     print("=== 游戏退出 ===")
@@ -213,7 +223,7 @@ function HandleNewGame(newState)
                 Events.Enqueue(state_, startEvents)
                 UIManager.RefreshAll(state_)
             end
-            SaveLoad.Save(state_)
+            SaveLoad.Save(state_, SaveLoad.SLOT_AUTO)
         end)
     elseif state_.turn_count == 0 then
         local startEvents = Events.CheckEvents(state_)
@@ -498,8 +508,8 @@ function ApplyBankruptcyRescue(state, rescueCash)
         "🆘 破产免死：观看广告获得 %s 克朗紧急救济金，家族转危为安",
         Config.FormatNumber(rescueCash)))
 
-    -- 存档
-    SaveLoad.Save(state)
+    -- 存档（关键事件存到 auto 槽）
+    SaveLoad.Save(state, SaveLoad.SLOT_AUTO)
 
     -- 提示
     UI.Toast.Show(string.format("🆘 紧急救济！\n+%s 克朗，家族暂时脱离破产危机",
@@ -545,9 +555,6 @@ function FinalizeEndTurn()
     for _, w in ipairs(report.warnings or {}) do
         table.insert(state_.turn_messages, { text = w, type = "warning" })
     end
-
-    -- 自动存档
-    SaveLoad.Save(state_)
 
     -- 刷新 UI
     UIManager.RefreshAll(state_)
