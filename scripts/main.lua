@@ -431,6 +431,7 @@ function ShowBankruptcyRescueModal(state)
                         width = "100%",
                         onClick = function(self)
                             modal:Close()
+                            modal:Destroy()
                             ---@diagnostic disable-next-line: undefined-global
                             sdk:ShowRewardVideoAd(function(result)
                                 if not result.success then
@@ -441,11 +442,9 @@ function ShowBankruptcyRescueModal(state)
                                         UI.Toast.Show("广告播放失败: " .. (result.msg or "未知错误"),
                                             { variant = "error", duration = 1.5 })
                                     end
-                                    -- 广告失败/取消 → 走正常破产流程
                                     ProceedBankruptcy(state)
                                     return
                                 end
-                                -- 广告成功 → 救活
                                 ApplyBankruptcyRescue(state, rescueCash)
                             end)
                         end,
@@ -456,6 +455,7 @@ function ShowBankruptcyRescueModal(state)
                         width = "100%",
                         onClick = function(self)
                             modal:Close()
+                            modal:Destroy()
                             ProceedBankruptcy(state)
                         end,
                     },
