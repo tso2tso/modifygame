@@ -261,7 +261,8 @@ local function showTechDetail(state, tech, accent)
     local hasOtherInProgress = inProgress and inProgress.id ~= tech.id
     local reqMet = checkReqMet(tech.requires, researched)
     local isExcluded = tech.excludes and researched[tech.excludes] == true
-    local canAfford = state.cash >= tech.cost
+    local inflatedCost = math.floor(tech.cost * GameState.GetInflationFactor(state))
+    local canAfford = state.cash >= inflatedCost
     local hasAP = (state.ap.current + (state.ap.temp or 0)) >= Balance.TECH.base_research_ap
 
     -- 状态标签
@@ -407,7 +408,7 @@ local function showTechDetail(state, tech, accent)
         gap = 12,
         children = {
             UI.Label {
-                text = string.format("费用 %d 克朗", tech.cost),
+                text = string.format("费用 %d 克朗", inflatedCost),
                 fontSize = F.body_minor,
                 fontColor = canAfford and C.text_primary or C.accent_red,
             },
@@ -529,7 +530,8 @@ local function getTechState(state, tech)
     local isDone = researched[tech.id] == true
     local isProgress = inProgress and inProgress.id == tech.id
     local hasOtherProgress = inProgress and inProgress.id ~= tech.id
-    local canAfford = state.cash >= tech.cost
+    local inflatedCost = math.floor(tech.cost * GameState.GetInflationFactor(state))
+    local canAfford = state.cash >= inflatedCost
     local hasAP = (state.ap.current + (state.ap.temp or 0)) >= Balance.TECH.base_research_ap
     local canStart = (not isDone) and (not isProgress) and (not isExcluded)
         and reqMet and canAfford and hasAP and not hasOtherProgress
@@ -564,6 +566,7 @@ local function getTechState(state, tech)
         canAfford = canAfford,
         hasAP = hasAP,
         canStart = canStart,
+        inflatedCost = inflatedCost,
     }
 end
 
@@ -837,7 +840,7 @@ local function createTechDetailPanel(state, accent, techId)
             gap = 12,
             children = {
                 UI.Label {
-                    text = "费用 " .. tech.cost,
+                    text = "费用 " .. st.inflatedCost,
                     fontSize = F.body_minor,
                     fontColor = st.canAfford and C.text_primary or C.accent_red,
                 },
@@ -1102,12 +1105,13 @@ function ActionModals.ShowIntelligence(state, accent)
     ActionModals._ShowList("👁️ 情报行动", rows)
 end
 
---- 检查是否负担得起（AP + 现金 + 可选 influence）
+--- 检查是否负担得起（AP + 现金×通胀 + 可选 influence）
 ---@param state table
 ---@param cfg table { ap, cash }
 ---@param influenceCost number|nil 额外的影响力消耗（可选）
 function ActionModals._CanAfford(state, cfg, influenceCost)
-    if state.cash < (cfg.cash or 0) then return false end
+    local inflation = GameState.GetInflationFactor(state)
+    if state.cash < math.floor((cfg.cash or 0) * inflation) then return false end
     if (state.ap.current + (state.ap.temp or 0)) < (cfg.ap or 0) then return false end
     if influenceCost and influenceCost > 0 then
         local totalInfluence = GameState.CalcTotalInfluence(state)
@@ -1116,7 +1120,7 @@ function ActionModals._CanAfford(state, cfg, influenceCost)
     return true
 end
 
---- 原子扣费：同时扣 AP、现金、可选 influence
+--- 原子扣费：同时扣 AP、现金×通胀、可选 influence
 ---@param state table
 ---@param cfg table
 ---@param influenceCost number|nil
@@ -1124,7 +1128,8 @@ function ActionModals._Spend(state, cfg, influenceCost)
     if not ActionModals._CanAfford(state, cfg, influenceCost) then return false end
     local apOk = GameState.SpendAP(state, cfg.ap or 0)
     if not apOk then return false end
-    state.cash = state.cash - (cfg.cash or 0)
+    local inflation = GameState.GetInflationFactor(state)
+    state.cash = state.cash - math.floor((cfg.cash or 0) * inflation)
     -- 扣除 influence：按比例从各地区扣减
     if influenceCost and influenceCost > 0 then
         local totalInf = GameState.CalcTotalInfluence(state)
@@ -1336,12 +1341,13 @@ function ActionModals.ShowTrade(state, accent)
     end
 
     -- 对 AI 发起资本攻击
+    local inflationFactor = GameState.GetInflationFactor(state)
     for _, faction in ipairs(state.ai_factions) do
         local factionLocal = faction
         table.insert(rows, ActionModals._TradeOption(
             "⚔ 资本攻击：" .. faction.name,
             string.format("花 %d 克朗削弱 AI 资金 %d / 势力 -%d",
-                Balance.TRADE.raid_ai.cash,
+                math.floor(Balance.TRADE.raid_ai.cash * inflationFactor),
                 Balance.TRADE.raid_ai.ai_cash_loss,
                 Balance.TRADE.raid_ai.power_loss),
             accent,
@@ -1352,7 +1358,7 @@ function ActionModals.ShowTrade(state, accent)
         table.insert(rows, ActionModals._TradeOption(
             "🛡 武装突袭：" .. faction.name,
             string.format("花 %d 克朗 / %d AP 发动一次军事打击，胜负会改变地区控制",
-                attackCfg.cash, attackCfg.ap),
+                math.floor(attackCfg.cash * inflationFactor), attackCfg.ap),
             C.accent_red,
             function() ActionModals._TradeMilitaryStrike(state, factionLocal) end,
             not ActionModals._CanAfford(state, attackCfg)

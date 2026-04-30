@@ -5,7 +5,7 @@
     "id": "977458462"
   },
   "entry": "main.lua",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "taptap_publish": {
     "title": "萨拉热窝：黄金家族",
     "description": "你将从一块不起眼的矿权开始，建立属于自己的家族基业。开采资源、扩张产业、操控市场，在利润与风险之间寻找平衡。但财富从来不是终点——它只是你踏入更大棋局的门票。\n\n随着时间推进，你将亲历一个剧变的时代：\n帝国扩张、民族冲突、金融动荡、革命浪潮接踵而至。每一次重大历史事件，都不只是背景，而是你必须应对的现实。\n\n你可以专注工业，成为垄断一方的资本巨头；\n也可以涉足政治，在权力之间斡旋博弈；\n甚至暗中布局，在混乱中左右局势走向。\n\n但请记住——\n家族的命运，从来不只取决于财富。\n\n信任、声望、风险、选择……\n你的一切决策，都将在时间中留下代价。\n\n当时代落幕时，留下的将不仅是资产负债表，\n而是一个家族的兴衰史。",
@@ -40,11 +40,11 @@
     "cover_vertical_url": "https://tapcode-sce.spark.xd.com/assets/game_material/p_nknd/cover_vertical.png"
   },
   "test_qrcode": {
-    "url": "https://tapcode-sce.spark.xd.com/qrcode/p_nknd_1777454263592.png",
-    "generated_at": "2026-04-29T09:17:43.709Z"
+    "url": "https://tapcode-sce.spark.xd.com/qrcode/p_nknd_1777472457396.png",
+    "generated_at": "2026-04-29T14:20:57.524Z"
   },
   "metadata": {
-    "updated_at": "2026-04-29T09:17:43.709Z",
+    "updated_at": "2026-04-29T14:20:57.524Z",
     "promo_dependent_hash": "4aa59da8d690510fff1690275644810a"
   }
 }

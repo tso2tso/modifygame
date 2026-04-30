@@ -72,13 +72,15 @@ function Tech.Start(state, techId)
         local exTech = TechData.GetById(tech.excludes)
         return false, "与已研发的[" .. (exTech and exTech.name or tech.excludes) .. "]互斥"
     end
-    if state.cash < tech.cost then
+    local inflation = GameState.GetInflationFactor(state)
+    local techCost = math.floor(tech.cost * inflation)
+    if state.cash < techCost then
         return false, "资金不足"
     end
     if not GameState.SpendAP(state, Balance.TECH.base_research_ap) then
         return false, "行动点不足（需要 " .. Balance.TECH.base_research_ap .. " AP）"
     end
-    state.cash = state.cash - tech.cost
+    state.cash = state.cash - techCost
 
     -- 基础研发周期
     local total = tech.turns

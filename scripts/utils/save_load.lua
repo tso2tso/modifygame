@@ -5,6 +5,7 @@
 
 local SaveLoad = {}
 
+local SAVE_VERSION = "0.4.0"
 local SAVE_DIR  = "saves"
 local SAVE_FILE = "saves/autosave.json"
 
@@ -22,7 +23,7 @@ function SaveLoad.Save(state, slotName)
 
     -- 构造存档数据（排除不需要持久化的运行时数据）
     local saveData = {
-        version = "0.3.0",
+        version = SAVE_VERSION,
         timestamp = os.time(),
         state = SaveLoad._SerializeState(state),
     }
@@ -73,9 +74,10 @@ function SaveLoad.Load(slotName)
         return nil
     end
 
-    -- 版本检查（未来可做迁移）
-    if saveData.version ~= "0.3.0" then
-        print("[SaveLoad] 存档版本：" .. tostring(saveData.version) .. "（已自动兼容 0.3.0）")
+    -- 版本检查与迁移
+    local ver = saveData.version or "0.0.0"
+    if ver ~= SAVE_VERSION then
+        print("[SaveLoad] 存档版本：" .. ver .. " → 迁移至 " .. SAVE_VERSION)
     end
 
     local state = SaveLoad._DeserializeState(saveData.state)
@@ -176,8 +178,25 @@ function SaveLoad._SerializeState(state)
     data.phase = state.phase
     data.turn_count = state.turn_count
 
+    -- 贷款/破产追踪
+    data.loan_consecutive_defaults = state.loan_consecutive_defaults or 0
+    data.negative_net_worth_turns = state.negative_net_worth_turns or 0
+    data.bankrupt = state.bankrupt or false
+
+    -- 黄金自动出售
+    data.gold_auto_sell = state.gold_auto_sell or false
+
+    -- 监管压力
+    data.regulation_pressure = state.regulation_pressure or 0
+
+    -- 大国博弈系统
+    data.europe = state.europe
+    data.collaboration_score = state.collaboration_score or 0
+    data.powers = state.powers or {}
+    data.fronts = state.fronts or {}
+
     -- 家族成员
-    data.family = { members = {} }
+    data.family = { members = {}, training = state.family.training }
     for _, m in ipairs(state.family.members) do
         table.insert(data.family.members, {
             id = m.id,
@@ -330,11 +349,17 @@ end
 ---@return table state
 function SaveLoad._DeserializeState(data)
     -- 纯数据表，直接返回（加上默认值保护）
+    -- 基础字段
+    data.year = data.year or 1904
+    data.quarter = data.quarter or 1
+    data.cash = data.cash or 1000
+    data.gold = data.gold or 5
     data.ap = data.ap or { current = 6, max = 6 }
     data.ap.temp = data.ap.temp or 0
     data.ap.bonus_used = data.ap.bonus_used or 0
     data.victory = data.victory or { economic = 0, military = 0 }
     data.family = data.family or { members = {} }
+    -- family.training 可以为 nil（表示没有正在培养的成员）
     data.regions = data.regions or {}
     data.mines = data.mines or {}
     data.workers = data.workers or { hired = 10, wage = 8, morale = 70 }
@@ -367,6 +392,32 @@ function SaveLoad._DeserializeState(data)
     data.victory.claimed_year = data.victory.claimed_year
     data.victory.claimed_quarter = data.victory.claimed_quarter
     data.victory.prompt_pending = data.victory.prompt_pending
+
+    -- 贷款/破产追踪（v0.4.0 新增保存）
+    data.loan_consecutive_defaults = data.loan_consecutive_defaults or 0
+    data.negative_net_worth_turns = data.negative_net_worth_turns or 0
+    if data.bankrupt == nil then data.bankrupt = false end
+
+    -- 黄金自动出售（v0.4.0 新增保存）
+    if data.gold_auto_sell == nil then data.gold_auto_sell = false end
+
+    -- 监管压力（v0.4.0 新增保存）
+    data.regulation_pressure = data.regulation_pressure or 0
+
+    -- 大国博弈系统（v0.4.0 新增保存）
+    if not data.europe then
+        local EuropeData = require("data.europe_data")
+        data.europe = EuropeData.CreateInitial()
+        print("[SaveLoad] 旧存档迁移：初始化大国博弈地图")
+    end
+    data.collaboration_score = data.collaboration_score or 0
+    data.powers = data.powers or {}
+    data.fronts = data.fronts or {}
+
+    -- 每回合重置的运行时标记（不需要持久化，但需要有默认值）
+    if data.emergency_gold_sold == nil then data.emergency_gold_sold = false end
+    if data.culture_action_this_turn == nil then data.culture_action_this_turn = false end
+    data.turn_messages = data.turn_messages or {}
 
     for _, r in ipairs(data.regions) do
         r.influence = r.influence or 0

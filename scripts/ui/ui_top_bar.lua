@@ -642,15 +642,17 @@ function TopBar._OnBuyAP()
             { variant = "warning", duration = 1.5 })
         return
     end
-    if stateRef_.cash < cfg.cost_per_ap then
-        UI.Toast.Show("资金不足（需要 " .. cfg.cost_per_ap .. " 克朗）",
+    local inflation = GameState.GetInflationFactor(stateRef_)
+    local apCost = math.floor(cfg.cost_per_ap * inflation)
+    if stateRef_.cash < apCost then
+        UI.Toast.Show("资金不足（需要 " .. apCost .. " 克朗）",
             { variant = "error", duration = 1.5 })
         return
     end
-    stateRef_.cash = stateRef_.cash - cfg.cost_per_ap
+    stateRef_.cash = stateRef_.cash - apCost
     stateRef_.ap.temp = (stateRef_.ap.temp or 0) + 1
     stateRef_.ap.bonus_used = used + 1
-    GameState.AddLog(stateRef_, string.format("购买 1 AP（花费 %d）", cfg.cost_per_ap))
+    GameState.AddLog(stateRef_, string.format("购买 1 AP（花费 %d）", apCost))
     UI.Toast.Show("+1 AP", { variant = "success", duration = 1.2 })
     if onLightRefresh_ then onLightRefresh_()
     elseif onStateChanged_ then onStateChanged_() end

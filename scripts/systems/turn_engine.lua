@@ -68,8 +68,9 @@ function TurnEngine.EndTurn(state)
     local drift = isWarPressure and infl.quarter_drift_war or infl.quarter_drift_peace
     drift = drift + GameState.GetModifierValue(state, "inflation_drift")
     drift = math.max(infl.quarter_drift_crisis_floor or -0.015, drift)
+    -- 乘法模型：factor *= (1 + drift)，符合通胀的复利特征
     state.inflation_factor = math.max(infl.floor_factor or infl.base_factor or 1.0,
-        math.min(infl.cap_factor, (state.inflation_factor or 1.0) + drift))
+        math.min(infl.cap_factor, (state.inflation_factor or 1.0) * (1 + drift)))
 
     -- ========================================
     -- 阶段 1: 经济结算

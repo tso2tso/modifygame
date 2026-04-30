@@ -236,7 +236,8 @@ function Events.ApplyOption(state, event, optionIndex)
 
     -- 1.5 历史事件对宏观环境的直接冲击
     if effects.inflation_delta then
-        state.inflation_factor = ClampInflation((state.inflation_factor or 1.0) + effects.inflation_delta)
+        -- 乘法模型：delta 作为百分比冲击，factor *= (1 + delta)
+        state.inflation_factor = ClampInflation((state.inflation_factor or 1.0) * (1 + effects.inflation_delta))
     end
     if effects.war_state ~= nil then
         state.flags = state.flags or {}

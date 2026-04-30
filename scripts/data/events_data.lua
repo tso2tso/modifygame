@@ -370,6 +370,7 @@ function EventsData.GetFixedEvents()
                     civilian_consumption = -0.20,
                     transport_risk = 0.30,
                     worker_cost_multiplier = 0.15,
+                    tax_rate = 0.06,  -- 战争税：战争利润税+所得税加征
                 },
             },
         },
@@ -1128,6 +1129,7 @@ function EventsData.GetFixedEvents()
                             { target = "civilian_consumption", value = -0.15, duration = 8 },
                             { target = "gold_price_mod", value = 0.35, duration = 8 },
                             { target = "coal_price_mod", value = -0.25, duration = 8 },
+                            { target = "tax_rate", value = -0.03, duration = 12 },  -- 经济萎缩，税基收窄
                         },
                     },
                 },
@@ -1144,6 +1146,7 @@ function EventsData.GetFixedEvents()
                         modifiers = {
                             { target = "total_assets", value = 900, duration = 0 },
                             { target = "foreign_control", value = -6, duration = 0 },
+                            { target = "tax_rate", value = -0.03, duration = 12 },  -- 经济萎缩，税基收窄
                         },
                     },
                 },
@@ -1157,6 +1160,7 @@ function EventsData.GetFixedEvents()
                             { target = "worker_morale", value = -18, duration = 0 },
                             { target = "public_support", value = -10, duration = 0 },
                             { target = "mine_output_mult", value = -0.15, duration = 4 },
+                            { target = "tax_rate", value = -0.03, duration = 12 },  -- 经济萎缩，税基收窄
                         },
                     },
                 },
@@ -1589,6 +1593,7 @@ function EventsData.GetFixedEvents()
                             { target = "total_assets", value = 700, duration = 0 },
                             { target = "gold_price_mod", value = 0.35, duration = 10 },
                             { target = "coal_price_mod", value = 0.55, duration = 10 },
+                            { target = "tax_rate", value = 0.10, duration = 12 },  -- 占领军征收贡金
                         },
                     },
                 },
@@ -1605,6 +1610,7 @@ function EventsData.GetFixedEvents()
                             { target = "military_industry_profit", value = 0.30, duration = 10 },
                             { target = "legitimacy", value = -25, duration = 0 },
                             { target = "public_support", value = -20, duration = 0 },
+                            { target = "tax_rate", value = 0.15, duration = 12 },  -- 合作者承担更高占领税
                         },
                     },
                 },
@@ -1621,6 +1627,7 @@ function EventsData.GetFixedEvents()
                             { target = "shadow_income", value = 90, duration = 10 },
                             { target = "transport_risk", value = 0.30, duration = 10 },
                             { target = "public_support", value = 10, duration = 0 },
+                            { target = "tax_rate", value = 0.06, duration = 12 },  -- 地下经营仍受部分征税
                         },
                     },
                 },
@@ -1819,6 +1826,7 @@ function EventsData.GetFixedEvents()
                         modifiers = {
                             { target = "political_standing", value = 25, duration = 0 },
                             { target = "total_assets", value = -400, duration = 0 },
+                            { target = "tax_rate", value = 0.08, duration = 16 },  -- 新政权累进重税（顺从者较轻）
                         },
                     },
                 },
@@ -1832,6 +1840,7 @@ function EventsData.GetFixedEvents()
                         modifiers = {
                             { target = "tech_bonus", value = 10, duration = 12 },
                             { target = "legitimacy", value = 12, duration = 0 },
+                            { target = "tax_rate", value = 0.06, duration = 16 },  -- 技术官僚路线，税负较低
                         },
                     },
                 },
@@ -1846,6 +1855,7 @@ function EventsData.GetFixedEvents()
                             { target = "shadow_income", value = 50, duration = 12 },
                             { target = "corruption_risk", value = 20, duration = 12 },
                             { target = "political_standing", value = -10, duration = 0 },
+                            { target = "tax_rate", value = 0.12, duration = 16 },  -- 资本家极高税率
                         },
                     },
                 },
