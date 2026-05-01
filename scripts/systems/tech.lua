@@ -7,6 +7,7 @@
 local TechData = require("data.tech_data")
 local GameState = require("game_state")
 local Balance = require("data.balance")
+local EquipmentData = require("data.equipment_data")
 
 local Tech = {}
 
@@ -163,10 +164,11 @@ local function applyEffect(state, eff, techId)
         state.ap.current = state.ap.current + eff.value
 
     elseif eff.kind == "equipment_up" then
-        state.military.equipment = math.min(5, state.military.equipment + eff.value)
+        -- 旧字段 state.military.equipment 已弃用（新系统通过 tech.researched 判断解锁）
+        -- 装备解锁通知已移至 Tech.Complete() 统一处理
 
     elseif eff.kind == "supply_reduction" then
-        state.military.wage = math.max(6, state.military.wage - 1)
+        state.supply_reduction_bonus = (state.supply_reduction_bonus or 0) + math.abs(eff.value)
 
     elseif eff.kind == "finance_network" then
         state.finance_supply_discount = 0.20
@@ -202,6 +204,12 @@ local function applyEffect(state, eff, techId)
 
     elseif eff.kind == "hire_cost_reduction" then
         state.hire_cost_discount = (state.hire_cost_discount or 0) + eff.value
+
+    elseif eff.kind == "mine_slots" then
+        state.mine_slots_bonus = (state.mine_slots_bonus or 0) + eff.value
+
+    elseif eff.kind == "prospect_success" then
+        state.prospect_success_bonus = (state.prospect_success_bonus or 0) + eff.value
     end
 end
 
@@ -219,6 +227,14 @@ function Tech.Complete(state, techId)
     end
 
     GameState.AddLog(state, string.format("[科技] 完成：%s", tech.name))
+
+    -- 装备解锁通知：检查该科技是否关联解锁了新装备
+    local unlockEquipId = EquipmentData.TECH_UNLOCK[techId]
+    if unlockEquipId then
+        local equipDef = EquipmentData.CATALOG[unlockEquipId]
+        local equipName = equipDef and equipDef.name or unlockEquipId
+        GameState.AddLog(state, string.format("[科技] 解锁新装备：%s", equipName))
+    end
 end
 
 --- 可立即研发的科技清单（满足前置 / 未被互斥 / 未研发 / 未进行中）

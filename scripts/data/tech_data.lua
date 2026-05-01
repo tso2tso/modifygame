@@ -48,10 +48,11 @@ function TechData.GetAll()
             cost = 600, turns = 5,
             requires = "a2_steam_drill",
             era_hint = "1910s",
-            effect_desc = "矿区安全 +1，事故概率 -15%",
+            effect_desc = "矿区安全 +1，事故概率 -15%，矿山槽位 +2",
             effects = {
                 { kind = "security_bonus", value = 1 },
                 { kind = "accident_reduction", value = -0.15 },
+                { kind = "mine_slots", value = 2 },
             },
         },
         -- ── 分叉1: 通风 vs 爆破 ──
@@ -64,10 +65,11 @@ function TechData.GetAll()
             requires = "a3_electric_mine",
             excludes = "a4b_blasting",
             era_hint = "1910s",
-            effect_desc = "工人效率 +12%，事故概率 -10%",
+            effect_desc = "工人效率 +12%，事故概率 -10%，探矿成功率 +5%",
             effects = {
                 { kind = "worker_efficiency", value = 0.12 },
                 { kind = "accident_reduction", value = -0.10 },
+                { kind = "prospect_success", value = 0.05 },
             },
         },
         {
@@ -93,10 +95,11 @@ function TechData.GetAll()
             cost = 700, turns = 5,
             requires = "a4a_ventilation|a4b_blasting",
             era_hint = "1920s",
-            effect_desc = "矿山基础产出 +2，工人效率 +5%",
+            effect_desc = "矿山基础产出 +2，工人效率 +5%，矿山槽位 +2",
             effects = {
                 { kind = "mine_output_base", value = 2 },
                 { kind = "worker_efficiency", value = 0.05 },
+                { kind = "mine_slots", value = 2 },
             },
         },
         -- ── 分叉2: 液压 vs 深层 ──
@@ -123,9 +126,10 @@ function TechData.GetAll()
             requires = "a5_conveyor",
             excludes = "a6a_hydraulic",
             era_hint = "1930s",
-            effect_desc = "矿山基础产出 +4 单位/季",
+            effect_desc = "矿山基础产出 +4 单位/季，探矿成功率 +5%",
             effects = {
                 { kind = "mine_output_base", value = 4 },
+                { kind = "prospect_success", value = 0.05 },
             },
         },
         {
@@ -404,10 +408,9 @@ function TechData.GetAll()
             requires = "c5_motorized",
             excludes = "c6a_intelligence",
             era_hint = "1930s",
-            effect_desc = "护卫战斗力 +30%，装备等级 +1",
+            effect_desc = "护卫战斗力 +30%",
             effects = {
                 { kind = "guard_power_bonus", value = 0.30 },
-                { kind = "equipment_up", value = 1 },
             },
         },
         {

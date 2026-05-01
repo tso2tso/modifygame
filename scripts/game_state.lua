@@ -156,8 +156,14 @@ function GameState.CreateNew()
                 level = 1,
                 output_bonus = 0,  -- 来自科技/岗位等额外加成
                 active = true,
+                reserve = 500,     -- 独立储量（与初始 region gold_reserve 一致）
             },
         },
+        mine_slots_bonus = 0,  -- 科技解锁的额外矿山槽位
+        prospect_reserves = {},     -- 备用矿列表 { {id, name, reserve} }
+        prospecting = nil,          -- 进行中 { progress, total, success_chance }
+        prospect_success_count = 0, -- 累计成功次数（驱动递减）
+        prospect_success_bonus = 0, -- 科技提供的成功率加成
 
         -- ============================
         -- 工人
@@ -175,8 +181,16 @@ function GameState.CreateNew()
             guards    = BS.guards,
             morale    = BMI.base_morale,
             wage      = BMI.guard_wage,
-            equipment = 1,  -- 装备等级 1-5
+            equipment = 1,  -- 旧字段保留兼容（新系统不再使用）
             supply    = 20, -- 补给储备
+            -- 编队系统（新）
+            squads = {},    -- { id, name, size, equip_id, veterancy, condition, battles }
+            inventory = {}, -- 库存装备 { equip_id, condition }（未分配给编队的装备）
+            -- 兵工厂
+            factory = nil,  -- nil=未建造, { level, building={progress,total}|nil }
+            -- 生产队列
+            production_queue = {},  -- { equip_id, progress, total, source="factory" }
+            outsource_slots = {},   -- { equip_id, progress, total, source="outsource" }
         },
 
         -- ============================
@@ -507,7 +521,7 @@ end
 ---@return boolean
 function GameState.CheckEconomicSnapshot(state)
     local snap = Balance.VICTORY.economic.snapshot
-    local totalAssets = GameState.GetModifierValue(state, "total_assets")
+    local totalAssets = GameState.CalcTotalAssets(state)
     if state.cash < snap.min_cash then return false end
     if state.gold < snap.min_gold then return false end
     if GameState.CalcTotalControl(state) < snap.min_total_control then return false end
@@ -672,7 +686,7 @@ function GameState.CalcMaxAP(state)
     local ap = BA.base
 
     -- 惩罚
-    if state.flags.at_war then
+    if state.flags and state.flags.at_war then
         ap = ap + BA.war_penalty
     end
 

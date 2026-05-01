@@ -233,18 +233,83 @@ function EventModal._FormatEffects(effects, state)
         if effects.security_bonus < 0 then hasNegative = true end
     end
 
+    -- 直接效果：黄金储备
+    if effects.gold_reserve and effects.gold_reserve ~= 0 then
+        local prefix = effects.gold_reserve >= 0 and "+" or ""
+        table.insert(hints, string.format("🪙 储备 %s%d", prefix, effects.gold_reserve))
+        if effects.gold_reserve > 0 then hasPositive = true end
+        if effects.gold_reserve < 0 then hasNegative = true end
+    end
+    -- 直接效果：通胀变化
+    if effects.inflation_delta and effects.inflation_delta ~= 0 then
+        local pct = math.floor(effects.inflation_delta * 100 + 0.5)
+        local prefix = pct >= 0 and "+" or ""
+        table.insert(hints, string.format("📊 通胀 %s%d%%", prefix, pct))
+        if pct > 0 then hasNegative = true end
+        if pct < 0 then hasPositive = true end
+    end
+    -- 直接效果：战争状态
+    if effects.war_state ~= nil then
+        if effects.war_state then
+            table.insert(hints, "⚔️ 进入战争状态")
+            hasNegative = true
+        else
+            table.insert(hints, "🕊️ 战争结束")
+            hasPositive = true
+        end
+    end
+
     -- 修正器提示
     if effects.modifiers then
+        --- 修正器显示映射
+        local modDisplay = {
+            mine_output_mult       = { icon = "⛏️", label = "产出",   pct = true },
+            worker_morale          = { icon = "💪", label = "士气",   pct = false },
+            tax_rate               = { icon = "📋", label = "税率",   pct = true, invert = true },
+            transport_risk         = { icon = "🚚", label = "运输风险", pct = true, invert = true },
+            shadow_income          = { icon = "🌑", label = "暗收入", pct = false },
+            corruption_risk        = { icon = "💀", label = "腐败",   pct = false, invert = true },
+            worker_cost_multiplier = { icon = "💸", label = "工资成本", pct = true, invert = true },
+            military_industry_profit = { icon = "🏭", label = "军工利润", pct = true },
+            civilian_consumption   = { icon = "🛒", label = "民用消费", pct = true },
+            political_standing     = { icon = "🏛️", label = "政治",   pct = false },
+            legitimacy             = { icon = "📜", label = "合法性", pct = false },
+            public_support         = { icon = "👥", label = "民心",   pct = false },
+            independence           = { icon = "🗽", label = "独立性", pct = false },
+            foreign_control        = { icon = "🌐", label = "外资控制", pct = false, invert = true },
+            local_relations        = { icon = "🤝", label = "地方关系", pct = false },
+            total_assets           = { icon = "💎", label = "总资产", pct = false },
+            foreign_assets         = { icon = "🌍", label = "海外资产", pct = false },
+            tech_bonus             = { icon = "🔬", label = "科技",   pct = false },
+            worker_wage            = { icon = "💰", label = "永久工资", pct = false },
+            security               = { icon = "🛡️", label = "区域治安", pct = false },
+            trade_income_mult      = { icon = "📦", label = "贸易收入", pct = true },
+            local_reputation       = { icon = "📣", label = "本地声誉", pct = false },
+            risk                   = { icon = "⚠️", label = "风险",   pct = false, invert = true },
+            railway_blocked        = { icon = "🚂", label = "铁路封锁", pct = false, invert = true },
+        }
         for _, mod in ipairs(effects.modifiers) do
-            if mod.target == "mine_output" and mod.value ~= 0 then
-                local prefix = mod.value > 0 and "+" or ""
-                local dur = mod.duration > 0 and string.format(" (%d季)", mod.duration) or ""
-                table.insert(hints, string.format("⛏️ 产出 %s%d%s", prefix, mod.value, dur))
-                if mod.value > 0 then hasPositive = true else hasNegative = true end
-            elseif mod.target == "worker_morale" and mod.value ~= 0 then
-                local prefix = mod.value > 0 and "+" or ""
-                table.insert(hints, string.format("💪 士气 %s%d", prefix, mod.value))
-                if mod.value > 0 then hasPositive = true else hasNegative = true end
+            if mod.value ~= 0 then
+                local info = modDisplay[mod.target]
+                if info then
+                    local dur = (mod.duration and mod.duration > 0) and string.format(" (%d季)", mod.duration) or ""
+                    local display
+                    if info.pct then
+                        local pctVal = math.floor(mod.value * 100 + 0.5)
+                        local prefix = pctVal >= 0 and "+" or ""
+                        display = string.format("%s %s %s%d%%%s", info.icon, info.label, prefix, pctVal, dur)
+                    else
+                        local prefix = mod.value >= 0 and "+" or ""
+                        display = string.format("%s %s %s%g%s", info.icon, info.label, prefix, mod.value, dur)
+                    end
+                    table.insert(hints, display)
+                    -- 判断正负面：invert 的指标，数值越大越"负面"
+                    if info.invert then
+                        if mod.value > 0 then hasNegative = true else hasPositive = true end
+                    else
+                        if mod.value > 0 then hasPositive = true else hasNegative = true end
+                    end
+                end
             end
         end
     end

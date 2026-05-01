@@ -5,6 +5,8 @@
 
 local Balance = require("data.balance")
 local GameState = require("game_state")
+local Equipment = require("systems.equipment")
+local EquipmentData = require("data.equipment_data")
 
 local BC = Balance.COMBAT
 local BMI = Balance.MILITARY
@@ -48,14 +50,29 @@ end
 ---@return number power
 function Combat.PlayerPower(state)
     local m = state.military
-    local base = m.guards * BMI.guard_base_power
+    local totalPower = 0
+
+    -- 编队战力（新系统）
+    if m.squads and #m.squads > 0 then
+        for _, squad in ipairs(m.squads) do
+            totalPower = totalPower + Equipment.CalcSquadPower(squad)
+        end
+        -- 未编队护卫（60% 效率，T1 装备）
+        local unassigned = Equipment.GetUnassignedGuards(state)
+        totalPower = totalPower + unassigned * EquipmentData.SQUAD.unassigned_power
+    else
+        -- 兼容：无编队时 fallback 旧公式基础部分
+        local base = m.guards * BMI.guard_base_power
+        local equipMul = 1.0 + ((m.equipment or 1) - 1) * BC.equipment_bonus
+        totalPower = base * equipMul
+    end
+
     local moraleMul = math.max(0.3, m.morale * BMI.morale_multiplier)
-    local equipMul = 1.0 + (m.equipment - 1) * BC.equipment_bonus
     -- 军务主管加成
     local chiefBonus = GameState.GetPositionBonus(state, "military_chief")
     -- 科技护卫战力加成
     local techBonus = state.guard_power_tech_bonus or 0
-    return base * moraleMul * equipMul * (1 + chiefBonus) * (1 + techBonus)
+    return totalPower * moraleMul * (1 + chiefBonus) * (1 + techBonus)
 end
 
 ---@param faction table
@@ -134,13 +151,28 @@ function Combat.ApplyResult(state, faction, result)
         m.morale = math.min(100, m.morale + BC.win_morale)
         state.battle_wins_total = (state.battle_wins_total or 0) + 1
         state.battle_wins_unclaimed = (state.battle_wins_unclaimed or 0) + 1
+        -- 编队战后处理：耐久衰减 + 老兵经验
+        Equipment.OnBattleEnd(state, nil)
         local mapImpact = Combat.ApplyMapImpact(state, faction, result) or ""
         log = string.format("⚔ 击退 %s，缴获 %d 现金，护卫士气+%d%s",
             faction.name, loot, BC.win_morale, mapImpact)
+        -- 检查是否触发瘫痪
+        local colCfg = Balance.AI.collapse
+        if not faction.collapsed
+            and faction.power <= colCfg.power_threshold
+            and faction.cash <= colCfg.cash_threshold then
+            faction.collapsed = true
+            faction.collapsed_seasons = 0
+            log = log .. string.format("\n💀 %s 势力崩溃，陷入瘫痪！", faction.name)
+        end
     else
         -- 败：损失护卫 + 士气，丢失一部分现金被抢
         local lost = math.ceil(m.guards * BC.lose_guards_ratio)
+        -- 编队战后处理：先计算耐久衰减（包含即将解散的小队），再减员
+        Equipment.OnBattleEnd(state, nil)
         m.guards = math.max(0, m.guards - lost)
+        -- 编队减员同步
+        Equipment.OnGuardsLost(state, lost)
         m.morale = math.max(0, m.morale + BC.lose_morale)
         local pillage = math.floor(state.cash * 0.10)
         state.cash = math.max(0, state.cash - pillage)
@@ -164,6 +196,8 @@ end
 function Combat.ResolveAIActions(state)
     local messages = {}
     for _, faction in ipairs(state.ai_factions) do
+        -- 瘫痪状态的势力不会主动进攻
+        if faction.collapsed then goto continue_ai end
         if not faction.pact_remaining or faction.pact_remaining <= 0 then
             local aiConfig = Balance.AI[faction.type] or {}
             local chance = BC.ai_attack_chance * (1 + (aiConfig.aggression or 0))
@@ -175,6 +209,7 @@ function Combat.ResolveAIActions(state)
                 table.insert(messages, log)
             end
         end
+        ::continue_ai::
     end
     return messages
 end

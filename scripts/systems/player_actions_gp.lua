@@ -6,6 +6,7 @@
 local Balance    = require("data.balance")
 local GameState  = require("game_state")
 local GrandPowers = require("systems.grand_powers")
+local Equipment  = require("systems.equipment")
 
 local PlayerActionsGP = {}
 
@@ -89,12 +90,17 @@ ACTIONS.send_volunteers = {
     execute = function(state, powerId)
         local power = state.powers[powerId]
         local loss = math.random(2, 4)
+        local oldGuards = state.military.guards
         state.military.guards = math.max(0, state.military.guards - loss)
+        local actualLoss = oldGuards - state.military.guards
+        if actualLoss > 0 then
+            Equipment.OnGuardsLost(state, actualLoss)
+        end
         power.military = math.min(100, power.military + 1)
         power.attitude_to_player = math.min(100, power.attitude_to_player + 15)
         state.collaboration_score = (state.collaboration_score or 0) + 8
-        GameState.AddLog(state, string.format("向 %s 派遣志愿军，损失 %d 名武装", power.label, loss))
-        return string.format("派遣志愿军，损失 %d 武装", loss)
+        GameState.AddLog(state, string.format("向 %s 派遣志愿军，损失 %d 名武装", power.label, actualLoss))
+        return string.format("派遣志愿军，损失 %d 武装", actualLoss)
     end,
 }
 
@@ -274,13 +280,18 @@ ACTIONS.sabotage_supply = {
     execute = function(state, powerId)
         local power = state.powers[powerId]
         local loss = math.random(1, 3)
+        local oldGuards = state.military.guards
         state.military.guards = math.max(0, state.military.guards - loss)
+        local actualLoss = oldGuards - state.military.guards
+        if actualLoss > 0 then
+            Equipment.OnGuardsLost(state, actualLoss)
+        end
         power.war_fatigue = math.min(100, power.war_fatigue + 3)
         power.military = math.max(0, power.military - 1)
         state.collaboration_score = (state.collaboration_score or 0) - 10
         power.attitude_to_player = math.max(-100, power.attitude_to_player - 15)
-        GameState.AddLog(state, string.format("破坏 %s 补给线，损失 %d 名武装", power.label, loss))
-        return string.format("破坏补给线，%s 军事 -1，损失 %d 武装", power.label, loss)
+        GameState.AddLog(state, string.format("破坏 %s 补给线，损失 %d 名武装", power.label, actualLoss))
+        return string.format("破坏补给线，%s 军事 -1，损失 %d 武装", power.label, actualLoss)
     end,
 }
 

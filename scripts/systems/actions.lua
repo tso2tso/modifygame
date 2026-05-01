@@ -17,10 +17,12 @@ local Actions = {}
 ---@return boolean success
 function Actions.HireWorkers(state, count, onDone)
     count = count or 5
+    local hireCostMul = math.max(0.5, 1.0 + (state.hire_cost_discount or 0))
     local hireCost = math.floor(
         Balance.WORKERS.hire_cost
         * GameState.GetLaborCostFactor(state)
         * (1 - GameState.GetInfluenceRecruitDiscount(state))
+        * hireCostMul
     ) * count
 
     if state.cash < hireCost then
@@ -53,15 +55,10 @@ function Actions.UpgradeMine(state, mine, onDone)
         return false
     end
 
-    -- 矿区资源耗尽检查
-    local region = GameState.GetRegion(state, mine.region_id)
-    if region then
-        local goldRes = region.resources.gold_reserve or 0
-        local silverRes = region.resources.silver_reserve or 0
-        if goldRes <= 0 and silverRes <= 0 then
-            UI.Toast.Show("矿区资源已耗尽，无法升级", { variant = "error", duration = 2 })
-            return false
-        end
+    -- 矿山储量耗尽检查
+    if (mine.reserve or 0) <= 0 then
+        UI.Toast.Show("矿山储量已耗尽，无法升级", { variant = "error", duration = 2 })
+        return false
     end
 
     local cost = math.floor(

@@ -31,7 +31,7 @@ function EventsData.GetFixedEvents()
             options = {
                 {
                     text = "稳扎稳打，小规模开采",
-                    desc = "控制风险，积累经验",
+                    desc = "小本经营，稳中求进",
                     effects = {
                         cash = -100,
                         gold_reserve = 30,
@@ -43,7 +43,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "大胆投入，扩大开采规模",
-                    desc = "高风险高回报",
+                    desc = "大投入大回报，但资金压力不小",
                     effects = {
                         cash = -300,
                         gold_reserve = 50,
@@ -56,7 +56,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "拉拢当地势力，合资开发",
-                    desc = "分享利润换取保护",
+                    desc = "花小钱交朋友，换来本地人脉",
                     effects = {
                         cash = -50,
                         gold_reserve = 20,
@@ -82,7 +82,7 @@ function EventsData.GetFixedEvents()
             options = {
                 {
                     text = "投资车站和装卸设施",
-                    desc = "提高运输效率，短期资金承压",
+                    desc = "重金投资运输基建，长期降低物流风险",
                     effects = {
                         cash = -180,
                         inflation_delta = 0.005,
@@ -96,7 +96,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "与铁路公司签订长期运价",
-                    desc = "稳定现金流，但受外资牵制",
+                    desc = "赚到现钱，但让外资插手经营",
                     effects = {
                         cash = 120,
                         modifiers = {
@@ -107,7 +107,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "维持骡队运输",
-                    desc = "保守独立，错过扩张窗口",
+                    desc = "保住独立自主，但运输效率落后",
                     effects = {
                         modifiers = {
                             { target = "independence", value = 8, duration = 0 },
@@ -131,7 +131,7 @@ function EventsData.GetFixedEvents()
             options = {
                 {
                     text = "建设体面宿舍和医务间",
-                    desc = "花费较高，减少劳资冲突",
+                    desc = "工人满意、口碑提升，但长期人力成本增加",
                     effects = {
                         cash = -220,
                         modifiers = {
@@ -143,7 +143,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "只修必要铺位",
-                    desc = "控制成本，士气小幅提升",
+                    desc = "凑合过关，小幅改善",
                     effects = {
                         cash = -80,
                         modifiers = {
@@ -153,7 +153,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "把宿舍包给地方承包人",
-                    desc = "省钱但埋下治安隐患",
+                    desc = "省钱又拉关系，但工人怨声载道",
                     effects = {
                         cash = 40,
                         security_bonus = -1,
@@ -180,7 +180,7 @@ function EventsData.GetFixedEvents()
             options = {
                 {
                     text = "依法缴税，申请合法许可",
-                    desc = "安全但代价不小",
+                    desc = "守法经营赢得信誉，但税负永久加重",
                     effects = {
                         cash = -200,
                         inflation_delta = 0.01,
@@ -192,7 +192,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "行贿地方官员，减免税负",
-                    desc = "走捷径",
+                    desc = "走歪路省税钱，但腐败缠身",
                     effects = {
                         cash = -120,
                         modifiers = {
@@ -203,7 +203,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "部分生产转入地下",
-                    desc = "风险极高但利润丰厚",
+                    desc = "铤而走险赚快钱，治安隐患加剧",
                     effects = {
                         cash = 50,
                         inflation_drift_mod = 0.002,
@@ -230,7 +230,7 @@ function EventsData.GetFixedEvents()
             options = {
                 {
                     text = "资助亲商议员参选",
-                    desc = "建立政治网络，降低税务风险",
+                    desc = "花钱培养政治盟友，换来税负减免",
                     effects = {
                         cash = -160,
                         inflation_delta = 0.005,
@@ -242,7 +242,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "保持距离，专注矿业",
-                    desc = "不卷入政治旋涡",
+                    desc = "不趟浑水，专注本业",
                     effects = {
                         modifiers = {
                             { target = "mine_output_mult", value = 0.05, duration = 4 },
@@ -265,7 +265,7 @@ function EventsData.GetFixedEvents()
             options = {
                 {
                     text = "囤积物资，静观其变",
-                    desc = "保守但安全",
+                    desc = "稳扎稳打囤物资，降低运输风险",
                     effects = {
                         cash = -80,
                         inflation_delta = 0.015,
@@ -279,7 +279,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "向军方供应矿产",
-                    desc = "短期获利，建立军方关系",
+                    desc = "用矿产换军方关系，短期获利可观",
                     effects = {
                         cash = 200,
                         gold = -3,
@@ -311,7 +311,7 @@ function EventsData.GetFixedEvents()
             options = {
                 {
                     text = "囤积黄金并暂停扩张",
-                    desc = "保守策略，保全资产",
+                    desc = "保守避险，囤金等待风暴过去",
                     effects = {
                         gold = 10,
                         inflation_delta = 0.08,
@@ -330,7 +330,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "转向军需供应",
-                    desc = "战争财富，但声誉有损",
+                    desc = "发战争财利润丰厚，但民心尽失",
                     effects = {
                         cash = 500,
                         inflation_delta = 0.12,
@@ -350,7 +350,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "向外转移部分资产",
-                    desc = "分散风险",
+                    desc = "资产转移海外避险，但本地口碑受损",
                     effects = {
                         cash = -200,
                         inflation_delta = 0.06,
@@ -389,7 +389,7 @@ function EventsData.GetFixedEvents()
             options = {
                 {
                     text = "接受军方订单",
-                    desc = "军需利润提高，民用市场受挤压",
+                    desc = "军需利润可观，但民生和人力成本双双承压",
                     effects = {
                         cash = 260,
                         inflation_delta = 0.10,
@@ -407,7 +407,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "优先保障矿工家庭",
-                    desc = "利润较低，但稳住士气和民心",
+                    desc = "赢得民心和士气，但要掏腰包",
                     effects = {
                         cash = -120,
                         inflation_delta = 0.07,
@@ -421,7 +421,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "暗中转移库存",
-                    desc = "保留硬通货，承担走私风险",
+                    desc = "黑市暴利诱人，但法律风险极高",
                     effects = {
                         gold = 6,
                         inflation_delta = 0.08,
@@ -449,7 +449,7 @@ function EventsData.GetFixedEvents()
             options = {
                 {
                     text = "提前囤积实物资产",
-                    desc = "用现金换取不贬值的硬通货",
+                    desc = "现金换黄金保值，但加剧通胀",
                     effects = {
                         cash = -200,
                         gold = 4,
@@ -463,7 +463,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "跟随通胀调薪",
-                    desc = "成本增加但避免罢工",
+                    desc = "工人满意，但工资成本永久增加",
                     effects = {
                         cash = -150,
                         inflation_delta = 0.08,
@@ -477,7 +477,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "冻结工资，以实物补贴",
-                    desc = "节省现金但工人不满",
+                    desc = "省下现金，但工人怨气积累",
                     effects = {
                         inflation_delta = 0.09,
                         inflation_drift_mod = 0.015,
@@ -504,7 +504,7 @@ function EventsData.GetFixedEvents()
             options = {
                 {
                     text = "提高工资和配给",
-                    desc = "成本上升，降低罢工风险",
+                    desc = "善待工人赢得人心，但开支大增",
                     effects = {
                         cash = -240,
                         inflation_delta = 0.12,
@@ -520,7 +520,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "削减民用供给保军需",
-                    desc = "短期现金流好，民心和治安恶化",
+                    desc = "军工暴利，但民间怨恨沸腾",
                     effects = {
                         cash = 360,
                         inflation_delta = 0.15,
@@ -538,7 +538,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "开辟黑市补给线",
-                    desc = "高收益高风险",
+                    desc = "黑市补给利润高，但腐败和风险并行",
                     effects = {
                         cash = 120,
                         gold = -2,
@@ -567,7 +567,7 @@ function EventsData.GetFixedEvents()
             options = {
                 {
                     text = "收留逃兵充当矿工",
-                    desc = "补充劳动力，但安全隐患大",
+                    desc = "廉价劳力补充产能，但治安和纪律下降",
                     effects = {
                         workers_bonus = 8,
                         inflation_delta = 0.02,
@@ -580,7 +580,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "组建矿区自卫队",
-                    desc = "花钱维护安全，赢得人心",
+                    desc = "守护矿区赢得民心，但得罪军方",
                     effects = {
                         cash = -180,
                         inflation_delta = 0.015,
@@ -593,7 +593,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "向当局举报换取奖赏",
-                    desc = "获得现金和政治资本，失去民心",
+                    desc = "讨好当局换奖赏，但失去民间信任",
                     effects = {
                         cash = 100,
                         modifiers = {
@@ -619,7 +619,7 @@ function EventsData.GetFixedEvents()
             options = {
                 {
                     text = "主动改善劳工待遇",
-                    desc = "提前化解矛盾，成本上升",
+                    desc = "顺应潮流安抚人心，但永久推高成本",
                     effects = {
                         cash = -200,
                         inflation_delta = 0.02,
@@ -632,7 +632,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "强化管控，压制激进工人",
-                    desc = "短期稳定但积累矛盾",
+                    desc = "铁腕维稳，但激化矛盾",
                     effects = {
                         cash = -60,
                         inflation_delta = 0.01,
@@ -645,7 +645,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "暗中资助温和改良派",
-                    desc = "拉拢工人领袖为己所用",
+                    desc = "暗中扶植温和派，争取时间但留下把柄",
                     effects = {
                         cash = -120,
                         modifiers = {
@@ -671,7 +671,7 @@ function EventsData.GetFixedEvents()
             options = {
                 {
                     text = "迅速接管废弃资产",
-                    desc = "趁乱扩张",
+                    desc = "趁乱抄底扩张资产，但法律地位存疑",
                     effects = {
                         cash = -300,
                         inflation_delta = 0.08,
@@ -688,7 +688,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "与新政权合作，确保地位",
-                    desc = "政治安全优先",
+                    desc = "顺势投靠新政权，赢得政治地位",
                     effects = {
                         cash = -100,
                         inflation_delta = -0.03,
@@ -703,7 +703,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "援助难民和失业工人",
-                    desc = "赢得民心",
+                    desc = "慷慨援助赢得口碑，为重建打基础",
                     effects = {
                         cash = -200,
                         inflation_delta = -0.015,
@@ -733,7 +733,7 @@ function EventsData.GetFixedEvents()
             options = {
                 {
                     text = "主动配合产权登记",
-                    desc = "确保合法地位，但接受新税制",
+                    desc = "合法合规站稳脚跟，但税负永久加重",
                     effects = {
                         cash = -150,
                         inflation_delta = 0.015,
@@ -746,7 +746,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "利用旧关系打通新官员",
-                    desc = "贿赂成本低但风险高",
+                    desc = "打通关系减税，但埋下腐败隐患",
                     effects = {
                         cash = -80,
                         inflation_delta = 0.01,
@@ -758,7 +758,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "将部分资产转移到瑞士",
-                    desc = "分散风险，但本地投资减少",
+                    desc = "海外藏富未雨绸缪，但本地产能受损",
                     effects = {
                         cash = -200,
                         inflation_delta = 0.005,
@@ -784,7 +784,7 @@ function EventsData.GetFixedEvents()
             options = {
                 {
                     text = "接受工会协商，建立合作机制",
-                    desc = "工资上涨但获得稳定劳工关系",
+                    desc = "赢得工人拥护，但人力成本永久攀升",
                     effects = {
                         inflation_delta = 0.015,
                         modifiers = {
@@ -796,7 +796,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "引入计件工资制度",
-                    desc = "提高效率但工人分化",
+                    desc = "效率提升但工人不满",
                     effects = {
                         inflation_delta = 0.01,
                         modifiers = {
@@ -807,7 +807,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "暗中分化工会领导层",
-                    desc = "短期有效但长期隐患",
+                    desc = "分裂工会维持控制，但名声和士气双降",
                     effects = {
                         cash = -100,
                         modifiers = {
@@ -833,7 +833,7 @@ function EventsData.GetFixedEvents()
             options = {
                 {
                     text = "全面转持黄金和实物",
-                    desc = "放弃现金流动性，对冲通胀",
+                    desc = "全部换成硬通货保值，代价是通胀加速",
                     effects = {
                         cash = -400,
                         gold = 12,
@@ -847,7 +847,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "加速投资固定资产",
-                    desc = "把贬值的钱变成不贬值的矿井",
+                    desc = "趁贬值抄底固定资产，长期产能提升",
                     effects = {
                         cash = -350,
                         inflation_delta = 0.12,
@@ -861,7 +861,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "借入长期贷款（通胀还债）",
-                    desc = "用贬值的钱还债，但信用受损",
+                    desc = "借钱让通胀还债，聪明但有风险",
                     effects = {
                         cash = 500,
                         inflation_delta = 0.10,
@@ -889,7 +889,7 @@ function EventsData.GetFixedEvents()
             options = {
                 {
                     text = "接受补偿，转投公路运输",
-                    desc = "获得一次性现金但需重建物流",
+                    desc = "拿补偿走独立路线，但运输不便",
                     effects = {
                         cash = 200,
                         inflation_delta = 0.01,
@@ -901,7 +901,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "利用政治关系保留优惠运价",
-                    desc = "维持成本优势但受政治变动影响",
+                    desc = "走后门保运价优惠，但滋生腐败",
                     effects = {
                         cash = -100,
                         modifiers = {
@@ -927,7 +927,7 @@ function EventsData.GetFixedEvents()
             options = {
                 {
                     text = "引进电气化设备",
-                    desc = "大幅提升产能，长期受益",
+                    desc = "效率飞跃式提升，但让出部分控制权",
                     effects = {
                         cash = -450,
                         inflation_delta = 0.01,
@@ -940,7 +940,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "仅购买核心部件",
-                    desc = "中等投入，部分升级",
+                    desc = "适度升级，量力而行",
                     effects = {
                         cash = -180,
                         modifiers = {
@@ -950,7 +950,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "自主研发改良工艺",
-                    desc = "慢但不受外国控制",
+                    desc = "自力更生搞研发，保住独立性",
                     effects = {
                         cash = -100,
                         modifiers = {
@@ -975,7 +975,7 @@ function EventsData.GetFixedEvents()
             options = {
                 {
                     text = "全力增产抢占市场",
-                    desc = "高价出口但工人压力大",
+                    desc = "全速开工抢市场，赚得多但工人吃不消",
                     effects = {
                         cash = 350,
                         inflation_delta = 0.015,
@@ -988,7 +988,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "维持正常产量，以溢价出售",
-                    desc = "稳健获利",
+                    desc = "稳吃溢价，不冒进",
                     effects = {
                         cash = 200,
                         inflation_delta = 0.01,
@@ -1013,7 +1013,7 @@ function EventsData.GetFixedEvents()
             options = {
                 {
                     text = "加强与贝尔格莱德中央关系",
-                    desc = "向权力中心靠拢",
+                    desc = "靠拢中央赢得政治资本，但本地口碑下降",
                     effects = {
                         cash = -120,
                         inflation_delta = 0.02,
@@ -1025,7 +1025,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "强化本地自治网络",
-                    desc = "不依赖中央，建立地方根基",
+                    desc = "经营本地人脉，增强自主权",
                     effects = {
                         cash = -100,
                         inflation_delta = 0.015,
@@ -1037,7 +1037,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "趁乱低价收购动荡地区资产",
-                    desc = "高风险高回报",
+                    desc = "趁乱抄底扩张，但手段不太光彩",
                     effects = {
                         cash = -300,
                         inflation_delta = 0.025,
@@ -1065,7 +1065,7 @@ function EventsData.GetFixedEvents()
             options = {
                 {
                     text = "积极配合新体制",
-                    desc = "获得政治保护但失去自主性",
+                    desc = "顺从新体制换取政治地位，但失去经营自主",
                     effects = {
                         cash = -80,
                         inflation_delta = 0.01,
@@ -1078,7 +1078,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "低调经营，避开政治",
-                    desc = "不引人注目",
+                    desc = "闷声做事，不出风头",
                     effects = {
                         inflation_delta = 0.005,
                         modifiers = {
@@ -1088,7 +1088,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "暗中支持反对派",
-                    desc = "押注政权更迭",
+                    desc = "暗中押注反对派，有远见但风险极大",
                     effects = {
                         cash = -150,
                         inflation_delta = 0.015,
@@ -1116,7 +1116,7 @@ function EventsData.GetFixedEvents()
             options = {
                 {
                     text = "收缩债务，保留现金",
-                    desc = "放慢扩张，降低金融风险",
+                    desc = "勒紧裤腰带过寒冬，稳健但要忍受萎缩",
                     effects = {
                         cash = -250,
                         inflation_delta = -0.08,
@@ -1135,7 +1135,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "抄底廉价资产",
-                    desc = "承担短期压力换长期资产",
+                    desc = "趁大萧条抄底资产，豪赌但回报丰厚",
                     effects = {
                         cash = -500,
                         inflation_delta = -0.06,
@@ -1152,7 +1152,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "裁员并停掉亏损业务",
-                    desc = "现金回血，但劳工关系恶化",
+                    desc = "裁员止血保现金，但人心散了",
                     effects = {
                         cash = 260,
                         inflation_delta = -0.015,
@@ -1180,7 +1180,7 @@ function EventsData.GetFixedEvents()
             options = {
                 {
                     text = "提前提取银行存款",
-                    desc = "保住现金但加剧恐慌",
+                    desc = "先下手为强抢现金，但名声受损",
                     effects = {
                         cash = 300,
                         inflation_delta = 0.06,
@@ -1194,7 +1194,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "公开宣布不撤资以稳定人心",
-                    desc = "冒险但赢得信誉",
+                    desc = "公开站台稳定人心，赢得信誉",
                     effects = {
                         cash = -100,
                         inflation_delta = 0.04,
@@ -1206,7 +1206,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "趁机以低价收购银行不良资产",
-                    desc = "高风险投机",
+                    desc = "低价捡漏不良资产，但手段有些灰色",
                     effects = {
                         cash = -350,
                         inflation_delta = 0.05,
@@ -1234,7 +1234,7 @@ function EventsData.GetFixedEvents()
             options = {
                 {
                     text = "拓展对德贸易",
-                    desc = "利用德国工业需求获利",
+                    desc = "搭上德国经济快车，但绑定越来越深",
                     effects = {
                         cash = 250,
                         inflation_delta = 0.01,
@@ -1247,7 +1247,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "加强与英法的经济联系",
-                    desc = "政治更安全但贸易距离远",
+                    desc = "押注西方阵营，稳健但收益有限",
                     effects = {
                         cash = -80,
                         inflation_delta = 0.005,
@@ -1259,7 +1259,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "两面下注，维持中立",
-                    desc = "灵活但谁也不信任你",
+                    desc = "左右逢源保独立，但谁都不讨好",
                     effects = {
                         inflation_delta = 0.008,
                         modifiers = {
@@ -1284,7 +1284,7 @@ function EventsData.GetFixedEvents()
             options = {
                 {
                     text = "支持摄政委员会",
-                    desc = "站在权力中心一边",
+                    desc = "站队摄政派赢得政治靠山",
                     effects = {
                         cash = -100,
                         inflation_delta = 0.02,
@@ -1296,7 +1296,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "保持中立，加强资产保护",
-                    desc = "不站队但确保安全",
+                    desc = "不表态，闷声保全资产",
                     effects = {
                         cash = -60,
                         inflation_delta = 0.015,
@@ -1323,7 +1323,7 @@ function EventsData.GetFixedEvents()
             options = {
                 {
                     text = "签订对德矿产出口合同",
-                    desc = "高利润但与轴心国绑定",
+                    desc = "军工大单利润丰厚，但从此受制于人",
                     effects = {
                         cash = 400,
                         inflation_delta = 0.015,
@@ -1337,7 +1337,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "多元化出口渠道",
-                    desc = "分散风险",
+                    desc = "多线布局保独立，赚得少但安全",
                     effects = {
                         cash = 150,
                         inflation_delta = 0.01,
@@ -1349,7 +1349,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "缩减出口，优先内需",
-                    desc = "保守但不引人注目",
+                    desc = "优先保民生，少赚但口碑好",
                     effects = {
                         inflation_delta = 0.008,
                         modifiers = {
@@ -1374,7 +1374,7 @@ function EventsData.GetFixedEvents()
             options = {
                 {
                     text = "允许工人志愿参战",
-                    desc = "显示开明但流失劳动力",
+                    desc = "放人走赢得人心，但劳动力减少",
                     effects = {
                         workers_bonus = -3,
                         inflation_delta = 0.008,
@@ -1386,7 +1386,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "禁止矿工离岗",
-                    desc = "保住产能但引发不满",
+                    desc = "保住产能，但工人心生不满",
                     effects = {
                         inflation_delta = 0.005,
                         modifiers = {
@@ -1412,7 +1412,7 @@ function EventsData.GetFixedEvents()
             options = {
                 {
                     text = "大量囤积黄金和战略物资",
-                    desc = "为最坏情况做准备",
+                    desc = "重金囤积硬通货和物资，为战争做准备",
                     effects = {
                         cash = -350,
                         gold = 8,
@@ -1427,7 +1427,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "趁战略需求高涨提价出口",
-                    desc = "短期暴利",
+                    desc = "趁战略需求大赚一笔，短期暴利",
                     effects = {
                         cash = 500,
                         inflation_delta = 0.05,
@@ -1440,7 +1440,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "加固矿区防御设施",
-                    desc = "预防性投资",
+                    desc = "加固防御未雨绸缪，长远保障运输安全",
                     effects = {
                         cash = -200,
                         inflation_delta = 0.04,
@@ -1467,7 +1467,7 @@ function EventsData.GetFixedEvents()
             options = {
                 {
                     text = "向交战各方出口矿产",
-                    desc = "两面获利，但中立地位脆弱",
+                    desc = "两边卖军火大发战争财，但通胀飙升",
                     effects = {
                         cash = 600,
                         inflation_delta = 0.10,
@@ -1483,7 +1483,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "收缩经营，保存实力",
-                    desc = "降低风险等待局势明朗",
+                    desc = "收缩保命，牺牲产能换安全",
                     effects = {
                         cash = -100,
                         inflation_delta = 0.07,
@@ -1497,7 +1497,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "秘密转移核心资产到中立国",
-                    desc = "保护家族财富但当地影响力下降",
+                    desc = "海外转移资产避险，但本地口碑尽毁",
                     effects = {
                         cash = -300,
                         inflation_delta = 0.08,
@@ -1524,7 +1524,7 @@ function EventsData.GetFixedEvents()
             options = {
                 {
                     text = "紧急加固矿区并储备物资",
-                    desc = "为入侵做最后准备",
+                    desc = "紧急备战加固矿区，花费不菲但有备无患",
                     effects = {
                         cash = -300,
                         inflation_delta = 0.12,
@@ -1540,7 +1540,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "立即将家族成员撤离",
-                    desc = "保人不保产",
+                    desc = "家人安全第一，但会被骂'跑路'",
                     effects = {
                         cash = -200,
                         inflation_delta = 0.10,
@@ -1552,7 +1552,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "联络抵抗组织",
-                    desc = "为长期抗争做准备",
+                    desc = "投身抵抗运动，赢得多方信任",
                     effects = {
                         cash = -100,
                         inflation_delta = 0.09,
@@ -1579,7 +1579,7 @@ function EventsData.GetFixedEvents()
             options = {
                 {
                     text = "迁走核心设备",
-                    desc = "保护长期资产，短期产能下降",
+                    desc = "保住核心设备，但产能大幅下滑且要缴占领税",
                     effects = {
                         cash = -420,
                         inflation_delta = 0.15,
@@ -1599,7 +1599,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "与占领当局合作保产",
-                    desc = "现金流稳定，声誉风险很高",
+                    desc = "与占领军合作赚大钱，但沦为'汉奸'",
                     effects = {
                         cash = 600,
                         inflation_delta = 0.20,
@@ -1616,7 +1616,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "建立地下供应网",
-                    desc = "转入灰色经营，风险和收益都提高",
+                    desc = "建地下网络求生，暗利高但风险如影随形",
                     effects = {
                         gold = -4,
                         inflation_delta = 0.12,
@@ -1647,7 +1647,7 @@ function EventsData.GetFixedEvents()
             options = {
                 {
                     text = "暗中资助游击队",
-                    desc = "押注未来，但现在极度危险",
+                    desc = "资助游击队赢得民心，但矿区安全堪忧",
                     effects = {
                         cash = -200,
                         gold = -3,
@@ -1663,7 +1663,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "保持中立，全力保护矿区",
-                    desc = "谁来都交一点保护费",
+                    desc = "谁都不帮只管赚钱，但安全形势恶化",
                     effects = {
                         cash = -300,
                         inflation_delta = 0.12,
@@ -1677,7 +1677,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "组织矿区居民互保",
-                    desc = "建立社区防御但消耗大",
+                    desc = "组织民间互保，凝聚人心守护家园",
                     effects = {
                         cash = -250,
                         inflation_delta = 0.08,
@@ -1705,7 +1705,7 @@ function EventsData.GetFixedEvents()
             options = {
                 {
                     text = "抢收意军遗弃物资",
-                    desc = "高风险但回报丰厚",
+                    desc = "抢收物资充实储备，但治安和运输风险加大",
                     effects = {
                         cash = 300,
                         inflation_delta = 0.08,
@@ -1719,7 +1719,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "协助盟军情报工作",
-                    desc = "建立与盟军的关系",
+                    desc = "协助盟军换取政治资本和海外布局",
                     effects = {
                         cash = -80,
                         inflation_delta = 0.06,
@@ -1732,7 +1732,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "避开冲突，加固矿区防御",
-                    desc = "保守但安全",
+                    desc = "不冒险，加固自家防线求稳",
                     effects = {
                         cash = -120,
                         inflation_delta = 0.06,
@@ -1758,7 +1758,7 @@ function EventsData.GetFixedEvents()
             options = {
                 {
                     text = "将矿区伪装成民用设施",
-                    desc = "避免轰炸但产量下降",
+                    desc = "隐蔽保全矿区，但产能和运输严重受限",
                     effects = {
                         cash = -150,
                         inflation_delta = 0.10,
@@ -1772,7 +1772,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "主动联络游击队并提供支援",
-                    desc = "为战后地位做铺垫",
+                    desc = "重金投靠游击队，为战后新秩序押注",
                     effects = {
                         cash = -300,
                         gold = -3,
@@ -1786,7 +1786,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "转移地下储备，准备战后重建",
-                    desc = "着眼长远",
+                    desc = "囤金转移资产，为战后重建留本钱",
                     effects = {
                         cash = -200,
                         gold = 5,
@@ -1814,7 +1814,7 @@ function EventsData.GetFixedEvents()
             options = {
                 {
                     text = "献出部分资产换取保护",
-                    desc = "损失账面财富，保住家族成员",
+                    desc = "割肉求存换政治庇护，但重税漫长",
                     effects = {
                         cash = -350,
                         inflation_delta = -0.10,
@@ -1832,7 +1832,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "转为技术官僚路线",
-                    desc = "以专业能力保留影响力",
+                    desc = "凭技术立身，税负较轻但失去财富",
                     effects = {
                         cash = -120,
                         inflation_delta = -0.06,
@@ -1846,7 +1846,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "隐藏资本，等待窗口",
-                    desc = "保留硬资产，长期审查风险上升",
+                    desc = "藏起家底暗中积累，但一旦败露万劫不复",
                     effects = {
                         gold = 8,
                         inflation_delta = -0.03,
@@ -1879,7 +1879,7 @@ function EventsData.GetFixedEvents()
             options = {
                 {
                     text = "主动上缴部分土地，以退为进",
-                    desc = "牺牲土地换取矿权保全",
+                    desc = "主动让步保住政治生命，但家产缩水",
                     effects = {
                         cash = -200,
                         modifiers = {
@@ -1891,7 +1891,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "聘请法律顾问拖延审查",
-                    desc = "争取时间但引起注意",
+                    desc = "法律手段拖延审查，但腐败风险上升",
                     effects = {
                         cash = -100,
                         modifiers = {
@@ -1902,7 +1902,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "将资产转入合作社名义",
-                    desc = "伪装顺从，暗中保留控制权",
+                    desc = "暗度陈仓保住资产，但合法性存疑",
                     effects = {
                         cash = -50,
                         modifiers = {
@@ -1928,7 +1928,7 @@ function EventsData.GetFixedEvents()
             options = {
                 {
                     text = "全力配合，超额完成指标",
-                    desc = "获得政府投资，但失去经营自主权",
+                    desc = "全力冲指标赢得政治认可，但工人疲于奔命",
                     effects = {
                         cash = 300,
                         inflation_delta = 0.02,
@@ -1941,7 +1941,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "谨慎参与，保留技术核心",
-                    desc = "既不出头也不掉队",
+                    desc = "稳健参与，技术和产能均有提升",
                     effects = {
                         cash = 100,
                         modifiers = {
@@ -1952,7 +1952,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "虚报产量，暗留利润",
-                    desc = "短期获利，一旦查出代价惨重",
+                    desc = "虚报数据中饱私囊，利润大但东窗事发必遭清算",
                     effects = {
                         cash = 250,
                         gold = 3,
@@ -1978,7 +1978,7 @@ function EventsData.GetFixedEvents()
             options = {
                 {
                     text = "公开效忠铁托路线",
-                    desc = "站队胜者，但短期经济受损",
+                    desc = "坚定站队铁托赢得政治高位，但贸易受封锁冲击",
                     effects = {
                         cash = -150,
                         inflation_delta = 0.08,
@@ -1991,7 +1991,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "保持沉默，两不得罪",
-                    desc = "暂时安全但失去信任",
+                    desc = "两不得罪但两边都不待见",
                     effects = {
                         modifiers = {
                             { target = "political_standing", value = -10, duration = 0 },
@@ -2001,7 +2001,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "秘密联络西方买家",
-                    desc = "铁幕裂缝中的新商机",
+                    desc = "暗通西方开辟新财路，但走的是灰色地带",
                     effects = {
                         cash = 200,
                         modifiers = {
@@ -2027,7 +2027,7 @@ function EventsData.GetFixedEvents()
             options = {
                 {
                     text = "全面接受援助和顾问",
-                    desc = "获得资金和技术，但外资渗透加深",
+                    desc = "全面拥抱西方援助，技术飞跃但外国影响力深入",
                     effects = {
                         cash = 400,
                         inflation_delta = -0.02,
@@ -2040,7 +2040,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "只接受设备，拒绝顾问",
-                    desc = "有限获利，保住自主权",
+                    desc = "只拿设备不让人进来，务实但收益有限",
                     effects = {
                         cash = 150,
                         modifiers = {
@@ -2065,7 +2065,7 @@ function EventsData.GetFixedEvents()
             options = {
                 {
                     text = "全力扩产，抓住风口",
-                    desc = "短期暴利但设备磨损加剧",
+                    desc = "拼命扩产赚暴利，但工人和设备都在透支",
                     effects = {
                         cash = 500,
                         gold = 5,
@@ -2081,7 +2081,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "稳健经营，适度增产",
-                    desc = "保证质量和工人福利",
+                    desc = "稳健增产，赚钱的同时照顾工人",
                     effects = {
                         cash = 250,
                         gold = 2,
@@ -2093,7 +2093,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "囤积原矿待价而沽",
-                    desc = "赌价格继续上涨",
+                    desc = "囤矿待涨赚黄金，但手段不够透明",
                     effects = {
                         gold = 8,
                         modifiers = {
@@ -2118,7 +2118,7 @@ function EventsData.GetFixedEvents()
             options = {
                 {
                     text = "真心推行自治，让工人参与决策",
-                    desc = "赢得工人拥戴，产效提升",
+                    desc = "真心放权赢得全面支持，长远受益",
                     effects = {
                         cash = -80,
                         modifiers = {
@@ -2131,7 +2131,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "形式上成立委员会，实际保留决策权",
-                    desc = "维持控制但工人不满",
+                    desc = "走过场应付了事，但工人看在眼里",
                     effects = {
                         modifiers = {
                             { target = "worker_morale", value = -5, duration = 0 },
@@ -2142,7 +2142,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "利用委员会安插亲信",
-                    desc = "扩大家族网络，但有被揭穿风险",
+                    desc = "借制度之名行揽权之实，腐败风险极高",
                     effects = {
                         modifiers = {
                             { target = "total_influence", value = 15, duration = 0 },
@@ -2167,7 +2167,7 @@ function EventsData.GetFixedEvents()
             options = {
                 {
                     text = "投资亚得里亚贸易线",
-                    desc = "开拓出口市场",
+                    desc = "投资海上贸易线，打开地中海市场",
                     effects = {
                         cash = -200,
                         modifiers = {
@@ -2179,7 +2179,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "建立走私渠道",
-                    desc = "暴利但极度危险",
+                    desc = "走私暴利诱人，但腐败代价极其沉重",
                     effects = {
                         cash = 350,
                         gold = 5,
@@ -2205,7 +2205,7 @@ function EventsData.GetFixedEvents()
             options = {
                 {
                     text = "扎根波黑，成为地方柱石",
-                    desc = "深耕本土，世代传承",
+                    desc = "扎根本地成为社区柱石，政治和民心全面丰收",
                     effects = {
                         modifiers = {
                             { target = "political_standing", value = 30, duration = 0 },
@@ -2217,7 +2217,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "布局海外，分散家族资产",
-                    desc = "全球化视野，降低单一风险",
+                    desc = "海外分散布局，为家族留退路",
                     effects = {
                         cash = -300,
                         gold = 10,
@@ -2229,7 +2229,7 @@ function EventsData.GetFixedEvents()
                 },
                 {
                     text = "功成身退，家族隐于幕后",
-                    desc = "低调生存，韬光养晦",
+                    desc = "功成身退隐于幕后，暗中积累但退出政坛",
                     effects = {
                         gold = 15,
                         modifiers = {
@@ -2266,7 +2266,7 @@ function EventsData.GetRandomEventTemplates()
             options = {
                 {
                     text = "全力救援，不惜代价",
-                    desc = "花费高昂但保住人心",
+                    desc = "不惜代价救人，赢得人心但停产损失大",
                     effects = {
                         cash = -150,
                         inflation_delta = 0.005,
@@ -2279,7 +2279,7 @@ function EventsData.GetRandomEventTemplates()
                 },
                 {
                     text = "最低限度救援",
-                    desc = "省钱但伤士气",
+                    desc = "省了钱但寒了人心",
                     effects = {
                         cash = -30,
                         modifiers = {
@@ -2309,7 +2309,7 @@ function EventsData.GetRandomEventTemplates()
             options = {
                 {
                     text = "答应加薪要求",
-                    desc = "工资永久上涨",
+                    desc = "满足加薪要求，工人满意但成本永久上升",
                     effects = {
                         inflation_delta = 0.01,
                         modifiers = {
@@ -2320,7 +2320,7 @@ function EventsData.GetRandomEventTemplates()
                 },
                 {
                     text = "谈判妥协，部分满足",
-                    desc = "折中方案",
+                    desc = "折中妥协，小幅加薪平息事态",
                     effects = {
                         cash = -50,
                         inflation_delta = 0.005,
@@ -2332,7 +2332,7 @@ function EventsData.GetRandomEventTemplates()
                 },
                 {
                     text = "强硬镇压，雇佣替工",
-                    desc = "短期有效但隐患巨大",
+                    desc = "铁腕镇压，省钱但后患无穷",
                     effects = {
                         modifiers = {
                             { target = "worker_morale", value = -30, duration = 0 },
@@ -2363,7 +2363,7 @@ function EventsData.GetRandomEventTemplates()
             options = {
                 {
                     text = "接受投资，让出部分股权",
-                    desc = "获得大笔资金但失去部分控制",
+                    desc = "大笔资金涌入，产能飙升，但从此受制于人",
                     effects = {
                         cash = 600,
                         inflation_delta = 0.01,
@@ -2375,7 +2375,7 @@ function EventsData.GetRandomEventTemplates()
                 },
                 {
                     text = "仅接受技术合作",
-                    desc = "小额资助换取技术支持",
+                    desc = "只引进技术不让渡股权，收益有限但保住自主",
                     effects = {
                         cash = 100,
                         modifiers = {
@@ -2385,7 +2385,7 @@ function EventsData.GetRandomEventTemplates()
                 },
                 {
                     text = "婉拒，保持独立经营",
-                    desc = "不受外部干涉",
+                    desc = "拒绝外资，独立性更强但错失发展机遇",
                     effects = {
                         modifiers = {
                             { target = "independence", value = 10, duration = 0 },
@@ -2414,7 +2414,7 @@ function EventsData.GetRandomEventTemplates()
             options = {
                 {
                     text = "立即开发新矿脉",
-                    desc = "投入资金，提升产能",
+                    desc = "大手笔投入开发，短期产能暴增",
                     effects = {
                         cash = -250,
                         modifiers = {
@@ -2424,7 +2424,7 @@ function EventsData.GetRandomEventTemplates()
                 },
                 {
                     text = "谨慎勘探，稳步推进",
-                    desc = "小投入，长期收益",
+                    desc = "小成本稳健勘探，收获黄金和长期产能提升",
                     effects = {
                         cash = -80,
                         gold = 3,
@@ -2453,7 +2453,7 @@ function EventsData.GetRandomEventTemplates()
             options = {
                 {
                     text = "缴纳保护费，息事宁人",
-                    desc = "破财消灾",
+                    desc = "花钱消灾，地方关系改善但开了口子",
                     effects = {
                         cash = -200,
                         inflation_delta = 0.005,
@@ -2464,7 +2464,7 @@ function EventsData.GetRandomEventTemplates()
                 },
                 {
                     text = "针锋相对，强硬回击",
-                    desc = "树敌但显示实力",
+                    desc = "正面硬刚，治安恶化且彻底得罪地方",
                     effects = {
                         cash = -50,
                         security_bonus = -1,
@@ -2475,7 +2475,7 @@ function EventsData.GetRandomEventTemplates()
                 },
                 {
                     text = "寻找高层靠山对抗",
-                    desc = "花费影响力换取保护",
+                    desc = "另辟蹊径找靠山，花钱提升政治地位",
                     effects = {
                         cash = -100,
                         modifiers = {
@@ -2504,7 +2504,7 @@ function EventsData.GetRandomEventTemplates()
             options = {
                 {
                     text = "趁高价抛售库存黄金",
-                    desc = "卖出 5 单位黄金，高价兑现",
+                    desc = "高位抛售黄金套现，但会压低后续金价",
                     effects = {
                         gold = -5,
                         cash = 400,
@@ -2516,7 +2516,7 @@ function EventsData.GetRandomEventTemplates()
                 },
                 {
                     text = "逢低吸纳，增加储备",
-                    desc = "花钱买入更多黄金",
+                    desc = "趁低价囤积黄金，押注金价继续上涨",
                     effects = {
                         cash = -200,
                         gold = 6,
@@ -2527,7 +2527,7 @@ function EventsData.GetRandomEventTemplates()
                 },
                 {
                     text = "按兵不动",
-                    desc = "不冒险",
+                    desc = "观望不动，不赚不亏",
                     effects = {},
                 },
             },
@@ -2551,7 +2551,7 @@ function EventsData.GetRandomEventTemplates()
             options = {
                 {
                     text = "参与走私，赚取暴利",
-                    desc = "高收益但法律和声誉风险极大",
+                    desc = "暴利诱人但风险极高，腐败和运输隐患随之而来",
                     effects = {
                         cash = 400,
                         inflation_delta = 0.02,
@@ -2564,7 +2564,7 @@ function EventsData.GetRandomEventTemplates()
                 },
                 {
                     text = "向当局举报换取奖赏",
-                    desc = "获得合法收入和政治资本",
+                    desc = "举报换来官方认可，但得罪了地方势力",
                     effects = {
                         cash = 120,
                         modifiers = {
@@ -2575,7 +2575,7 @@ function EventsData.GetRandomEventTemplates()
                 },
                 {
                     text = "装作不知道",
-                    desc = "明哲保身",
+                    desc = "明哲保身，不沾是非",
                     effects = {},
                 },
             },
@@ -2599,7 +2599,7 @@ function EventsData.GetRandomEventTemplates()
             options = {
                 {
                     text = "紧急请医生并隔离治疗",
-                    desc = "花费大但控制住疫情",
+                    desc = "花大价钱救人，赢得人心但短期停产严重",
                     effects = {
                         cash = -250,
                         inflation_delta = 0.01,
@@ -2612,7 +2612,7 @@ function EventsData.GetRandomEventTemplates()
                 },
                 {
                     text = "继续生产，忽视疫情",
-                    desc = "短期保产但工人伤亡大",
+                    desc = "漠视生命，工人死伤惨重，人心尽失",
                     effects = {
                         workers_bonus = -5,
                         modifiers = {
@@ -2641,7 +2641,7 @@ function EventsData.GetRandomEventTemplates()
             options = {
                 {
                     text = "高薪挽留核心技术人员",
-                    desc = "保住技术优势但成本增加",
+                    desc = "高薪留人，技术和产能双升但工资成本永久增加",
                     effects = {
                         cash = -180,
                         modifiers = {
@@ -2653,7 +2653,7 @@ function EventsData.GetRandomEventTemplates()
                 },
                 {
                     text = "让他们走，培养本地新人",
-                    desc = "短期损失但培育人才",
+                    desc = "短痛换长远，本地人才慢慢成长",
                     effects = {
                         modifiers = {
                             { target = "mine_output_mult", value = -0.08, duration = 3 },
@@ -2681,7 +2681,7 @@ function EventsData.GetRandomEventTemplates()
             options = {
                 {
                     text = "全面修复并加固设施",
-                    desc = "彻底解决问题但花费大",
+                    desc = "大修加固一劳永逸，但花费不菲且短期停产",
                     effects = {
                         cash = -300,
                         modifiers = {
@@ -2693,7 +2693,7 @@ function EventsData.GetRandomEventTemplates()
                 },
                 {
                     text = "临时修补道路",
-                    desc = "低成本但治标不治本",
+                    desc = "省钱应急，但运输隐患留了下来",
                     effects = {
                         cash = -80,
                         modifiers = {
@@ -2722,7 +2722,7 @@ function EventsData.GetRandomEventTemplates()
             options = {
                 {
                     text = "全力增产满足需求",
-                    desc = "高收益但工人承压",
+                    desc = "全速开工抢市场，赚得多但工人吃不消",
                     effects = {
                         cash = 350,
                         inflation_delta = 0.01,
@@ -2735,7 +2735,7 @@ function EventsData.GetRandomEventTemplates()
                 },
                 {
                     text = "适度增产，保留余力",
-                    desc = "稳健获利",
+                    desc = "稳扎稳打适度增产，收益适中无负面影响",
                     effects = {
                         cash = 180,
                         modifiers = {
@@ -2763,7 +2763,7 @@ function EventsData.GetRandomEventTemplates()
             options = {
                 {
                     text = "趁机用外汇收购本地资产",
-                    desc = "利用汇率差套利",
+                    desc = "危中求机抄底资产，回报丰厚但通胀飙升",
                     effects = {
                         cash = -200,
                         inflation_delta = 0.03,
@@ -2777,7 +2777,7 @@ function EventsData.GetRandomEventTemplates()
                 },
                 {
                     text = "将收入转为黄金储备",
-                    desc = "对冲贬值风险",
+                    desc = "换成黄金保值，但通胀照样吃掉一部分",
                     effects = {
                         cash = -150,
                         gold = 5,
@@ -2788,7 +2788,7 @@ function EventsData.GetRandomEventTemplates()
                 },
                 {
                     text = "维持现状，等待汇率回稳",
-                    desc = "不冒险",
+                    desc = "什么也不做，坐等通胀侵蚀财富",
                     effects = {
                         inflation_delta = 0.02,
                     },
@@ -2813,7 +2813,7 @@ function EventsData.GetRandomEventTemplates()
             options = {
                 {
                     text = "全面配合调查",
-                    desc = "清白但浪费时间精力",
+                    desc = "配合调查赢得信任，但生产受到干扰",
                     effects = {
                         cash = -60,
                         modifiers = {
@@ -2824,7 +2824,7 @@ function EventsData.GetRandomEventTemplates()
                 },
                 {
                     text = "利用调查打击竞争对手",
-                    desc = "嫁祸于人",
+                    desc = "借刀杀人提升政治地位，但沾上腐败污点",
                     effects = {
                         cash = -100,
                         modifiers = {
@@ -2853,7 +2853,7 @@ function EventsData.GetRandomEventTemplates()
             options = {
                 {
                     text = "购买粮食发放给工人",
-                    desc = "花钱保人心",
+                    desc = "自掏腰包济民，人心大振但物价更高了",
                     effects = {
                         cash = -200,
                         inflation_delta = 0.02,
@@ -2867,7 +2867,7 @@ function EventsData.GetRandomEventTemplates()
                 },
                 {
                     text = "削减口粮标准",
-                    desc = "省钱但工人不满",
+                    desc = "省了粮食钱，但工人饿着肚子干活效率骤降",
                     effects = {
                         inflation_delta = 0.025,
                         inflation_drift_mod = 0.004,
@@ -2875,6 +2875,98 @@ function EventsData.GetRandomEventTemplates()
                         modifiers = {
                             { target = "worker_morale", value = -15, duration = 0 },
                             { target = "mine_output_mult", value = -0.08, duration = 3 },
+                        },
+                    },
+                },
+            },
+        },
+
+        -- ================================================================
+        -- 劫匪劫道
+        -- ================================================================
+        {
+            id = "bandit_raid",
+            title = "劫匪劫道",
+            priority = EventsData.PRIORITY.REGION,
+            icon = "🏴‍☠️",
+            trigger = {
+                requires_mine = true,
+                min_year = 1905,
+                cooldown = 4,
+            },
+            chance = 0.08,
+            chance_modifier = "transport_risk", -- 运输风险越高越容易触发
+            desc = "一伙武装劫匪袭击了从矿区出发的运输队，押运人员被打散，部分货物被劫走。治安堪忧。",
+            options = {
+                {
+                    text = "出钱赎回货物并加强护送",
+                    desc = "花钱止损并降低后续运输风险，但开销不小",
+                    effects = {
+                        cash = -150,
+                        modifiers = {
+                            { target = "transport_risk", value = -0.08, duration = 4 },
+                        },
+                    },
+                },
+                {
+                    text = "组织武装追击",
+                    desc = "动用武装追剿匪帮，消耗兵力但有望夺回货物",
+                    effects = {
+                        gold = -2,
+                        security_bonus = 1,
+                        modifiers = {
+                            { target = "transport_risk", value = -0.05, duration = 6 },
+                        },
+                    },
+                },
+                {
+                    text = "认栽吃亏，吸取教训",
+                    desc = "损失已成定局，运输隐患依然存在",
+                    effects = {
+                        gold = -3,
+                        modifiers = {
+                            { target = "worker_morale", value = -5, duration = 0 },
+                        },
+                    },
+                },
+            },
+        },
+
+        -- ================================================================
+        -- 铁路瘫痪
+        -- ================================================================
+        {
+            id = "railway_shutdown",
+            title = "铁路瘫痪",
+            priority = EventsData.PRIORITY.REGION,
+            icon = "🚂",
+            trigger = {
+                requires_mine = true,
+                min_year = 1910,
+                cooldown = 6,
+            },
+            chance = 0.06,
+            chance_modifier = "transport_risk", -- 运输风险越高越容易触发
+            desc = "铁路干线发生严重事故——桥梁垮塌、路基损毁，短期内无法修复。矿区出产的黄金堆在仓库里运不出去，本季度无法出售。",
+            options = {
+                {
+                    text = "紧急抢修，尽快恢复通车",
+                    desc = "花大价钱加急修复，下季度恢复销售，运输风险略降",
+                    effects = {
+                        cash = -300,
+                        modifiers = {
+                            { target = "railway_blocked", value = 1, duration = 1 },
+                            { target = "transport_risk", value = -0.05, duration = 0 },
+                        },
+                    },
+                },
+                {
+                    text = "等待官方修复，节省开支",
+                    desc = "省了修路钱，但黄金积压更久且运输风险上升",
+                    effects = {
+                        modifiers = {
+                            { target = "railway_blocked", value = 1, duration = 2 },
+                            { target = "transport_risk", value = 0.08, duration = 3 },
                         },
                     },
                 },

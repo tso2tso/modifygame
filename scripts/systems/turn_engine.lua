@@ -12,6 +12,7 @@ local Combat = require("systems.combat")
 local Tech = require("systems.tech")
 local GrandPowers = require("systems.grand_powers")
 local BranchEvents = require("systems.branch_events")
+local Equipment = require("systems.equipment")
 
 local BV = Balance.VICTORY
 
@@ -327,6 +328,15 @@ function TurnEngine.EndTurn(state)
     -- ========================================
     Tech.Tick(state, report)
 
+    -- ========================================
+    -- 阶段 1.8: 装备生产/维修推进
+    -- ========================================
+    local equipMessages = Equipment.TickProduction(state)
+    for _, msg in ipairs(equipMessages) do
+        GameState.AddLog(state, "[装备] " .. msg)
+        table.insert(report.warnings, msg)
+    end
+
     if report.economy.bankrupt then
         table.insert(report.warnings, "家族财政陷入困境！")
     end
@@ -358,7 +368,7 @@ function TurnEngine.EndTurn(state)
 
     local totalControl = GameState.CalcTotalControl(state)
     local totalInfluence = GameState.CalcTotalInfluence(state)
-    local isWar = state.flags.at_war
+    local isWar = state.flags and state.flags.at_war
 
     -- ── 经济胜利点 ──
     local BVE = BV.economic
@@ -387,7 +397,9 @@ function TurnEngine.EndTurn(state)
         local moralePart  = math.floor(state.military.morale / BVM.morale_divisor)
         local controlPart = math.floor(totalControl / BVM.control_divisor)
         local winsPart    = math.min(state.battle_wins_unclaimed or 0, BVM.battle_wins_cap)
-        milDelta = guardPart + moralePart + controlPart + winsPart
+        -- 装备分 + 老兵分（方案B）
+        local equipScore, vetScore = Equipment.CalcVictoryScores(state)
+        milDelta = guardPart + moralePart + controlPart + winsPart + equipScore + vetScore
         -- war_mod
         if isWar then
             milDelta = math.floor(milDelta * BVM.war_mod)
@@ -404,9 +416,12 @@ function TurnEngine.EndTurn(state)
     -- AI 同步累积相对胜利分，用于“领先 AI 多少点”的胜利判断
     for _, faction in ipairs(state.ai_factions or {}) do
         faction.victory = faction.victory or { economic = 0, military = 0 }
-        local aiDelta = GameState.CalcAIVictoryDelta(state, faction)
-        faction.victory.economic = (faction.victory.economic or 0) + (aiDelta.economic or 0)
-        faction.victory.military = (faction.victory.military or 0) + (aiDelta.military or 0)
+        -- 瘫痪期间不累积胜利分
+        if not faction.collapsed then
+            local aiDelta = GameState.CalcAIVictoryDelta(state, faction)
+            faction.victory.economic = (faction.victory.economic or 0) + (aiDelta.economic or 0)
+            faction.victory.military = (faction.victory.military or 0) + (aiDelta.military or 0)
+        end
         faction.battle_wins_unclaimed = 0
     end
 
@@ -466,6 +481,62 @@ function TurnEngine.EndTurn(state)
     for _, faction in ipairs(state.ai_factions) do
         local aiConfig = Balance.AI[faction.type]
         if aiConfig then
+            -- ── 瘫痪状态检测 ──
+            local colCfg = Balance.AI.collapse
+            if not faction.collapsed then
+                -- 检查是否应该进入瘫痪
+                if faction.power <= colCfg.power_threshold
+                    and faction.cash <= colCfg.cash_threshold then
+                    faction.collapsed = true
+                    faction.collapsed_seasons = 0
+                    GameState.AddLog(state, string.format(
+                        "💀 %s 势力崩溃，陷入瘫痪！", faction.name))
+                    table.insert(report.ai_changes,
+                        string.format("%s 势力崩溃，已瘫痪", faction.name))
+                end
+            end
+
+            if faction.collapsed then
+                -- 瘫痪期间：慢速恢复 power，存在度衰减
+                faction.collapsed_seasons = (faction.collapsed_seasons or 0) + 1
+                -- 慢速 power 恢复
+                if faction.power < 100 then
+                    faction.power = math.min(100,
+                        faction.power + (colCfg.collapsed_power_gain or 1))
+                end
+                -- 地区存在度衰减
+                for _, r in ipairs(state.regions or {}) do
+                    if r.ai_presence and r.ai_presence[faction.id] then
+                        local p = r.ai_presence[faction.id]
+                        if p > 0 then
+                            r.ai_presence[faction.id] = math.max(0,
+                                p - (colCfg.presence_decay or 5))
+                        end
+                    end
+                end
+                -- 瘫痪期间态度缓慢回暖（被打服了）
+                if faction.attitude < 0 then
+                    faction.attitude = math.min(0, faction.attitude + 3)
+                end
+                -- 到达恢复期限：注入资源，解除瘫痪
+                if faction.collapsed_seasons >= (colCfg.recovery_seasons or 6) then
+                    faction.collapsed = false
+                    faction.collapsed_seasons = nil
+                    faction.cash = (faction.cash or 0) + (colCfg.recovery_cash or 400)
+                    faction.power = math.min(100,
+                        (faction.power or 0) + (colCfg.recovery_power or 20))
+                    GameState.AddLog(state, string.format(
+                        "⚡ %s 势力重组，恢复活动！", faction.name))
+                    table.insert(report.ai_changes,
+                        string.format("%s 从瘫痪中恢复，重新活跃", faction.name))
+                end
+                -- 瘫痪期间跳过正常 growth / spending / 攻击
+                -- 只做态度 clamp
+                faction.attitude = math.max(-100, math.min(100, faction.attitude))
+                goto continue_faction
+            end
+
+            -- ── 正常状态：基础资产增长 ──
             -- 基础资产增长率 + 情报渗透 debuff
             local rate = aiConfig.growth_rate + (faction.growth_mod or 0)
             if faction.growth_mod_remaining and faction.growth_mod_remaining > 0 then
@@ -494,7 +565,7 @@ function TurnEngine.EndTurn(state)
             if faction.power < 100 then
                 local powerGain = 2
                 -- 战时 AI 势力增长更快
-                if state.flags.at_war then powerGain = 3 end
+                if state.flags and state.flags.at_war then powerGain = 3 end
                 if faction.cash >= (aiConfig.expand_threshold or math.huge) then
                     powerGain = powerGain + 1
                     local targetRegion = PickAIExpansionRegion(state, faction)
@@ -515,7 +586,7 @@ function TurnEngine.EndTurn(state)
             end
 
             -- 战时外资撤退
-            if faction.type == "foreign_capital" and state.flags.at_war then
+            if faction.type == "foreign_capital" and state.flags and state.flags.at_war then
                 if math.random() > aiConfig.war_flee_threshold then
                     local fled = math.floor(faction.cash * 0.15)
                     faction.cash = faction.cash - fled
@@ -634,6 +705,7 @@ function TurnEngine.EndTurn(state)
             -- 最终 clamp
             faction.attitude = math.max(-100, math.min(100, faction.attitude))
         end
+        ::continue_faction::
     end
 
     -- ── 阶段 6.2: foreign_control 持续性修正器 ──
@@ -729,6 +801,38 @@ function TurnEngine.EndTurn(state)
             table.insert(report.warnings,
                 "新家族成员 " .. state.family.training.member_template.name .. " 培养完成！")
             state.family.training = nil
+        end
+    end
+
+    -- ========================================
+    -- 阶段 8.5: 探矿进度
+    -- ========================================
+    if state.prospecting then
+        state.prospecting.progress = state.prospecting.progress + 1
+        if state.prospecting.progress >= state.prospecting.total then
+            local chance = state.prospecting.success_chance
+            local roll = math.random()
+            if roll <= chance then
+                -- 成功：生成备用矿
+                local cfg = Balance.MINE.prospect
+                local reserve = math.random(cfg.reserve_min, cfg.reserve_max)
+                local cnt = (state.prospect_success_count or 0) + 1
+                local id = "prospect_" .. cnt .. "_q" .. (state.quarter or 0)
+                state.prospect_reserves = state.prospect_reserves or {}
+                table.insert(state.prospect_reserves, {
+                    id = id,
+                    name = "探明矿脉 #" .. cnt,
+                    reserve = reserve,
+                })
+                state.prospect_success_count = cnt
+                GameState.AddLog(state, string.format(
+                    "[矿业] 探矿成功！发现新矿脉（储量 %d），已加入备用", reserve))
+                table.insert(report.warnings, "探矿成功！发现新矿脉（储量 " .. reserve .. "）")
+            else
+                GameState.AddLog(state, "[矿业] 探矿未果，未发现有价值矿脉")
+                table.insert(report.warnings, "探矿未果，未发现有价值矿脉")
+            end
+            state.prospecting = nil
         end
     end
 

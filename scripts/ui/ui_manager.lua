@@ -15,6 +15,7 @@ local MilitaryPage = require("ui.ui_military")
 local WorldPage = require("ui.ui_world")
 local MenuPage = require("ui.ui_menu")
 local ActionModals = require("ui.ui_action_modals")
+local EquipModals = require("ui.ui_equipment_modals")
 local EndingModal = require("ui.ui_ending_modal")
 
 local AudioManager = require("systems.audio_manager")
@@ -119,6 +120,7 @@ function UIManager.Create(state, callbacks)
     UI.SetRoot(uiRoot_)
     -- 将 UI 根节点传递给弹窗模块，Modal 必须 AddChild 到 UI 树才能渲染
     ActionModals.SetRoot(uiRoot_)
+    EquipModals.SetRoot(uiRoot_)
     MarketPage.SetRoot(uiRoot_)
     EndingModal.SetRoot(uiRoot_)
     EndingModal.SetCallbacks({
@@ -491,7 +493,14 @@ function UIManager.RefreshAll(state)
     -- 执行 ClearChildren+rebuild 导致按钮闪烁）
     refreshPending_ = true
 
-    settingsDrawer_ = nil
+    -- 销毁设置 Drawer（避免孤立 widget 泄露）
+    if settingsDrawer_ then
+        local old = settingsDrawer_
+        settingsDrawer_ = nil
+        old:Destroy()
+    else
+        settingsDrawer_ = nil
+    end
 end
 
 --- 轻量刷新：仅更新 TopBar + 仪表盘关键控件属性，不触发页面重建

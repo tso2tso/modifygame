@@ -1,5 +1,5 @@
 -- ============================================================================
--- 武装页 UI：护矿队管理、士气、装备、补给
+-- 武装页 UI：护矿队管理、士气、编队、装备、补给
 -- 设计规范：sarajevo_dynasty_ui_spec §6.5
 -- ============================================================================
 
@@ -8,11 +8,15 @@ local Config = require("config")
 local GameState = require("game_state")
 local Balance = require("data.balance")
 local Combat = require("systems.combat")
+local Equipment = require("systems.equipment")
+local EquipmentData = require("data.equipment_data")
+local EquipModals = require("ui.ui_equipment_modals")
 
 local C = Config.COLORS
 local F = Config.FONT
 local S = Config.SIZE
 local BMI = Balance.MILITARY
+local CATALOG = EquipmentData.CATALOG
 
 local MilitaryPage = {}
 
@@ -51,10 +55,38 @@ function MilitaryPage._BuildContent(state)
     local inflation = GameState.GetInflationFactor(state)
     local quarterCost = math.floor(mil.guards * mil.wage * inflation
         + mil.guards * BMI.supply_per_guard * BMI.supply_cost * inflation)
+    -- 装备维护费
+    local equipMaint, factoryMaint = Equipment.CalcMaintenanceCost(state)
+    local totalMaint = quarterCost + equipMaint + factoryMaint
 
     -- 招募费用
     local recruitCost = math.floor(BMI.recruit_cost * inflation
         * (1 - GameState.GetInfluenceRecruitDiscount(state)))
+
+    -- 编队信息
+    local squads = mil.squads or {}
+    local assigned = Equipment.GetAssignedGuards(state)
+    local unassigned = Equipment.GetUnassignedGuards(state)
+
+    -- 工厂信息
+    local factory = mil.factory
+    local factoryLabel = "未建造"
+    local factoryColor = C.text_muted
+    if factory then
+        if factory.building then
+            factoryLabel = string.format("建造中 %d/%d 季", factory.building.progress, factory.building.total)
+            factoryColor = C.accent_blue
+        elseif factory.level and factory.level > 0 then
+            factoryLabel = string.format("Lv%d 运行中", factory.level)
+            factoryColor = C.accent_green
+        end
+    end
+
+    -- 库存 / 生产队列
+    local invCount = #(mil.inventory or {})
+    local queueCount = #(mil.production_queue or {}) + #(mil.outsource_slots or {})
+
+    local accent = Config.GetEraAccent(state)
 
     return UI.Panel {
         id = "militaryContent",
@@ -107,7 +139,7 @@ function MilitaryPage._BuildContent(state)
                             },
                             MilitaryPage._StatCol("士气", moraleText, moraleColor),
                             MilitaryPage._StatCol("战力", tostring(combatPower), C.accent_gold),
-                            MilitaryPage._StatCol("军费/季", tostring(quarterCost), C.accent_red),
+                            MilitaryPage._StatCol("军费/季", tostring(totalMaint), C.accent_red),
                         },
                     },
                     -- §6.5 士气进度条
@@ -121,6 +153,13 @@ function MilitaryPage._BuildContent(state)
                     },
                 },
             },
+
+            -- 编队概览卡片
+            MilitaryPage._BuildSquadCard(state, squads, assigned, unassigned, accent),
+
+            -- 兵工厂 & 库存卡片
+            MilitaryPage._BuildFactoryCard(state, factoryLabel, factoryColor,
+                invCount, queueCount, accent),
 
             -- 详细信息卡片
             UI.Panel {
@@ -137,14 +176,17 @@ function MilitaryPage._BuildContent(state)
                     MilitaryPage._InfoRow("主管加成", string.format("%+d%%", math.floor(chiefBonus * 100)),
                         chiefBonus >= 0 and C.accent_green or C.accent_red),
                     MilitaryPage._InfoRow("护卫工资", mil.wage .. " /人/季", C.text_primary),
-                    MilitaryPage._InfoRow("装备等级", mil.equipment .. "/5", C.text_primary),
+                    MilitaryPage._InfoRow("装备维护", equipMaint > 0
+                        and (equipMaint .. " /季") or "无", C.text_primary),
+                    MilitaryPage._InfoRow("工厂维护", factoryMaint > 0
+                        and (factoryMaint .. " /季") or "无", C.text_primary),
                     MilitaryPage._InfoRow("补给储备", mil.supply .. " 单位", C.text_primary),
                     UI.Divider { color = C.divider },
                     UI.Label {
-                        text = state.flags.at_war and "当前处于战争状态，士气衰减加速"
+                        text = (state.flags and state.flags.at_war) and "当前处于战争状态，士气衰减加速"
                             or "和平时期，士气每季自然衰减 " .. math.abs(BMI.morale_decay),
                         fontSize = F.label,
-                        fontColor = state.flags.at_war and C.accent_red or C.text_muted,
+                        fontColor = (state.flags and state.flags.at_war) and C.accent_red or C.text_muted,
                         whiteSpace = "normal",
                     },
                 },
@@ -194,7 +236,7 @@ function MilitaryPage._BuildContent(state)
                                 flexGrow = 1,
                                 flexBasis = 0,
                                 variant = "outlined",
-                                disabled = mil.guards < 3,
+                                disabled = unassigned < 3,
                                 borderRadius = S.radius_btn,
                                 onClick = function(self)
                                     self.props.disabled = true
@@ -223,6 +265,220 @@ function MilitaryPage._BuildContent(state)
         },
     }
 end
+
+-- ============================================================================
+-- 编队概览卡片
+-- ============================================================================
+
+function MilitaryPage._BuildSquadCard(state, squads, assigned, unassigned, accent)
+    local children = {
+        UI.Panel {
+            width = "100%",
+            flexDirection = "row",
+            justifyContent = "space-between",
+            alignItems = "center",
+            children = {
+                UI.Label {
+                    text = "🛡️ 编队",
+                    fontSize = F.subtitle,
+                    fontWeight = "bold",
+                    fontColor = C.text_primary,
+                },
+                UI.Label {
+                    text = string.format("%d 编队 | 编入 %d | 待编 %d",
+                        #squads, assigned, unassigned),
+                    fontSize = F.label,
+                    fontColor = C.text_secondary,
+                },
+            },
+        },
+    }
+
+    if #squads > 0 then
+        table.insert(children, UI.Divider { color = C.divider })
+        -- 每个编队一行摘要
+        for _, sq in ipairs(squads) do
+            local ed = CATALOG[sq.equip_id] or CATALOG.rifle
+            local vet = EquipmentData.VETERANCY[sq.veterancy] or EquipmentData.VETERANCY[0]
+            local power = math.floor(Equipment.CalcSquadPower(sq))
+            local condColor = sq.condition >= 60 and C.accent_green
+                or (sq.condition >= 30 and C.accent_amber or C.accent_red)
+
+            table.insert(children, UI.Panel {
+                width = "100%",
+                flexDirection = "row",
+                justifyContent = "space-between",
+                alignItems = "center",
+                paddingTop = 2,
+                paddingBottom = 2,
+                children = {
+                    -- 左侧：名称 + 装备
+                    UI.Panel {
+                        flexShrink = 1,
+                        flexDirection = "row",
+                        gap = 6,
+                        alignItems = "center",
+                        children = {
+                            UI.Label {
+                                text = sq.name,
+                                fontSize = F.body_minor,
+                                fontWeight = "bold",
+                                fontColor = C.text_primary,
+                            },
+                            UI.Label {
+                                text = string.format("%s%s", ed.icon, vet.name),
+                                fontSize = F.label,
+                                fontColor = sq.veterancy >= 3 and C.accent_gold or C.text_muted,
+                            },
+                        },
+                    },
+                    -- 右侧：人数 + 耐久 + 战力
+                    UI.Panel {
+                        flexDirection = "row",
+                        gap = 8,
+                        alignItems = "center",
+                        children = {
+                            UI.Label {
+                                text = string.format("%d人", sq.size),
+                                fontSize = F.label,
+                                fontColor = C.text_secondary,
+                            },
+                            UI.Label {
+                                text = sq.condition .. "%",
+                                fontSize = F.label,
+                                fontColor = condColor,
+                            },
+                            UI.Label {
+                                text = string.format("⚔%d", power),
+                                fontSize = F.label,
+                                fontWeight = "bold",
+                                fontColor = C.accent_gold,
+                            },
+                        },
+                    },
+                },
+            })
+        end
+    else
+        table.insert(children, UI.Label {
+            text = "暂无编队，编组护卫可提升战力。",
+            fontSize = F.body_minor,
+            fontColor = C.text_muted,
+            paddingTop = 4,
+        })
+    end
+
+    -- 编队管理按钮
+    table.insert(children, UI.Divider { color = C.divider })
+    table.insert(children, UI.Panel {
+        width = "100%",
+        height = 34,
+        borderRadius = S.radius_btn,
+        backgroundColor = accent,
+        justifyContent = "center",
+        alignItems = "center",
+        onPointerUp = Config.TapGuard(function()
+            EquipModals.SetCallbacks(stateRef_, function()
+                if onStateChanged_ then onStateChanged_() end
+            end)
+            EquipModals.ShowSquadManagement(stateRef_, accent)
+        end),
+        children = {
+            UI.Label {
+                text = "编队管理",
+                fontSize = F.body,
+                fontWeight = "bold",
+                fontColor = { 255, 255, 255, 255 },
+                pointerEvents = "none",
+            },
+        },
+    })
+
+    return UI.Panel {
+        width = "100%",
+        backgroundColor = C.paper_dark,
+        borderRadius = S.radius_card,
+        borderWidth = 1,
+        borderColor = C.border_card,
+        padding = S.card_padding,
+        flexDirection = "column",
+        gap = 6,
+        children = children,
+    }
+end
+
+-- ============================================================================
+-- 兵工厂 & 库存卡片
+-- ============================================================================
+
+function MilitaryPage._BuildFactoryCard(state, factoryLabel, factoryColor,
+    invCount, queueCount, accent)
+    local children = {
+        UI.Panel {
+            width = "100%",
+            flexDirection = "row",
+            justifyContent = "space-between",
+            alignItems = "center",
+            children = {
+                UI.Label {
+                    text = "⚒️ 装备与生产",
+                    fontSize = F.subtitle,
+                    fontWeight = "bold",
+                    fontColor = C.text_primary,
+                },
+            },
+        },
+        UI.Divider { color = C.divider },
+        MilitaryPage._InfoRow("兵工厂", factoryLabel, factoryColor),
+        MilitaryPage._InfoRow("库存装备", invCount > 0
+            and (invCount .. " 件") or "无", C.text_primary),
+        MilitaryPage._InfoRow("生产中", queueCount > 0
+            and (queueCount .. " 项") or "无",
+            queueCount > 0 and C.accent_blue or C.text_muted),
+    }
+
+    -- 装备生产按钮
+    table.insert(children, UI.Divider { color = C.divider })
+    table.insert(children, UI.Panel {
+        width = "100%",
+        height = 34,
+        borderRadius = S.radius_btn,
+        backgroundColor = accent,
+        justifyContent = "center",
+        alignItems = "center",
+        onPointerUp = Config.TapGuard(function()
+            EquipModals.SetCallbacks(stateRef_, function()
+                if onStateChanged_ then onStateChanged_() end
+            end)
+            EquipModals.ShowProduction(stateRef_, accent)
+        end),
+        children = {
+            UI.Label {
+                text = "装备生产与管理",
+                fontSize = F.body,
+                fontWeight = "bold",
+                fontColor = { 255, 255, 255, 255 },
+                pointerEvents = "none",
+            },
+        },
+    })
+
+    return UI.Panel {
+        width = "100%",
+        backgroundColor = C.paper_dark,
+        borderRadius = S.radius_card,
+        borderWidth = 1,
+        borderColor = C.border_card,
+        padding = S.card_padding,
+        flexDirection = "column",
+        gap = 6,
+        children = children,
+    }
+end
+
+-- ============================================================================
+-- 辅助组件
+-- ============================================================================
 
 function MilitaryPage._StatCol(label, value, color)
     return UI.Panel {
@@ -276,11 +532,15 @@ function MilitaryPage._OnRecruit(count)
     if onStateChanged_ then onStateChanged_() end
 end
 
---- 裁军
+--- 裁军（只能裁撤未编队的护卫）
 function MilitaryPage._OnDisband(count)
     if not stateRef_ then return end
-    count = math.min(count, stateRef_.military.guards)
-    if count <= 0 then return end
+    local unassigned = Equipment.GetUnassignedGuards(stateRef_)
+    count = math.min(count, unassigned)
+    if count <= 0 then
+        UI.Toast.Show("没有可裁撤的未编队护卫", { variant = "error", duration = 1.5 })
+        return
+    end
     stateRef_.military.guards = stateRef_.military.guards - count
     stateRef_.military.morale = math.max(0, stateRef_.military.morale - 3)
     GameState.AddLog(stateRef_, string.format("裁撤 %d 名护卫", count))

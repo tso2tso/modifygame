@@ -54,6 +54,23 @@ Balance.MINE = {
     level_output_bonus  = 0.20,  -- 每级 +20% 产能
     -- 事故概率（受治安和投入影响）
     accident_base_chance = 0.05, -- 5% 基础事故概率/季
+    -- 矿山耗尽处置
+    depletion = {
+        migrate_ap = 1,                -- 产能迁移消耗 AP
+        migrate_cash_ratio = 0.5,      -- 迁移费 = 新矿费用 × 此比例
+        cleanup_cost_per_level = 200,  -- 善后处理：每级费用
+    },
+    prospect = {
+        ap = 1,                 -- 启动探矿消耗 AP
+        cash = 400,             -- 探矿基础费用
+        turns = 2,              -- 探矿周期（季度）
+        base_success = 0.25,    -- 首次成功率 25%
+        success_decay = 0.05,   -- 每次成功后递减 5%
+        min_success = 0.05,     -- 最低成功率 5%
+        reserve_min = 1000,     -- 备用矿储量下限
+        reserve_max = 2000,     -- 备用矿储量上限
+        max_reserves = 2,       -- 备用槽位上限
+    },
 }
 
 -- ============================================================================
@@ -137,20 +154,24 @@ Balance.VICTORY = {
             min_total_control = 80,     -- 100→80
         },
     },
-    -- 军事胜利：每季增量 = (floor(guards*0.3) + floor(morale/25) + floor(total_control/12) + 本季/近期胜场) * war_mod
+    -- 军事胜利：每季增量 = (floor(guards*0.25) + floor(morale/25) + floor(total_control/12) + 胜场 + 装备分 + 老兵分) * war_mod
     military = {
-        threshold        = 2000,  -- 军事胜利点阈值（2500→2000：与经济线拉近难度差）
-        guard_multiplier = 0.3,   -- 每护卫 +0.3 点（0.25→0.3：护卫投资更有效）
-        morale_divisor   = 25,    -- 每 25 士气 +1 点（28→25：士气管理更重要）
-        control_divisor  = 12,    -- 每 12 总控制度 +1 点（14→12：军事扩张更有收益）
+        threshold        = 2000,  -- 军事胜利点阈值
+        guard_multiplier = 0.25,  -- 每护卫 +0.25 点（0.3→0.25：装备/老兵分补充）
+        morale_divisor   = 25,    -- 每 25 士气 +1 点
+        control_divisor  = 12,    -- 每 12 总控制度 +1 点
         battle_wins_cap  = 3,     -- 每季最多计入 3 场近期胜利
         war_mod          = 1.25,  -- 战时乘数（战争加速军事胜利）
         gate_year        = 1925,  -- 章节门控：军事线要到 1925 年后才结算
+        -- 装备/老兵胜利分（方案B）
+        equip_score_cap         = 4,    -- 装备分上限
+        equip_tier_multiplier   = 0.8,  -- 每 (tier-1) × 0.8
+        veterancy_score_cap     = 2,    -- 老兵分上限（王牌编队数 × 1）
         -- 快照验证
         snapshot = {
-            min_guards        = 25,     -- 30→25：降低快照门槛
-            min_morale        = 50,     -- 55→50
-            min_total_control = 100,    -- 120→100
+            min_guards        = 25,     -- 降低快照门槛
+            min_morale        = 50,
+            min_total_control = 100,
         },
     },
 }
@@ -226,6 +247,16 @@ Balance.AI = {
         low_power_sympathy  = 30,    -- AI power 低于此值 → 态度 +1（弱势求和倾向）
         natural_recovery    = 1,     -- 每季自然回暖 +1（人心向善基线）
         attitude_cap        = 60,    -- 正向态度上限（不会无限好感）
+    },
+    -- AI 势力瘫痪机制（power + cash 过低时触发）
+    collapse = {
+        power_threshold   = 5,    -- power <= 此值 且 cash <= cash_threshold 时触发瘫痪
+        cash_threshold    = 100,  -- cash <= 此值 且 power <= power_threshold 时触发瘫痪
+        collapsed_power_gain = 1, -- 瘫痪期间每季度 power 恢复量（正常 2~3）
+        presence_decay    = 5,    -- 瘫痪期间每季度地区存在度衰减
+        recovery_seasons  = 6,    -- 瘫痪持续 N 季后获得一次性注入
+        recovery_cash     = 400,  -- 恢复时注入的现金
+        recovery_power    = 20,   -- 恢复时注入的势力值
     },
 }
 
@@ -385,7 +416,7 @@ Balance.DIPLOMACY = {
 -- 资产交易
 -- ============================================================================
 Balance.TRADE = {
-    new_mine = { ap = 2, cash = 1200, base_reserve = 1500, max_mines = 8 },  -- 600→1500
+    new_mine = { ap = 2, cash = 1200, base_reserve = 1500, max_mines = 4 },  -- 基础4槽，科技可扩至8
     sell_mine = { ap = 2, cash_per_level = 500 },
     raid_ai = { ap = 2, cash = 400, ai_cash_loss = 200, power_loss = 8 },
 }

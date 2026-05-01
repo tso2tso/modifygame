@@ -6,6 +6,7 @@
 
 local GrandPowers = require("systems.grand_powers")
 local GameState   = require("game_state")
+local Equipment   = require("systems.equipment")
 local Config      = require("config")
 
 local BranchEvents = {}
@@ -32,11 +33,10 @@ local BRANCH_EVENTS = {
         options = {
             {
                 text = "📩 向奥匈当局通报阴谋",
-                desc = "背叛同胞换取帝国庇护。刺杀失败，一战推迟2-4个季度",
+                desc = "背叛同胞换取帝国庇护，刺杀失败，一战推迟",
                 effects = { collaboration_score = 10 },
                 apply = function(state)
                     -- 刺杀失败 → 一战推迟
-                    state.collaboration_score = (state.collaboration_score or 0) + 10
                     local ah = state.powers and state.powers["austria_hungary"]
                     if ah then
                         ah.attitude_to_player = math.min(100, ah.attitude_to_player + 25)
@@ -48,10 +48,9 @@ local BRANCH_EVENTS = {
             },
             {
                 text = "🗡️ 暗中协助刺杀组织",
-                desc = "提前引爆欧洲火药桶。塞尔维亚视你为英雄",
+                desc = "助推刺杀赢得塞尔维亚好感，但战火加速降临",
                 effects = { collaboration_score = -5 },
                 apply = function(state)
-                    state.collaboration_score = (state.collaboration_score or 0) - 5
                     local serbia = state.powers and state.powers["serbia"]
                     if serbia then
                         serbia.attitude_to_player = math.min(100, (serbia.attitude_to_player or 0) + 20)
@@ -63,7 +62,7 @@ local BRANCH_EVENTS = {
             },
             {
                 text = "🤷 明哲保身，不予干预",
-                desc = "历史按原定轨道运行。1914年夏，一战爆发",
+                desc = "袖手旁观，历史按原定轨道运行",
                 effects = {},
                 apply = function(state)
                     GameState.AddLog(state, "[分支] 你选择了袖手旁观，历史按原轨迹运行")
@@ -71,7 +70,7 @@ local BRANCH_EVENTS = {
             },
             {
                 text = "🕊️ 刺杀后紧急斡旋",
-                desc = "需要影响力≥40且双方态度≥0。极小概率阻止战争升级",
+                desc = "需影响力≥40且双方态度≥0。成功率极低，但若成功可改写历史",
                 effects = {},
                 condition = function(state)
                     local totalInf = GameState.CalcTotalInfluence(state)
@@ -114,7 +113,7 @@ local BRANCH_EVENTS = {
         options = {
             {
                 text = "🏛️ 推动联邦化改革",
-                desc = "需与奥匈态度≥40且影响力≥50。帝国改组为联邦，政治格局大变",
+                desc = "需奥匈态度≥40且影响力≥50。推动帝国联邦化，维持其存在但削弱",
                 effects = { collaboration_score = 8 },
                 condition = function(state)
                     local totalInf = GameState.CalcTotalInfluence(state)
@@ -123,7 +122,6 @@ local BRANCH_EVENTS = {
                     return ah and ah.attitude_to_player >= 40
                 end,
                 apply = function(state)
-                    state.collaboration_score = (state.collaboration_score or 0) + 8
                     -- 联邦化：奥匈不完全解体（保留存在但削弱）
                     state._branch_ah_federalized = true
                     local ah = state.powers["austria_hungary"]
@@ -138,31 +136,31 @@ local BRANCH_EVENTS = {
             },
             {
                 text = "🇷🇸 支持南斯拉夫统一",
-                desc = "加速南斯拉夫建国进程",
+                desc = "站在民族统一一边，加速南斯拉夫建国",
                 effects = { collaboration_score = -3 },
                 apply = function(state)
-                    state.collaboration_score = (state.collaboration_score or 0) - 3
                     state._branch_yugo_accelerated = true
                     GameState.AddLog(state, "[分支] 你积极支持南斯拉夫统一运动，为建国铺平道路")
                 end,
             },
             {
                 text = "💰 趁乱扩张地盘",
-                desc = "需现金≥5000。在权力真空中大肆收购",
+                desc = "需现金≥5000。趁乱大肆收购资产，代价不菲但收获丰厚",
                 effects = { collaboration_score = 2 },
                 condition = function(state)
                     return state.cash >= 5000
                 end,
                 apply = function(state)
-                    state.cash = state.cash - 3000
-                    state.collaboration_score = (state.collaboration_score or 0) + 2
+                    local inf = GameState.GetInflationFactor(state)
+                    local cost = math.floor(3000 * inf)
+                    state.cash = state.cash - cost
                     -- 大幅提升本地控制权
                     for _, r in ipairs(state.regions) do
                         r.control = math.min(100, (r.control or 0) + 15)
                     end
                     -- 获取黄金
                     state.gold = state.gold + 5
-                    GameState.AddLog(state, "[分支] 你在帝国崩溃的混乱中大肆扩张，花费3000克朗获取了大量资产")
+                    GameState.AddLog(state, string.format("[分支] 你在帝国崩溃的混乱中大肆扩张，花费%d克朗获取了大量资产", cost))
                 end,
             },
         },
@@ -185,11 +183,11 @@ local BRANCH_EVENTS = {
         options = {
             {
                 text = "🤝 与德国资本深度合作",
-                desc = "经济繁荣，但被占领时将被'特殊关照'",
+                desc = "与德国深度绑定，短期暴富但占领时会被清算",
                 effects = { collaboration_score = 8 },
                 apply = function(state)
-                    state.collaboration_score = (state.collaboration_score or 0) + 8
-                    state.cash = state.cash + 2000
+                    local inf = GameState.GetInflationFactor(state)
+                    state.cash = state.cash + math.floor(2000 * inf)
                     local nazi = state.powers["nazi_germany"]
                     if nazi then
                         nazi.attitude_to_player = math.min(100, nazi.attitude_to_player + 20)
@@ -201,13 +199,12 @@ local BRANCH_EVENTS = {
             },
             {
                 text = "🛡️ 加固防御，秘密备战",
-                desc = "需武装≥15。二战初期本地抵抗更强",
+                desc = "需武装≥15。暗中备战增强抵抗力量，为未来解放铺路",
                 effects = { collaboration_score = -5 },
                 condition = function(state)
                     return state.military and state.military.guards >= 15
                 end,
                 apply = function(state)
-                    state.collaboration_score = (state.collaboration_score or 0) - 5
                     state.military.guards = state.military.guards + 5
                     state._branch_fortified = true
                     GameState.AddLog(state, "[分支] 你暗中加固了防御工事，储备了武器弹药")
@@ -215,7 +212,7 @@ local BRANCH_EVENTS = {
             },
             {
                 text = "🕊️ 外交斡旋保持中立",
-                desc = "需影响力≥60。尝试让南斯拉夫保持中立",
+                desc = "需影响力≥60。外交斡旋争取中立时间，推迟被入侵",
                 effects = {},
                 condition = function(state)
                     return GameState.CalcTotalInfluence(state) >= 60
@@ -246,7 +243,7 @@ local BRANCH_EVENTS = {
         options = {
             {
                 text = "⏳ 等待游击队/苏联解放",
-                desc = "按历史走向，铁托游击队将在年底解放萨拉热窝",
+                desc = "静待正规力量解放，安全但被动",
                 effects = {},
                 apply = function(state)
                     GameState.AddLog(state, "[分支] 你选择等待正规解放力量，铁托的游击队正在逼近")
@@ -254,15 +251,19 @@ local BRANCH_EVENTS = {
             },
             {
                 text = "⚔️ 组织本地武装起义",
-                desc = "需合作度≤-20且武装≥15。提前解放，获得'解放者'称号",
+                desc = "需合作度≤-20且武装≥15。自己动手提前解放，消耗武装但赢得巨大声望",
                 effects = { collaboration_score = -15 },
                 condition = function(state)
                     return (state.collaboration_score or 0) <= -20
                         and state.military and state.military.guards >= 15
                 end,
                 apply = function(state)
-                    state.collaboration_score = (state.collaboration_score or 0) - 15
+                    local oldGuards = state.military.guards
                     state.military.guards = math.max(0, state.military.guards - 8)
+                    local lost = oldGuards - state.military.guards
+                    if lost > 0 then
+                        Equipment.OnGuardsLost(state, lost)
+                    end
                     state._branch_self_liberation = true
 
                     -- 提前解放萨拉热窝
@@ -278,13 +279,12 @@ local BRANCH_EVENTS = {
             },
             {
                 text = "🤝 与西方盟军接洽",
-                desc = "需影响力≥50。萨拉热窝划入西方占领区（蝴蝶效应）",
+                desc = "需影响力≥50。引入西方力量改变战后格局（蝴蝶效应）",
                 effects = { collaboration_score = -5 },
                 condition = function(state)
                     return GameState.CalcTotalInfluence(state) >= 50
                 end,
                 apply = function(state)
-                    state.collaboration_score = (state.collaboration_score or 0) - 5
                     state._branch_western_zone = true
                     GameState.AddLog(state, "[分支·蝴蝶效应] 你成功与西方盟军建立联系，萨拉热窝被划入西方占领区")
                 end,
@@ -308,14 +308,14 @@ local BRANCH_EVENTS = {
         options = {
             {
                 text = "🇾🇺 支持铁托独立路线",
-                desc = "需合作度≤0。西方援助提前到来，经济机会大增",
+                desc = "需合作度≤0。站在铁托一边，获得经济回报和政治好感",
                 effects = { collaboration_score = -5 },
                 condition = function(state)
                     return (state.collaboration_score or 0) <= 0
                 end,
                 apply = function(state)
-                    state.collaboration_score = (state.collaboration_score or 0) - 5
-                    state.cash = state.cash + 1500
+                    local inf = GameState.GetInflationFactor(state)
+                    state.cash = state.cash + math.floor(1500 * inf)
                     local tito = state.powers and state.powers["tito_yugoslavia"]
                     if tito then
                         tito.attitude_to_player = math.min(100, tito.attitude_to_player + 25)
@@ -326,17 +326,17 @@ local BRANCH_EVENTS = {
             },
             {
                 text = "🇷🇺 暗中为苏联传递情报",
-                desc = "高风险。铁托-斯大林决裂可能不发生",
+                desc = "高风险赌博：极小概率改写历史，大概率被发现遭严惩",
                 effects = { collaboration_score = 5 },
                 apply = function(state)
-                    state.collaboration_score = (state.collaboration_score or 0) + 5
                     -- 10% 概率阻止决裂（蝴蝶效应）
                     if math.random(100) <= 10 then
                         state._branch_tito_stays_soviet = true
                         GameState.AddLog(state, "[分支·蝴蝶效应] 你传递的情报阻止了决裂，南斯拉夫留在苏联阵营")
                     else
                         -- 被发现
-                        state.cash = math.max(0, state.cash - 2000)
+                        local inf = GameState.GetInflationFactor(state)
+                        state.cash = math.max(0, state.cash - math.floor(2000 * inf))
                         local tito = state.powers and state.powers["tito_yugoslavia"]
                         if tito then
                             tito.attitude_to_player = math.max(-100, tito.attitude_to_player - 30)
@@ -347,7 +347,7 @@ local BRANCH_EVENTS = {
             },
             {
                 text = "🌐 推动亲西方路线",
-                desc = "需解放时选择了西方盟军。南斯拉夫可能加入西方阵营（蝴蝶效应）",
+                desc = "需解放时选择了西方盟军。推动南斯拉夫整体转向西方（蝴蝶效应）",
                 effects = {},
                 condition = function(state)
                     return state._branch_western_zone == true
@@ -358,7 +358,8 @@ local BRANCH_EVENTS = {
                     if tito then
                         tito.faction = "allies"
                     end
-                    state.cash = state.cash + 3000
+                    local inf = GameState.GetInflationFactor(state)
+                    state.cash = state.cash + math.floor(3000 * inf)
                     GameState.AddLog(state, "[分支·蝴蝶效应] 凭借西方占领区的基础，你推动南斯拉夫走向西方阵营")
                 end,
             },
@@ -401,7 +402,7 @@ local function BuildReckoningEvent(state)
         event.options = {
             {
                 text = "💰 接受罚没，低调求生",
-                desc = "资产罚没50%，被排除出公共生活",
+                desc = "认罚求生，资产大幅缩水但保住性命和根基",
                 apply = function(s)
                     s.cash = math.floor(s.cash * 0.5)
                     s.gold = math.floor(s.gold * 0.5)
@@ -414,7 +415,7 @@ local function BuildReckoningEvent(state)
             },
             {
                 text = "🏃 转移资产出逃",
-                desc = "保住部分资产，但失去所有本地影响力",
+                desc = "携财出逃保住大部分资产，但在本地声望尽毁",
                 apply = function(s)
                     s.cash = math.floor(s.cash * 0.7)
                     s.gold = math.floor(s.gold * 0.8)
@@ -432,7 +433,7 @@ local function BuildReckoningEvent(state)
         event.options = {
             {
                 text = "💸 缴纳罚款，重新开始",
-                desc = "小额罚款，保留大部分资产",
+                desc = "小额罚款了事，影响不大",
                 apply = function(s)
                     local fine = math.floor(s.cash * 0.15)
                     s.cash = s.cash - fine
@@ -446,7 +447,7 @@ local function BuildReckoningEvent(state)
         event.options = {
             {
                 text = "👤 普通人的日常继续",
-                desc = "无特殊影响",
+                desc = "平安无事，生活照旧",
                 apply = function(s)
                     GameState.AddLog(s, "[清算] 你以'普通市民'身份安然度过审查")
                 end,
@@ -458,9 +459,10 @@ local function BuildReckoningEvent(state)
         event.options = {
             {
                 text = "🎖️ 接受'抵抗者'荣誉",
-                desc = "获得政治地位和税收优惠",
+                desc = "获得荣誉和奖励，在新政权中地位稳固",
                 apply = function(s)
-                    s.cash = s.cash + 1000
+                    local inf = GameState.GetInflationFactor(s)
+                    s.cash = s.cash + math.floor(1000 * inf)
                     for _, r in ipairs(s.regions) do
                         r.influence = math.min(100, (r.influence or 0) + 8)
                     end
@@ -474,9 +476,10 @@ local function BuildReckoningEvent(state)
         event.options = {
             {
                 text = "🏆 接受'人民英雄'称号",
-                desc = "免费国有化豁免 + 态度+40 + 大量经济奖励",
+                desc = "最高荣誉加身，丰厚奖赏和政治特权，前途一片光明",
                 apply = function(s)
-                    s.cash = s.cash + 3000
+                    local inf = GameState.GetInflationFactor(s)
+                    s.cash = s.cash + math.floor(3000 * inf)
                     s.gold = s.gold + 5
                     for _, r in ipairs(s.regions) do
                         r.influence = math.min(100, (r.influence or 0) + 15)

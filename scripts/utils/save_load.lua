@@ -282,8 +282,17 @@ function SaveLoad._SerializeState(state)
             level = mine.level,
             output_bonus = mine.output_bonus,
             active = mine.active,
+            reserve = mine.reserve,
+            migrating = mine.migrating or nil,
         })
     end
+    data.mine_slots_bonus = state.mine_slots_bonus or 0
+
+    -- 探矿
+    data.prospect_reserves = state.prospect_reserves or {}
+    data.prospecting = state.prospecting
+    data.prospect_success_count = state.prospect_success_count or 0
+    data.prospect_success_bonus = state.prospect_success_bonus or 0
 
     -- 股市（含历史与 event_mu_mods）
     data.stocks = {}
@@ -323,6 +332,7 @@ function SaveLoad._SerializeState(state)
         finance_supply_discount = state.finance_supply_discount or 0,
         gold_price_bonus = state.gold_price_bonus or 0,
         hire_cost_discount = state.hire_cost_discount or 0,
+        supply_reduction_bonus = state.supply_reduction_bonus or 0,
         accident_rate_mod = state.accident_rate_mod or 0,
     }
 
@@ -351,6 +361,12 @@ function SaveLoad._SerializeState(state)
         wage = state.military.wage,
         equipment = state.military.equipment,
         supply = state.military.supply,
+        -- 装备/编队系统
+        squads = state.military.squads or {},
+        inventory = state.military.inventory or {},
+        factory = state.military.factory,
+        production_queue = state.military.production_queue or {},
+        outsource_slots = state.military.outsource_slots or {},
     }
 
     -- AI 势力
@@ -480,8 +496,30 @@ function SaveLoad._DeserializeState(data)
     data.finance_supply_discount = derived.finance_supply_discount or data.finance_supply_discount or 0
     data.gold_price_bonus = derived.gold_price_bonus or data.gold_price_bonus or 0
     data.hire_cost_discount = derived.hire_cost_discount or data.hire_cost_discount or 0
+    data.supply_reduction_bonus = derived.supply_reduction_bonus or data.supply_reduction_bonus or 0
     data.accident_rate_mod = derived.accident_rate_mod or data.accident_rate_mod or 0
+    data.derived_effects = nil  -- 清除残留，避免序列化时产生嵌套冗余
     data.military.supply = data.military.supply or 20
+
+    -- 装备/编队系统（v0.5.0 新增）
+    data.military.squads = data.military.squads or {}
+    data.military.inventory = data.military.inventory or {}
+    -- data.military.factory 可以为 nil（表示未建造）
+    data.military.production_queue = data.military.production_queue or {}
+    data.military.outsource_slots = data.military.outsource_slots or {}
+
+    -- 矿山槽位 + 探矿（v0.4.0 新增）
+    data.mine_slots_bonus = data.mine_slots_bonus or 0
+    data.prospect_reserves = data.prospect_reserves or {}
+    -- data.prospecting 可以为 nil（表示未在探矿）
+    data.prospect_success_count = data.prospect_success_count or 0
+    data.prospect_success_bonus = data.prospect_success_bonus or 0
+    -- 矿山独立储量兼容（旧存档无 reserve 字段）
+    for _, mine in ipairs(data.mines) do
+        if mine.reserve == nil then
+            mine.reserve = 500  -- 旧存档默认储量
+        end
+    end
 
     -- 兼容旧存档：老版本只保存 researched，没有保存科技派生字段。
     if not data.derived_effects and data.tech and data.tech.researched then
@@ -508,8 +546,14 @@ function SaveLoad._DeserializeState(data)
                         data.gold_price_bonus = (data.gold_price_bonus or 0) + eff.value
                     elseif eff.kind == "hire_cost_reduction" then
                         data.hire_cost_discount = (data.hire_cost_discount or 0) + eff.value
+                    elseif eff.kind == "supply_reduction" then
+                        data.supply_reduction_bonus = (data.supply_reduction_bonus or 0) + math.abs(eff.value)
                     elseif eff.kind == "accident_reduction" then
                         data.accident_rate_mod = (data.accident_rate_mod or 0) + eff.value
+                    elseif eff.kind == "mine_slots" then
+                        data.mine_slots_bonus = (data.mine_slots_bonus or 0) + eff.value
+                    elseif eff.kind == "prospect_success" then
+                        data.prospect_success_bonus = (data.prospect_success_bonus or 0) + eff.value
                     end
                 end
             end
@@ -548,6 +592,10 @@ function SaveLoad._DeserializeState(data)
             s.change_pct = s.change_pct or 0
         end
     end
+
+    -- 重建装备库存 uid 计数器，避免新物品 uid 与旧存档冲突
+    local Equipment = require("systems.equipment")
+    Equipment.RebuildUidCounter(data)
 
     return data
 end

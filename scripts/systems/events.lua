@@ -75,6 +75,13 @@ function Events.CheckEvents(state)
             if cd <= 0 then
                 -- 概率检查（带保底乘数）
                 local effectiveChance = (event.chance or 0.1) * chanceMultiplier
+                -- 事件自带的概率修正（基于游戏状态中的 modifier）
+                if event.chance_modifier then
+                    local modVal = GameState.GetModifierValue(state, event.chance_modifier)
+                    if modVal ~= 0 then
+                        effectiveChance = effectiveChance * (1 + modVal)
+                    end
+                end
                 -- 前两年（1904-1905）降低随机事件概率，给玩家缓冲期
                 if state.year and state.year <= 1905 then
                     effectiveChance = effectiveChance * 0.4
@@ -158,7 +165,7 @@ function Events._CheckTrigger(state, event)
     -- 最低基建
     if trigger.min_development then
         local mineRegion = GameState.GetRegion(state, "mine_district")
-        if mineRegion and mineRegion.development < trigger.min_development then
+        if mineRegion and (mineRegion.development or 0) < trigger.min_development then
             return false
         end
     end
@@ -228,9 +235,32 @@ function Events.ApplyOption(state, event, optionIndex)
         state.gold = math.max(0, state.gold + effects.gold)
     end
     if effects.gold_reserve then
+        -- 将储量增量分配到矿区的各矿山独立储量上（均分），
+        -- 避免被 _SyncRegionGoldReserve 覆盖
+        local regionMines = {}
+        for _, mine in ipairs(state.mines) do
+            if (mine.region_id or "mine_district") == "mine_district" and mine.active then
+                table.insert(regionMines, mine)
+            end
+        end
+        if #regionMines > 0 then
+            local perMine = math.floor(effects.gold_reserve / #regionMines)
+            local remainder = effects.gold_reserve - perMine * #regionMines
+            for i, mine in ipairs(regionMines) do
+                local bonus = perMine + (i <= remainder and 1 or 0)
+                mine.reserve = math.max(0, (mine.reserve or 0) + bonus)
+            end
+        end
+        -- 同步 region 显示值
         local region = GameState.GetRegion(state, "mine_district")
         if region then
-            region.resources.gold_reserve = (region.resources.gold_reserve or 0) + effects.gold_reserve
+            local total = 0
+            for _, mine in ipairs(state.mines) do
+                if (mine.region_id or "mine_district") == "mine_district" then
+                    total = total + math.max(0, mine.reserve or 0)
+                end
+            end
+            region.resources.gold_reserve = total
         end
     end
 

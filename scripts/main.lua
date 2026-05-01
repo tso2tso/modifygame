@@ -655,6 +655,9 @@ function FinalizeEndTurn()
     end
 
     UI.Toast.Show(toastMsg, { variant = variant, duration = 2.5 })
+
+    -- 回合结束自动存档
+    SaveLoad.Save(state_, SaveLoad.SLOT_AUTO)
 end
 
 -- ============================================================================

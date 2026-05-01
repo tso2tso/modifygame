@@ -113,6 +113,8 @@ local EFFECT_LABELS = {
     trade_income      = function(v) return string.format("每季贸易收入 +%d", v) end,
     gold_price_bonus  = function(v) return string.format("黄金售价 +%d%%", math.floor(v * 100)) end,
     hire_cost_reduction = function(v) return string.format("雇佣成本 %d%%", math.floor(v * 100)) end,
+    mine_slots          = function(v) return string.format("矿山槽位 +%d", v) end,
+    prospect_success    = function(v) return string.format("探矿成功率 +%d%%", math.floor(v * 100)) end,
 }
 
 --- 解析管道式 requires，返回第一个前置id（用于深度计算）
@@ -1052,6 +1054,53 @@ function ActionModals.ShowIntelligence(state, accent)
     local rows = {}
     for _, faction in ipairs(state.ai_factions) do
         local factionLocal = faction  -- 闭包捕获
+        -- 瘫痪势力显示特殊卡片
+        if faction.collapsed then
+            table.insert(rows, UI.Panel {
+                width = "100%",
+                padding = 10,
+                backgroundColor = { 40, 40, 45, 255 },
+                borderRadius = S.radius_card,
+                borderLeftWidth = 2,
+                borderLeftColor = { 100, 100, 100, 255 },
+                flexDirection = "column",
+                gap = 6,
+                opacity = 0.7,
+                children = {
+                    UI.Panel {
+                        flexDirection = "row",
+                        alignItems = "center",
+                        gap = 6,
+                        children = {
+                            UI.Label {
+                                text = "💀 " .. faction.name,
+                                fontSize = F.body,
+                                fontWeight = "bold",
+                                fontColor = { 140, 140, 140, 255 },
+                            },
+                            UI.Panel {
+                                paddingHorizontal = 5,
+                                paddingVertical = 1,
+                                backgroundColor = { 180, 50, 50, 50 },
+                                borderRadius = S.radius_badge,
+                                children = {
+                                    UI.Label {
+                                        text = "已瘫痪",
+                                        fontSize = F.label,
+                                        fontColor = C.accent_red,
+                                    },
+                                },
+                            },
+                        },
+                    },
+                    UI.Label {
+                        text = "该势力已崩溃，无需情报行动",
+                        fontSize = F.label,
+                        fontColor = { 120, 120, 120, 255 },
+                    },
+                },
+            })
+        else
         table.insert(rows, UI.Panel {
             width = "100%",
             padding = 10,
@@ -1100,6 +1149,7 @@ function ActionModals.ShowIntelligence(state, accent)
                 },
             },
         })
+        end
     end
 
     ActionModals._ShowList("👁️ 情报行动", rows)
@@ -1203,6 +1253,34 @@ function ActionModals.ShowDiplomacy(state, accent)
     local rows = {}
     for _, faction in ipairs(state.ai_factions) do
         local factionLocal = faction
+        if faction.collapsed then
+            table.insert(rows, UI.Panel {
+                width = "100%",
+                padding = 10,
+                backgroundColor = { 40, 40, 45, 255 },
+                borderRadius = S.radius_card,
+                borderLeftWidth = 2,
+                borderLeftColor = { 100, 100, 100, 255 },
+                flexDirection = "column",
+                gap = 6,
+                opacity = 0.7,
+                children = {
+                    UI.Panel {
+                        flexDirection = "row", alignItems = "center", gap = 6,
+                        children = {
+                            UI.Label { text = "💀 " .. faction.name, fontSize = F.body,
+                                fontWeight = "bold", fontColor = { 140, 140, 140, 255 } },
+                            UI.Panel { paddingHorizontal = 5, paddingVertical = 1,
+                                backgroundColor = { 180, 50, 50, 50 }, borderRadius = S.radius_badge,
+                                children = { UI.Label { text = "已瘫痪", fontSize = F.label,
+                                    fontColor = C.accent_red } } },
+                        },
+                    },
+                    UI.Label { text = "该势力已崩溃，无法进行外交", fontSize = F.label,
+                        fontColor = { 120, 120, 120, 255 } },
+                },
+            })
+        else
         local pactText = (faction.pact_remaining and faction.pact_remaining > 0)
             and string.format("  🤝协议剩 %d 季", faction.pact_remaining) or ""
         table.insert(rows, UI.Panel {
@@ -1242,6 +1320,7 @@ function ActionModals.ShowDiplomacy(state, accent)
                 },
             },
         })
+        end
     end
 
     ActionModals._ShowList("🤝 政治外交", rows)
@@ -1310,7 +1389,7 @@ function ActionModals.ShowTrade(state, accent)
     local rows = {}
 
     -- 开发新矿
-    local maxMines = Balance.TRADE.new_mine.max_mines or 8
+    local maxMines = (Balance.TRADE.new_mine.max_mines or 4) + (state.mine_slots_bonus or 0)
     local minesFull = #state.mines >= maxMines
     local assetPriceFactor = GameState.GetAssetPriceFactor(state)
     local newMineCost = math.floor(Balance.TRADE.new_mine.cash * assetPriceFactor)
@@ -1343,6 +1422,16 @@ function ActionModals.ShowTrade(state, accent)
     -- 对 AI 发起资本攻击
     local inflationFactor = GameState.GetInflationFactor(state)
     for _, faction in ipairs(state.ai_factions) do
+        -- 瘫痪势力：显示已瘫痪提示，跳过攻击选项
+        if faction.collapsed then
+            table.insert(rows, ActionModals._TradeOption(
+                "💀 " .. faction.name .. "（已瘫痪）",
+                "该势力已崩溃，无需进一步打击",
+                { 100, 100, 100, 255 },
+                function() end,
+                true
+            ))
+        else
         local factionLocal = faction
         table.insert(rows, ActionModals._TradeOption(
             "⚔ 资本攻击：" .. faction.name,
@@ -1363,6 +1452,7 @@ function ActionModals.ShowTrade(state, accent)
             function() ActionModals._TradeMilitaryStrike(state, factionLocal) end,
             not ActionModals._CanAfford(state, attackCfg)
         ))
+        end
     end
 
     ActionModals._ShowList("🏭 资产交易", rows)
@@ -1407,8 +1497,8 @@ end
 function ActionModals._TradeNewMine(state)
     local cfg = Balance.TRADE.new_mine
     local cashCost = math.floor(cfg.cash * GameState.GetAssetPriceFactor(state))
-    -- 检查矿山数量上限
-    local maxMines = cfg.max_mines or 8
+    -- 检查矿山数量上限（基础 + 科技加成）
+    local maxMines = (cfg.max_mines or 4) + (state.mine_slots_bonus or 0)
     if #state.mines >= maxMines then
         UI.Toast.Show(string.format("矿山已达上限（%d/%d）", #state.mines, maxMines),
             { variant = "warning", duration = 1.5 })
@@ -1424,14 +1514,12 @@ function ActionModals._TradeNewMine(state)
     end
     state.cash = state.cash - cashCost
     local id = "mine_" .. tostring(state.turn_count) .. "_" .. tostring(math.random(1000, 9999))
-    -- 扩展矿区资源
-    local region = state.regions[1]  -- 放在主矿区上
+    local region = state.regions[1]
     for _, r in ipairs(state.regions) do
         if r.id == "mine_district" then region = r; break end
     end
-    if region and region.resources then
-        region.resources.gold_reserve = (region.resources.gold_reserve or 0) + cfg.base_reserve
-    end
+    -- 新矿使用独立储量，同时同步到 region
+    local newReserve = cfg.base_reserve or 1500
     table.insert(state.mines, {
         id = id,
         name = "新矿井 #" .. (#state.mines + 1),
@@ -1439,8 +1527,13 @@ function ActionModals._TradeNewMine(state)
         level = 1,
         output_bonus = 0,
         active = true,
+        reserve = newReserve,
     })
-    GameState.AddLog(state, string.format("[交易] 新矿开发完成，储量 +%d", cfg.base_reserve))
+    -- 同步 region.gold_reserve（兼容显示）
+    if region and region.resources then
+        region.resources.gold_reserve = (region.resources.gold_reserve or 0) + newReserve
+    end
+    GameState.AddLog(state, string.format("[交易] 新矿开发完成，独立储量 %d", newReserve))
     UI.Toast.Show("新矿已建成", { variant = "success", duration = 1.5 })
     closeModal()
     notifyChanged()

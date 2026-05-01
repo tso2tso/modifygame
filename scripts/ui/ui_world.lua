@@ -39,6 +39,18 @@ local activeSubTab_ = "map"
 ---@type string|nil
 local selectedNodeId_ = nil
 
+-- ── 势力页缓存：避免每次切 Tab 都重新计算 ──
+---@type table|nil
+local cachedPrecomputed_ = nil
+---@type boolean
+local precomputedDirty_ = true
+
+--- 标记势力预计算数据为脏（在 onStateChanged / 页面重建时调用）
+function WorldPage.InvalidatePrecomputed()
+    precomputedDirty_ = true
+    cachedPrecomputed_ = nil
+end
+
 -- 子 Tab 定义（关系+势力合并为"势力与外交"）
 local SUB_TABS = {
     { id = "map",       label = "地图" },
@@ -59,6 +71,7 @@ function WorldPage.Create(state, callbacks)
     callbacksRef_ = callbacks or {}
     selectedNodeId_ = state.regions[1] and state.regions[1].id or nil
     activeSubTab_ = "map"
+    WorldPage.InvalidatePrecomputed()
     return WorldPage._BuildContent(state)
 end
 
@@ -578,7 +591,104 @@ end
 -- 势力子页 — §8.5 势力子页
 -- ============================================================================
 
+--- 一次性预计算势力面板所需的所有遍历数据，避免每张卡片重复扫描
+---@param state table
+---@return table precomputed
+function WorldPage._PrecomputeFactionsData(state)
+    local result = {}
+
+    -- 1. 活跃大国列表（排序后）
+    result.activePowers = GrandPowers.GetActivePowers(state)
+
+    -- 2. 批量计算所有大国的领土和前线（一次遍历 europe）
+    result.territories = {}  -- powerId → { country, ... }
+    result.frontLines = {}   -- powerId → { frontLine, ... }
+
+    -- 领土：一次遍历 europe，按 sovereign 分组
+    if state.europe then
+        for _, country in pairs(state.europe) do
+            local sid = country.sovereign
+            if sid then
+                if not result.territories[sid] then
+                    result.territories[sid] = {}
+                end
+                table.insert(result.territories[sid], country)
+            end
+        end
+    end
+
+    -- 前线：遍历活跃大国的 war_goals
+    for _, power in ipairs(result.activePowers) do
+        result.frontLines[power.id] = GrandPowers.GetFrontLines(state, power.id)
+    end
+
+    -- 3. 可用行动：不再预计算（最大开销项），改为卡片内懒加载
+    result.actions = {}  -- powerId → 按需填充
+
+    -- 3.5 缓存 CalcTotalInfluence（避免里程碑面板重复遍历 regions）
+    result.totalInfluence = GameState.CalcTotalInfluence(state)
+
+    -- 4. 本地势力：一次遍历 regions 建立 ai_presence 索引
+    result.factionNodes = {}  -- factionId → { "地名(xx%)", ... }
+    if state.regions then
+        for _, r in ipairs(state.regions) do
+            if r.ai_presence then
+                for aiId, presence in pairs(r.ai_presence) do
+                    if presence >= 30 then
+                        if not result.factionNodes[aiId] then
+                            result.factionNodes[aiId] = {}
+                        end
+                        table.insert(result.factionNodes[aiId],
+                            r.name .. "(" .. presence .. "%)")
+                    end
+                end
+            end
+        end
+    end
+
+    -- 5. 本地势力：一次遍历 history_log，按 faction 分组最近记录
+    result.factionLogs = {}  -- factionId → { entry, ... } (最多3条)
+    if state.history_log and state.ai_factions then
+        -- 从最新往回扫描，每个 faction 收集到3条就停止
+        local neededCount = {}
+        for _, f in ipairs(state.ai_factions) do
+            neededCount[f.id] = 3
+            result.factionLogs[f.id] = {}
+        end
+        local totalNeeded = #state.ai_factions * 3
+        local scanned = 0
+        for i = #state.history_log, 1, -1 do
+            if totalNeeded <= 0 then break end
+            -- 限制扫描深度避免遍历过长日志
+            scanned = scanned + 1
+            if scanned > 50 then break end
+            local entry = state.history_log[i]
+            if entry.text then
+                for _, f in ipairs(state.ai_factions) do
+                    if neededCount[f.id] > 0 then
+                        if (f.name and string.find(entry.text, f.name, 1, true))
+                            or (f.id and string.find(entry.text, f.id, 1, true)) then
+                            table.insert(result.factionLogs[f.id], entry)
+                            neededCount[f.id] = neededCount[f.id] - 1
+                            totalNeeded = totalNeeded - 1
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    return result
+end
+
 function WorldPage._BuildFactionsTab(state)
+    -- ══ 预计算（带缓存）：仅在数据变化时重新计算 ══
+    if precomputedDirty_ or not cachedPrecomputed_ then
+        cachedPrecomputed_ = WorldPage._PrecomputeFactionsData(state)
+        precomputedDirty_ = false
+    end
+    local precomputed = cachedPrecomputed_
+
     local widgets = {
         UI.Panel {
             width = "100%",
@@ -612,15 +722,18 @@ function WorldPage._BuildFactionsTab(state)
         },
     }
 
+    -- ── 影响力里程碑 ──
+    table.insert(widgets, WorldPage._CreateInfluenceMilestones(state, precomputed))
+
     -- ── 合作度指示器 ──
     table.insert(widgets, WorldPage._CreateCollaborationHeader(state))
 
     -- ── 大国卡片 ──
-    local activePowers = GrandPowers.GetActivePowers(state)
+    local activePowers = precomputed.activePowers
     if #activePowers > 0 then
         table.insert(widgets, WorldPage._SectionDivider("欧洲列强", C.accent_gold))
         for _, power in ipairs(activePowers) do
-            table.insert(widgets, WorldPage._CreateGrandPowerCard(state, power))
+            table.insert(widgets, WorldPage._CreateGrandPowerCard(state, power, precomputed))
         end
     end
 
@@ -628,7 +741,7 @@ function WorldPage._BuildFactionsTab(state)
     if state.ai_factions and #state.ai_factions > 0 then
         table.insert(widgets, WorldPage._SectionDivider("本地势力", C.text_secondary))
         for _, faction in ipairs(state.ai_factions) do
-            table.insert(widgets, WorldPage._CreateUnifiedFactionCard(state, faction))
+            table.insert(widgets, WorldPage._CreateUnifiedFactionCard(state, faction, precomputed))
         end
     end
 
@@ -659,6 +772,150 @@ function WorldPage._SectionDivider(text, color)
             },
             UI.Divider { flexGrow = 1, color = C.divider },
         },
+    }
+end
+
+-- ============================================================================
+-- 影响力里程碑
+-- ============================================================================
+
+--- 影响力里程碑卡片：展示当前影响力及各级解锁状态
+function WorldPage._CreateInfluenceMilestones(state, precomputed)
+    local totalInf = (precomputed and precomputed.totalInfluence)
+        or GameState.CalcTotalInfluence(state)
+    local thresholds = Balance.INFLUENCE.thresholds
+
+    -- 找到最高已达成的里程碑索引和下一个目标
+    local reachedIdx = 0
+    for i, t in ipairs(thresholds) do
+        if totalInf >= t.min then reachedIdx = i end
+    end
+    local nextThreshold = thresholds[reachedIdx + 1]
+
+    -- 进度条：到下一个里程碑的进度
+    local progressValue = 0
+    if nextThreshold then
+        local prevMin = reachedIdx > 0 and thresholds[reachedIdx].min or 0
+        local range = nextThreshold.min - prevMin
+        if range > 0 then
+            progressValue = math.min(1, (totalInf - prevMin) / range)
+        end
+    else
+        progressValue = 1  -- 全部达成
+    end
+
+    -- 里程碑行
+    local milestoneRows = {}
+    for i, t in ipairs(thresholds) do
+        local reached = totalInf >= t.min
+        local isCurrent = (i == reachedIdx + 1)  -- 下一个要达成的
+
+        local icon = reached and "✅" or (isCurrent and "🔜" or "🔒")
+        local labelColor = reached and C.accent_green
+            or (isCurrent and C.accent_gold or C.text_muted)
+        local valueColor = reached and C.accent_green or C.text_muted
+
+        table.insert(milestoneRows, UI.Panel {
+            width = "100%",
+            flexDirection = "row",
+            alignItems = "center",
+            gap = 6,
+            opacity = reached and 1.0 or 0.7,
+            children = {
+                UI.Label { text = icon, fontSize = 14, width = 20 },
+                UI.Label {
+                    text = t.label,
+                    fontSize = F.body_minor,
+                    fontWeight = reached and "bold" or "normal",
+                    fontColor = labelColor,
+                    width = 80,
+                },
+                UI.Label {
+                    text = t.desc,
+                    fontSize = F.label,
+                    fontColor = valueColor,
+                    flexGrow = 1,
+                    flexShrink = 1,
+                },
+                UI.Label {
+                    text = tostring(t.min),
+                    fontSize = F.label,
+                    fontColor = reached and C.accent_green or C.text_muted,
+                    width = 30,
+                    textAlign = "right",
+                },
+            },
+        })
+    end
+
+    -- 下一目标提示
+    local nextHint = nextThreshold
+        and string.format("下一目标：%s（还需 %d）", nextThreshold.label, nextThreshold.min - totalInf)
+        or "已达成全部里程碑"
+
+    -- 构建 children（避免 table.unpack 陷阱）
+    local cardChildren = {
+        -- 标题行
+        UI.Panel {
+            width = "100%",
+            flexDirection = "row",
+            justifyContent = "space-between",
+            alignItems = "center",
+            children = {
+                UI.Panel {
+                    flexDirection = "row",
+                    alignItems = "center",
+                    gap = 6,
+                    children = {
+                        UI.Label { text = "🌐", fontSize = S.icon_size },
+                        UI.Label {
+                            text = "影响力里程碑",
+                            fontSize = F.subtitle,
+                            fontWeight = "bold",
+                            fontColor = C.text_primary,
+                        },
+                    },
+                },
+                UI.Label {
+                    text = "当前：" .. totalInf,
+                    fontSize = F.body,
+                    fontWeight = "bold",
+                    fontColor = C.accent_blue,
+                },
+            },
+        },
+        -- 总进度条
+        UI.ProgressBar {
+            value = progressValue,
+            width = "100%",
+            height = 6,
+            borderRadius = 3,
+            trackColor = C.bg_surface,
+            fillColor = C.accent_blue,
+        },
+        -- 下一目标提示
+        UI.Label {
+            text = nextHint,
+            fontSize = F.label,
+            fontColor = C.text_muted,
+        },
+        UI.Divider { color = C.divider },
+    }
+    -- 追加里程碑行
+    for _, row in ipairs(milestoneRows) do
+        table.insert(cardChildren, row)
+    end
+
+    return UI.Panel {
+        width = "100%",
+        backgroundColor = C.paper_dark,
+        borderRadius = S.radius_card,
+        borderWidth = 1,
+        borderColor = C.border_card,
+        padding = S.card_padding,
+        flexDirection = "column",
+        gap = 6,
+        children = cardChildren,
     }
 end
 
@@ -778,7 +1035,7 @@ local STANCE_META = {
 }
 
 --- 创建大国详细卡片（军事/经济/厌战 + 阵营标签 + 行动按钮）
-function WorldPage._CreateGrandPowerCard(state, power)
+function WorldPage._CreateGrandPowerCard(state, power, precomputed)
     local attColor = power.attitude_to_player >= 10 and C.accent_green
         or (power.attitude_to_player >= -10 and C.accent_amber or C.accent_red)
 
@@ -789,9 +1046,9 @@ function WorldPage._CreateGrandPowerCard(state, power)
     local factionLabel = FACTION_LABELS[power.faction] or "未知"
     local factionColor = FACTION_COLORS[power.faction] or C.text_muted
 
-    -- 控制领土数量
-    local territories = GrandPowers.GetControlledTerritories(state, power.id)
-    local frontLines = GrandPowers.GetFrontLines(state, power.id)
+    -- 使用预计算的领土和前线数据
+    local territories = precomputed.territories[power.id] or {}
+    local frontLines = precomputed.frontLines[power.id] or {}
 
     -- 属性行
     local statRows = {
@@ -828,74 +1085,114 @@ function WorldPage._CreateGrandPowerCard(state, power)
         end
     end
 
-    -- ── 行动按钮区域 ──
-    local actionChildren = {}
-    local actions = PlayerActionsGP.GetAvailableActions(state, power.id)
-    local stanceOrder = { "collaborate", "join", "counter", "resist" }
+    -- ── 行动按钮区域（懒加载：点击后才计算 + 创建按钮） ──
+    local actionContainer = UI.Panel {
+        width = "100%",
+        flexDirection = "column",
+        gap = 0,
+    }
 
-    for _, stanceId in ipairs(stanceOrder) do
-        local group = actions[stanceId]
-        if group and #group > 0 then
-            local meta = STANCE_META[stanceId]
-            -- 姿态分组标题
-            local btnRow = {}
-            for _, act in ipairs(group) do
-                local enabled = act.available and (state.ap.current + (state.ap.temp or 0)) >= act.ap_cost
-                local btnColor = enabled and meta.color or C.text_muted
+    local actionsExpanded = false
 
-                table.insert(btnRow, UI.Button {
-                    text = act.icon .. " " .. act.label,
-                    fontSize = F.label,
-                    fontColor = enabled and C.text_primary or C.text_muted,
-                    backgroundColor = enabled and { btnColor[1], btnColor[2], btnColor[3], 60 } or C.bg_surface,
-                    borderRadius = S.radius_btn,
-                    borderWidth = 1,
-                    borderColor = enabled and { btnColor[1], btnColor[2], btnColor[3], 120 } or C.border_soft,
-                    paddingHorizontal = 8,
-                    paddingVertical = 5,
-                    flexShrink = 1,
-                    onClick = function(self)
-                        self.props.disabled = true
-                        if not enabled then
-                            local reason = act.reason or "行动点不足"
-                            UI.Toast.Show(reason, { variant = "error", duration = 1.5 })
-                            return
-                        end
-                        local ok, msg = PlayerActionsGP.ExecuteAction(state, power.id, act.id)
-                        if ok then
-                            UI.Toast.Show(msg, { variant = "success", duration = 2 })
-                        else
-                            UI.Toast.Show(msg, { variant = "error", duration = 1.5 })
-                        end
-                        if callbacksRef_ and callbacksRef_.onStateChanged then
-                            callbacksRef_.onStateChanged()
-                        end
-                    end,
-                })
+    local expandBtn = UI.Button {
+        text = "📋 查看行动",
+        fontSize = F.body_minor,
+        fontColor = C.accent_gold,
+        backgroundColor = { 0, 0, 0, 0 },
+        paddingVertical = 6,
+        alignSelf = "center",
+        textAlign = "center",
+        onClick = function(self)
+            if actionsExpanded then
+                -- ── 收起 ──
+                actionsExpanded = false
+                self:SetText("📋 查看行动")
+                actionContainer:ClearChildren()
+                return
             end
 
-            table.insert(actionChildren, UI.Panel {
-                width = "100%",
-                flexDirection = "column",
-                gap = 3,
-                children = {
-                    UI.Label {
-                        text = meta.icon .. " " .. meta.label,
-                        fontSize = F.label,
-                        fontWeight = "bold",
-                        fontColor = meta.color,
-                    },
-                    UI.Panel {
+            -- ── 展开：懒加载计算可用行动并创建按钮 ──
+            actionsExpanded = true
+            self:SetText("📋 收起行动")
+            local actions = PlayerActionsGP.GetAvailableActions(state, power.id)
+            local stanceOrder = { "collaborate", "join", "counter", "resist" }
+            local actionWidgets = {}
+
+            for _, stanceId in ipairs(stanceOrder) do
+                local group = actions[stanceId]
+                if group and #group > 0 then
+                    local meta = STANCE_META[stanceId]
+                    local btnRow = {}
+                    for _, act in ipairs(group) do
+                        local enabled = act.available and (state.ap.current + (state.ap.temp or 0)) >= act.ap_cost
+                        local btnColor = enabled and meta.color or C.text_muted
+
+                        table.insert(btnRow, UI.Button {
+                            text = act.icon .. " " .. act.label,
+                            fontSize = F.label,
+                            fontColor = enabled and C.text_primary or C.text_muted,
+                            backgroundColor = enabled and { btnColor[1], btnColor[2], btnColor[3], 60 } or C.bg_surface,
+                            borderRadius = S.radius_btn,
+                            borderWidth = 1,
+                            borderColor = enabled and { btnColor[1], btnColor[2], btnColor[3], 120 } or C.border_soft,
+                            paddingHorizontal = 8,
+                            paddingVertical = 5,
+                            flexShrink = 1,
+                            onClick = function(btn)
+                                btn.props.disabled = true
+                                if not enabled then
+                                    local reason = act.reason or "行动点不足"
+                                    UI.Toast.Show(reason, { variant = "error", duration = 1.5 })
+                                    return
+                                end
+                                local ok, msg = PlayerActionsGP.ExecuteAction(state, power.id, act.id)
+                                if ok then
+                                    UI.Toast.Show(msg, { variant = "success", duration = 2 })
+                                else
+                                    UI.Toast.Show(msg, { variant = "error", duration = 1.5 })
+                                end
+                                if callbacksRef_ and callbacksRef_.onStateChanged then
+                                    callbacksRef_.onStateChanged()
+                                end
+                            end,
+                        })
+                    end
+
+                    table.insert(actionWidgets, UI.Panel {
                         width = "100%",
-                        flexDirection = "row",
-                        flexWrap = "wrap",
-                        gap = 4,
-                        children = btnRow,
-                    },
-                },
-            })
-        end
-    end
+                        flexDirection = "column",
+                        gap = 3,
+                        children = {
+                            UI.Label {
+                                text = meta.icon .. " " .. meta.label,
+                                fontSize = F.label,
+                                fontWeight = "bold",
+                                fontColor = meta.color,
+                            },
+                            UI.Panel {
+                                width = "100%",
+                                flexDirection = "row",
+                                flexWrap = "wrap",
+                                gap = 4,
+                                children = btnRow,
+                            },
+                        },
+                    })
+                end
+            end
+
+            if #actionWidgets > 0 then
+                actionContainer:AddChild(WorldPage._BuildActionSection(state, actionWidgets))
+            else
+                actionContainer:AddChild(UI.Label {
+                    text = "暂无可用行动",
+                    fontSize = F.label,
+                    fontColor = C.text_muted,
+                    padding = S.card_padding,
+                })
+            end
+        end,
+    }
 
     return UI.Panel {
         width = "100%",
@@ -975,8 +1272,12 @@ function WorldPage._CreateGrandPowerCard(state, power)
                 children = statRows,
             },
 
-            -- 行动区（仅在有可用行动时显示）
-            #actionChildren > 0 and WorldPage._BuildActionSection(state, actionChildren) or nil,
+            -- 分隔线 + 展开按钮
+            UI.Divider { color = C.divider },
+            expandBtn,
+
+            -- 行动区容器（懒加载后填充）
+            actionContainer,
         },
     }
 end
@@ -1006,7 +1307,136 @@ function WorldPage._BuildActionSection(state, actionChildren)
 end
 
 --- 统一势力卡片：合并关系 + 势力详情为一体
-function WorldPage._CreateUnifiedFactionCard(state, faction)
+function WorldPage._CreateUnifiedFactionCard(state, faction, precomputed)
+    -- ── 瘫痪状态：显示特殊卡片 ──
+    if faction.collapsed then
+        local colCfg = Balance.COLLAPSE or (Balance.AI and Balance.AI.collapse)
+            or { recovery_seasons = 6 }
+        local remaining = math.max(0,
+            (colCfg.recovery_seasons or 6) - (faction.collapsed_seasons or 0))
+        return UI.Panel {
+            width = "100%",
+            backgroundColor = { 40, 40, 45, 255 },
+            borderRadius = S.radius_card,
+            borderWidth = 1,
+            borderColor = { 80, 80, 80, 255 },
+            flexDirection = "column",
+            overflow = "hidden",
+            opacity = 0.75,
+            children = {
+                -- 头部：灰色调
+                UI.Panel {
+                    width = "100%",
+                    padding = S.card_padding,
+                    backgroundColor = { 50, 50, 55, 255 },
+                    flexDirection = "row",
+                    alignItems = "center",
+                    gap = 8,
+                    children = {
+                        UI.Label {
+                            text = "💀",
+                            fontSize = S.icon_size,
+                        },
+                        UI.Panel {
+                            flexGrow = 1,
+                            flexShrink = 1,
+                            flexDirection = "column",
+                            gap = 2,
+                            children = {
+                                UI.Panel {
+                                    flexDirection = "row",
+                                    alignItems = "center",
+                                    gap = 6,
+                                    children = {
+                                        UI.Label {
+                                            text = faction.name,
+                                            fontSize = F.card_title,
+                                            fontWeight = "bold",
+                                            fontColor = { 160, 160, 160, 255 },
+                                        },
+                                        UI.Panel {
+                                            paddingHorizontal = 6,
+                                            paddingVertical = 2,
+                                            backgroundColor = { 180, 50, 50, 60 },
+                                            borderRadius = S.radius_badge,
+                                            children = {
+                                                UI.Label {
+                                                    text = "已瘫痪",
+                                                    fontSize = F.label,
+                                                    fontWeight = "bold",
+                                                    fontColor = C.accent_red,
+                                                },
+                                            },
+                                        },
+                                    },
+                                },
+                                UI.Label {
+                                    text = faction.desc or "",
+                                    fontSize = F.label,
+                                    fontColor = { 120, 120, 120, 255 },
+                                    whiteSpace = "normal",
+                                    lineHeight = 1.3,
+                                },
+                            },
+                        },
+                    },
+                },
+                -- 瘫痪状态详情
+                UI.Panel {
+                    width = "100%",
+                    padding = S.card_padding,
+                    flexDirection = "column",
+                    gap = 6,
+                    children = {
+                        UI.Label {
+                            text = "势力已崩溃，组织结构瓦解",
+                            fontSize = F.body_minor,
+                            fontColor = { 160, 120, 100, 255 },
+                            whiteSpace = "normal",
+                        },
+                        UI.Panel {
+                            width = "100%",
+                            flexDirection = "row",
+                            justifyContent = "space-between",
+                            children = {
+                                WorldPage._InfoRow("残余势力",
+                                    tostring(faction.power or 0), { 160, 160, 160, 255 }),
+                                WorldPage._InfoRow("残余资金",
+                                    tostring(faction.cash or 0), { 160, 160, 160, 255 }),
+                            },
+                        },
+                        UI.Panel {
+                            width = "100%",
+                            flexDirection = "row",
+                            alignItems = "center",
+                            gap = 6,
+                            children = {
+                                UI.Label {
+                                    text = "⏳",
+                                    fontSize = 14,
+                                },
+                                UI.Label {
+                                    text = remaining > 0
+                                        and string.format("预计 %d 季后可能重组", remaining)
+                                        or "即将恢复活动",
+                                    fontSize = F.label,
+                                    fontColor = C.accent_amber,
+                                },
+                            },
+                        },
+                        -- 地区存在度衰减提示
+                        UI.Label {
+                            text = "📉 控制区域正在收缩，地区存在度持续下降",
+                            fontSize = F.label,
+                            fontColor = { 140, 140, 140, 255 },
+                            whiteSpace = "normal",
+                        },
+                    },
+                },
+            },
+        }
+    end
+
     local att = faction.attitude or 0
     local attColor = att >= 10 and C.accent_green
         or (att >= -10 and C.accent_amber or C.accent_red)
@@ -1028,17 +1458,8 @@ function WorldPage._CreateUnifiedFactionCard(state, faction)
     -- ── 势力属性行 ──
     local statRows = {}
 
-    -- 核心资产（从地区数据推算）
-    local controlledNodes = {}
-    for _, r in ipairs(state.regions) do
-        if r.ai_presence then
-            for aiId, presence in pairs(r.ai_presence) do
-                if aiId == faction.id and presence >= 30 then
-                    table.insert(controlledNodes, r.name .. "(" .. presence .. "%)")
-                end
-            end
-        end
-    end
+    -- 使用预计算的控制区域数据
+    local controlledNodes = precomputed.factionNodes[faction.id] or {}
     if #controlledNodes > 0 then
         table.insert(statRows, WorldPage._InfoRow("控制区域",
             table.concat(controlledNodes, "、"), C.accent_amber))
@@ -1058,20 +1479,8 @@ function WorldPage._CreateUnifiedFactionCard(state, faction)
     end
     table.insert(statRows, WorldPage._InfoRow("行动倾向", focusText, focusColor))
 
-    -- ── 近期互动记录（最近3条历史日志中关于该势力的） ──
-    local recentLogs = {}
-    if state.history_log then
-        for i = #state.history_log, math.max(1, #state.history_log - 20), -1 do
-            local entry = state.history_log[i]
-            if entry.text and (
-                string.find(entry.text, faction.name or "", 1, true) or
-                string.find(entry.text, faction.id or "", 1, true)
-            ) then
-                table.insert(recentLogs, entry)
-                if #recentLogs >= 3 then break end
-            end
-        end
-    end
+    -- 使用预计算的近期日志数据
+    local recentLogs = precomputed.factionLogs[faction.id] or {}
 
     local logChildren = {}
     if #recentLogs > 0 then
