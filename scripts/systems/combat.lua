@@ -154,8 +154,9 @@ function Combat.ApplyResult(state, faction, result)
         -- 编队战后处理：耐久衰减 + 老兵经验
         Equipment.OnBattleEnd(state, nil)
         local mapImpact = Combat.ApplyMapImpact(state, faction, result) or ""
-        log = string.format("⚔ 击退 %s，缴获 %d 现金，护卫士气+%d%s",
-            faction.name, loot, BC.win_morale, mapImpact)
+        log = string.format("⚔ 击退 %s（战力 %d vs %d），缴获 %d 现金，护卫士气+%d%s",
+            faction.name, math.floor(result.p_power), math.floor(result.a_power),
+            loot, BC.win_morale, mapImpact)
         -- 检查是否触发瘫痪
         local colCfg = Balance.AI.collapse
         if not faction.collapsed
@@ -180,8 +181,13 @@ function Combat.ApplyResult(state, faction, result)
         faction.power = math.min(100, faction.power + 5)
         faction.battle_wins_unclaimed = (faction.battle_wins_unclaimed or 0) + 1
         local mapImpact = Combat.ApplyMapImpact(state, faction, result) or ""
-        log = string.format("💥 %s 突袭得手，折损 %d 护卫，被抢走 %d 现金%s",
-            faction.name, lost, pillage, mapImpact)
+        log = string.format("💥 %s 突袭得手（战力 %d vs %d），折损 %d 护卫，被抢走 %d 现金%s",
+            faction.name, math.floor(result.p_power), math.floor(result.a_power),
+            lost, pillage, mapImpact)
+        -- 战力差距过大时给出扩军提示
+        if result.a_power > result.p_power * 1.5 then
+            log = log .. "\n⚠ 战力悬殊！建议扩招护卫、组建编队提升战力"
+        end
     end
 
     GameState.AddLog(state, log)
