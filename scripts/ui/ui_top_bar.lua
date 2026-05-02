@@ -10,6 +10,7 @@ local Config = require("config")
 local RegionsData = require("data.regions_data")
 local Balance = require("data.balance")
 local GameState = require("game_state")
+local Economy = require("systems.economy")
 
 local C = Config.COLORS
 local S = Config.SIZE
@@ -27,6 +28,17 @@ local onStateChanged_ = nil
 local onLightRefresh_ = nil
 ---@type table 游戏状态引用（用于 + 按钮）
 local stateRef_ = nil
+
+local function calcExpectedGoldOutput(state)
+    local total = 0
+    for _, mine in ipairs(state.mines or {}) do
+        if mine.active and not mine.migrating then
+            local raw = Economy._CalcMineOutput(state, mine)
+            total = total + math.min(raw, mine.reserve or 0)
+        end
+    end
+    return total
+end
 
 -- ============================================================================
 -- 公开接口
@@ -89,13 +101,8 @@ function TopBar._CreateInfoRow(state, era)
     -- 日期+时代（副文字行）
     local dateText = Config.QUARTER_DATES[state.quarter] or ""
 
-    -- 产能（当季矿产）
-    local production = 0
-    for _, mine in ipairs(state.mines) do
-        if mine.active then
-            production = production + (mine.level * 30 + state.workers.hired * 2)
-        end
-    end
+    -- 预计当季实际可采黄金；按剩余储量封顶，避免显示理论产能超过储量。
+    local production = calcExpectedGoldOutput(state)
 
     -- 声望
     local reputation = 0
@@ -159,7 +166,7 @@ function TopBar._CreateInfoRow(state, era)
                             TopBar._ResourceCell("goldCell", "●",
                                 tostring(state.gold), C.text_primary, "黄金"),
                             TopBar._ResourceCell("prodCell", "⛏",
-                                tostring(production), C.text_primary, "产能"),
+                                tostring(production), C.text_primary, "产金"),
                             TopBar._ResourceCell("repCell", "★",
                                 tostring(reputation), C.text_primary, "声望"),
                         },
@@ -544,12 +551,7 @@ function TopBar.Refresh(root, state)
     local goldVal = root:FindById("goldCell_val")
     if goldVal then goldVal:SetText(tostring(state.gold)) end
 
-    local production = 0
-    for _, mine in ipairs(state.mines) do
-        if mine.active then
-            production = production + (mine.level * 30 + state.workers.hired * 2)
-        end
-    end
+    local production = calcExpectedGoldOutput(state)
     local prodVal = root:FindById("prodCell_val")
     if prodVal then prodVal:SetText(tostring(production)) end
 

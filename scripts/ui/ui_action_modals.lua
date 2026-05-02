@@ -1528,6 +1528,7 @@ function ActionModals._TradeNewMine(state)
         output_bonus = 0,
         active = true,
         reserve = newReserve,
+        initial_reserve = newReserve,
     })
     -- 同步 region.gold_reserve（兼容显示）
     if region and region.resources then

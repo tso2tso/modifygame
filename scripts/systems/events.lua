@@ -249,6 +249,7 @@ function Events.ApplyOption(state, event, optionIndex)
             for i, mine in ipairs(regionMines) do
                 local bonus = perMine + (i <= remainder and 1 or 0)
                 mine.reserve = math.max(0, (mine.reserve or 0) + bonus)
+                mine.initial_reserve = math.max(mine.initial_reserve or 0, mine.reserve or 0)
             end
         end
         -- 同步 region 显示值

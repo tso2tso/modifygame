@@ -50,6 +50,7 @@ Balance.MINE = {
     coal_price          = 5,     -- 煤炭售价/单位（低单价高产量）
     upgrade_cost        = 300,   -- 矿山升级基础费用
     max_level           = 5,     -- 矿山最大等级
+    max_quarterly_depletion_ratio = 0.08, -- 单季最多开采初始储量的 8%，防止产能溢出式耗尽
     -- 每级产能加成
     level_output_bonus  = 0.20,  -- 每级 +20% 产能
     -- 事故概率（受治安和投入影响）

@@ -180,8 +180,9 @@ function IndustryPage._CreateMineCard(state, mine)
     local security = region and region.security or 0
     local secText = RegionsData.GetSecurityText(security)
 
-    -- 计算当前产出
-    local currentOutput = Economy._CalcMineOutput(state, mine)
+    -- 计算当前实际可采产出：理论产能必须按剩余储量封顶。
+    local rawOutput = Economy._CalcMineOutput(state, mine)
+    local currentOutput = math.min(rawOutput, mineReserve)
     local isDepleted = mineReserve <= 0
     local isMigrating = mine.migrating == true
 
@@ -1239,6 +1240,7 @@ function IndustryPage._OnActivateReserve(index)
         region_id = regionId,
         level = 1,
         reserve = rm.reserve,
+        initial_reserve = rm.initial_reserve or rm.reserve,
         active = true,
     })
 

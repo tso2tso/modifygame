@@ -671,6 +671,7 @@ function WorldPage._ResolveTileOccupation(state, tile, mode)
 
     local oldController = tile.controller or "contested"
     tile.controller = "player"
+    tile.manual_control = true
     local region
     for _, r in ipairs(state.regions or {}) do
         if r.id == tile.region_id then region = r; break end

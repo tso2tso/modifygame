@@ -285,6 +285,7 @@ function SaveLoad._SerializeState(state)
             output_bonus = mine.output_bonus,
             active = mine.active,
             reserve = mine.reserve,
+            initial_reserve = mine.initial_reserve,
             migrating = mine.migrating or nil,
         })
     end
@@ -536,8 +537,12 @@ function SaveLoad._DeserializeState(data)
     data.prospect_success_bonus = data.prospect_success_bonus or 0
     -- 矿山独立储量兼容（旧存档无 reserve 字段）
     for _, mine in ipairs(data.mines) do
-        if mine.reserve == nil then
-            mine.reserve = 500  -- 旧存档默认储量
+        if mine.reserve == nil then mine.reserve = 500 end
+        if mine.initial_reserve == nil then
+            local defaultReserve = mine.id == "main_mine" and 500
+                or ((require("data.balance").TRADE or {}).new_mine or {}).base_reserve
+                or 1500
+            mine.initial_reserve = math.max(defaultReserve, mine.reserve or 0)
         end
     end
 

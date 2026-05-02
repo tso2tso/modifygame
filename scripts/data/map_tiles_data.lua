@@ -96,11 +96,11 @@ MapTilesData.TEMPLATES = {
     { id = "bos_sarajevo",  label = "萨拉热窝",     country_id = "bosnia", region_id = "capital_city",    type = "capital",    q = 8,  r = 10, weight = 2, controller = "foreign_capital", terrain = "urban" },
     { id = "bos_mine",      label = "巴科维奇矿区", country_id = "bosnia", region_id = "mine_district",   type = "mine",       q = 7,  r = 11, weight = 2, controller = "player",          terrain = "mountain" },
     { id = "bos_zenica",    label = "泽尼察工业区", country_id = "bosnia", region_id = "industrial_town", type = "industrial", q = 8,  r = 11, weight = 2, controller = "local_clan",      terrain = "hills" },
-    { id = "bos_banja",     label = "巴尼亚卢卡",   country_id = "bosnia",                                type = "cultural",   q = 7,  r = 10, weight = 1, controller = "contested",       terrain = "plains" },
-    { id = "bos_drina",     label = "德里纳边境",   country_id = "bosnia",                                type = "border",     q = 9,  r = 10, weight = 1, controller = "contested",       terrain = "hills" },
-    { id = "bos_east",      label = "东波黑",       country_id = "bosnia",                                type = "border",     q = 9,  r = 11, weight = 1, controller = "contested",       terrain = "forest" },
-    { id = "bos_herceg_n",  label = "黑塞哥维那北", country_id = "bosnia",                                type = "strategic",  q = 8,  r = 12, weight = 1, controller = "contested",       terrain = "mountain" },
-    { id = "bos_herceg_w",  label = "黑塞哥维那西", country_id = "bosnia",                                type = "port",       q = 7,  r = 12, weight = 1, controller = "contested",       terrain = "coast" },
+    { id = "bos_banja",     label = "巴尼亚卢卡",   country_id = "bosnia", region_id = "capital_city",    type = "cultural",   q = 7,  r = 10, weight = 1, controller = "contested",       terrain = "plains" },
+    { id = "bos_drina",     label = "德里纳边境",   country_id = "bosnia", region_id = "capital_city",    type = "border",     q = 9,  r = 10, weight = 1, controller = "contested",       terrain = "hills" },
+    { id = "bos_east",      label = "东波黑",       country_id = "bosnia", region_id = "capital_city",    type = "border",     q = 9,  r = 11, weight = 1, controller = "contested",       terrain = "forest" },
+    { id = "bos_herceg_n",  label = "黑塞哥维那北", country_id = "bosnia", region_id = "industrial_town", type = "strategic",  q = 8,  r = 12, weight = 1, controller = "contested",       terrain = "mountain" },
+    { id = "bos_herceg_w",  label = "黑塞哥维那西", country_id = "bosnia", region_id = "industrial_town", type = "port",       q = 7,  r = 12, weight = 1, controller = "contested",       terrain = "coast" },
 
     -- ═══════════════════════════════════════════════════════════
     -- 奥匈帝国 Austria-Hungary (9 tiles)
@@ -303,12 +303,30 @@ function MapTilesData.EnsureState(state)
         state.map_tiles = MapTilesData.CreateInitialTiles()
         return true
     end
-    MapTilesData.RebuildNeighbors(state.map_tiles)
+
+    -- 模板升级兼容：保留同 ID 的运行时控制状态，移除旧版遗留 tile。
+    local existingById = {}
     for _, t in ipairs(state.map_tiles) do
-        t.weight = t.weight or 1
-        t.controller = t.controller or "contested"
+        existingById[t.id] = t
     end
-    return false
+    local upgraded = {}
+    local changed = #state.map_tiles ~= #MapTilesData.TEMPLATES
+    for _, tmpl in ipairs(MapTilesData.TEMPLATES) do
+        local t = copyTile(tmpl)
+        local old = existingById[tmpl.id]
+        if old then
+            t.controller = old.controller or t.controller
+            t.owner = old.owner or t.owner
+            t.exhausted = old.exhausted or t.exhausted
+            t.manual_control = old.manual_control or t.manual_control
+        else
+            changed = true
+        end
+        table.insert(upgraded, t)
+    end
+    state.map_tiles = upgraded
+    MapTilesData.RebuildNeighbors(state.map_tiles)
+    return changed
 end
 
 function MapTilesData.GetTile(state, tileId)
@@ -434,7 +452,7 @@ function MapTilesData.SyncTilesFromRegions(state)
         byRegion[r.id] = r
     end
     for _, tile in ipairs(state.map_tiles) do
-        if tile.region_id and byRegion[tile.region_id] then
+        if tile.region_id and byRegion[tile.region_id] and not tile.manual_control then
             tile.controller = dominantFromRegion(byRegion[tile.region_id])
         end
     end

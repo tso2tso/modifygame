@@ -352,7 +352,15 @@ function Economy._CalcMineOutput(state, mine)
     local posBonus = GameState.GetPositionBonus(state, "mine_director")
     -- 工人加成（含工人效率科技加成）
     local efficiencyMul = 1.0 + (state.worker_efficiency_bonus or 0)
-    local workerBonus = math.floor(state.workers.hired / BW.workers_per_unit * efficiencyMul)
+    local activeMineCount = 0
+    for _, m in ipairs(state.mines or {}) do
+        if m.active and not m.migrating and (m.reserve or 0) > 0 then
+            activeMineCount = activeMineCount + 1
+        end
+    end
+    activeMineCount = math.max(1, activeMineCount)
+    local workersForMine = (state.workers.hired or 0) / activeMineCount
+    local workerBonus = math.floor(workersForMine / BW.workers_per_unit * efficiencyMul)
     -- 事件修正
     local outputMod = GameState.GetModifierValue(state, "mine_output")
         + (state.mine_output_base_bonus or 0)
@@ -365,7 +373,17 @@ function Economy._CalcMineOutput(state, mine)
     if multBonus ~= 0 then
         total = total * (1 + multBonus)
     end
-    return math.max(0, math.floor(total))
+    total = math.max(0, math.floor(total))
+
+    -- 产能不能无限接近整座矿山储量。按单矿初始储量设置季度开采上限；
+    -- 剩余储量封顶仍在 Settle / Estimate 中处理。
+    local defaultInitial = mine.id == "main_mine" and 500
+        or ((Balance.TRADE or {}).new_mine or {}).base_reserve
+        or 1500
+    mine.initial_reserve = math.max(mine.initial_reserve or 0, mine.reserve or 0, defaultInitial)
+    local capRatio = BM.max_quarterly_depletion_ratio or 0.08
+    local quarterlyCap = math.max(1, math.floor(mine.initial_reserve * capRatio))
+    return math.min(total, quarterlyCap)
 end
 
 --- 获取当前季度预估收支

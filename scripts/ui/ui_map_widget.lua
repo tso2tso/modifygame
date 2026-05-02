@@ -439,6 +439,16 @@ function MapWidget:Render(nvg)
         self:_DrawSecurityLayer(nvg, mx, my, mw, mh)
     end
 
+    if self.activeLayers_.trade then
+        self:_DrawTradeLayer(nvg, mx, my, mw, mh)
+    end
+    if self.activeLayers_.military then
+        self:_DrawMilitaryLayer(nvg, mx, my, mw, mh)
+    end
+    if self.activeLayers_.intel then
+        self:_DrawIntelLayer(nvg, mx, my, mw, mh)
+    end
+
     -- ⑤ Hex 网格线 + 国家边界
     self:_DrawHexGrid(nvg, mx, my, mw, mh, theme)
     self:_DrawCountryBorders(nvg, mx, my, mw, mh)
@@ -542,6 +552,36 @@ function MapWidget:_DrawSecurityLayer(nvg, mx, my, mw, mh)
     end
 end
 
+function MapWidget:_DrawTileOverlay(nvg, tile, rgba, mx, my, mw, mh)
+    self:_BeginHexPath(nvg, tile.q, tile.r, mx, my, mw, mh)
+    nvgFillColor(nvg, nvgRGBA(rgba[1], rgba[2], rgba[3], rgba[4]))
+    nvgFill(nvg)
+end
+
+function MapWidget:_DrawTradeLayer(nvg, mx, my, mw, mh)
+    for _, tile in ipairs(self.mapTiles_) do
+        if tile.type == "port" or tile.type == "industrial" or tile.type == "mine" then
+            self:_DrawTileOverlay(nvg, tile, { 46, 204, 113, tile.type == "port" and 70 or 42 }, mx, my, mw, mh)
+        end
+    end
+end
+
+function MapWidget:_DrawMilitaryLayer(nvg, mx, my, mw, mh)
+    for _, tile in ipairs(self.mapTiles_) do
+        if tile.type == "border" or tile.type == "strategic" or tile.controller == "local_clan" then
+            self:_DrawTileOverlay(nvg, tile, { 44, 62, 80, 70 }, mx, my, mw, mh)
+        end
+    end
+end
+
+function MapWidget:_DrawIntelLayer(nvg, mx, my, mw, mh)
+    for _, tile in ipairs(self.mapTiles_) do
+        if tile.controller == "foreign_capital" or tile.controller == "local_clan" or tile.controller == "contested" then
+            self:_DrawTileOverlay(nvg, tile, { 149, 165, 166, tile.controller == "contested" and 45 or 65 }, mx, my, mw, mh)
+        end
+    end
+end
+
 -- ============================================================================
 -- Hex 网格线
 -- ============================================================================
@@ -566,7 +606,6 @@ function MapWidget:_DrawCountryBorders(nvg, mx, my, mw, mh)
     local oddDirs  = { {1, 0}, {1, 1}, {0, -1}, {0, 1}, {-1, 0}, {-1, 1} }
 
     nvgStrokeWidth(nvg, 1.8)
-    nvgLineCap(nvg, NVG_ROUND)
 
     for _, tile in ipairs(self.mapTiles_) do
         local q, r = tile.q, tile.r

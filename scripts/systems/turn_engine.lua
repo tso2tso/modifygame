@@ -43,6 +43,7 @@ local function MarkFactionDefeated(state, faction, mode, report)
     for _, tile in ipairs(state.map_tiles or {}) do
         if tile.controller == faction.id then
             tile.controller = "player"
+            tile.manual_control = true
         end
     end
     local msg = string.format("%s 已被击败，剩余地盘转入玩家控制", faction.name)
@@ -940,6 +941,7 @@ function TurnEngine.EndTurn(state)
                     id = id,
                     name = "探明矿脉 #" .. cnt,
                     reserve = reserve,
+                    initial_reserve = reserve,
                 })
                 state.prospect_success_count = cnt
                 GameState.AddLog(state, string.format(

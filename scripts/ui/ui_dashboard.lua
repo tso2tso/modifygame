@@ -630,8 +630,8 @@ function Dashboard._FocusCard(state, mine, era)
     era = era or Config.GetEraByYear(state.year)
     local accent = era.accent
 
-    -- 产量计算
-    local output = Economy._CalcMineOutput(state, mine)
+    -- 产量计算：显示实际可采量，按矿山剩余储量封顶。
+    local output = math.min(Economy._CalcMineOutput(state, mine), mine.reserve or 0)
     -- 工人状态
     local morale = state.workers.morale
     local moraleIcon = morale >= 80 and "😊" or (morale >= 60 and "😐" or "😠")

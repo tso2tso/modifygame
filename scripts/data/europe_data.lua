@@ -9,7 +9,7 @@ local EuropeData = {}
 -- 国家定义
 -- ============================================================================
 
---- 完整国家列表（与 ui_map_widget.lua EUROPE_REGIONS 的 id 一一对应）
+--- 完整国家列表（主权状态表；地图渲染通过 map_tiles_data.lua 的 country_id 对齐）
 local COUNTRIES = {
     -- ── 大国 ──
     {

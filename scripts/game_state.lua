@@ -159,6 +159,7 @@ function GameState.CreateNew()
                 output_bonus = 0,  -- 来自科技/岗位等额外加成
                 active = true,
                 reserve = 500,     -- 独立储量（与初始 region gold_reserve 一致）
+                initial_reserve = 500,
             },
         },
         mine_slots_bonus = 0,  -- 科技解锁的额外矿山槽位
@@ -462,9 +463,13 @@ function GameState.GetVictoryStanding(state)
     local claimable = nil
     local minClaimYear = relative.min_claim_year or 1945
     if not (state.victory and state.victory.claimed) and state.year >= minClaimYear then
-        if ecoLead >= (margins.economic or 200) and GameState.CheckEconomicSnapshot(state) then
+        if player.economic >= (Balance.VICTORY.economic.threshold or 0)
+            and ecoLead >= (margins.economic or 200)
+            and GameState.CheckEconomicSnapshot(state) then
             claimable = { type = "economic", lead = ecoLead, margin = margins.economic or 200 }
-        elseif milLead >= (margins.military or 250) and GameState.CheckMilitarySnapshot(state) then
+        elseif player.military >= (Balance.VICTORY.military.threshold or 0)
+            and milLead >= (margins.military or 250)
+            and GameState.CheckMilitarySnapshot(state) then
             claimable = { type = "military", lead = milLead, margin = margins.military or 250 }
         elseif domLead >= (relative.dominance_margin or 300)
             and ((not relative.dominance_requires_positive_track) or ecoLead > 0 or milLead > 0) then
