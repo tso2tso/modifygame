@@ -13,10 +13,97 @@ local Tech = require("systems.tech")
 local GrandPowers = require("systems.grand_powers")
 local BranchEvents = require("systems.branch_events")
 local Equipment = require("systems.equipment")
+local MapTilesData = require("data.map_tiles_data")
 
 local BV = Balance.VICTORY
 
 local TurnEngine = {}
+
+local function TotalFactionPresence(state, factionId)
+    local total = 0
+    for _, r in ipairs(state.regions or {}) do
+        total = total + ((r.ai_presence and r.ai_presence[factionId]) or 0)
+    end
+    return total
+end
+
+local function MarkFactionDefeated(state, faction, mode, report)
+    if faction.defeated then return end
+    faction.defeated = true
+    faction.defeat_mode = mode or "routed"
+    faction.collapsed = true
+    faction.collapsed_seasons = nil
+    faction.power = 0
+    faction.cash = math.max(0, math.floor((faction.cash or 0) * 0.25))
+    for _, r in ipairs(state.regions or {}) do
+        if r.ai_presence and r.ai_presence[faction.id] then
+            r.ai_presence[faction.id] = 0
+        end
+    end
+    for _, tile in ipairs(state.map_tiles or {}) do
+        if tile.controller == faction.id then
+            tile.controller = "player"
+        end
+    end
+    local msg = string.format("%s 已被击败，剩余地盘转入玩家控制", faction.name)
+    GameState.AddLog(state, msg)
+    if report then table.insert(report.ai_changes, msg) end
+end
+
+local function CheckFactionDefeat(state, faction, report)
+    if faction.defeated then return end
+    local presence = TotalFactionPresence(state, faction.id)
+    local colCfg = Balance.AI.collapse or {}
+    if presence <= 5 and (faction.power or 0) <= (colCfg.power_threshold or 5) then
+        MarkFactionDefeated(state, faction, "routed", report)
+    elseif faction.collapsed and presence <= 8 and (faction.cash or 0) <= (colCfg.cash_threshold or 100) then
+        MarkFactionDefeated(state, faction, "absorbed", report)
+    end
+end
+
+local function UpdateSpecialContentFlags(state, report)
+    state.special_content = state.special_content or {}
+    local prev = {
+        quota_active = state.special_content.quota_active,
+        black_market_active = state.special_content.black_market_active,
+        foreign_trade_window = state.special_content.foreign_trade_window,
+        technocrat_route = state.special_content.technocrat_route,
+    }
+
+    local year = state.year or 1904
+    local influence = GameState.CalcTotalInfluence(state)
+    local knowledgeAvg = 0
+    local activeMembers = 0
+    for _, m in ipairs((state.family and state.family.members) or {}) do
+        if m.status == "active" then
+            knowledgeAvg = knowledgeAvg + ((m.attrs and m.attrs.knowledge) or 0)
+            activeMembers = activeMembers + 1
+        end
+    end
+    if activeMembers > 0 then knowledgeAvg = knowledgeAvg / activeMembers end
+
+    state.special_content.quota_active = year >= 1946 and year <= 1991
+    state.special_content.black_market_active = (state.flags and state.flags.at_war)
+        or (year >= 1941 and year <= 1945)
+        or (year >= 1992 and year <= 1995)
+        or (state.regulation_pressure or 0) >= 45
+    state.special_content.foreign_trade_window = year >= 1948
+        and (year <= 1955 or year >= 1984)
+    state.special_content.technocrat_route = (year >= 1946 and year <= 1991)
+        and (influence >= 70 or knowledgeAvg >= 6)
+
+    local labels = {
+        quota_active = "配额生产窗口开启",
+        black_market_active = "灰色市场机会增加",
+        foreign_trade_window = "对外贸易窗口出现",
+        technocrat_route = "技术官僚路线可推进",
+    }
+    for key, label in pairs(labels) do
+        if state.special_content[key] and not prev[key] then
+            table.insert(report.ai_changes, label)
+        end
+    end
+end
 
 local function PickAIExpansionRegion(state, faction)
     local bestRegion = nil
@@ -60,6 +147,9 @@ function TurnEngine.EndTurn(state)
         warnings = {},
     }
 
+    MapTilesData.EnsureState(state)
+    MapTilesData.SyncTilesFromRegions(state)
+
     -- ========================================
     -- 阶段 0: 通胀推进（影响本季价格）
     -- ========================================
@@ -77,11 +167,13 @@ function TurnEngine.EndTurn(state)
     -- 阶段 1: 经济结算
     -- ========================================
     state.phase = "settlement"
+    StockEngine.ApplyCompanySynergies(state)
     report.economy = Economy.Settle(state)
 
     -- ========================================
     -- 阶段 1.5: 股市 GBM 更新（每季一次）
     -- ========================================
+    StockEngine.ApplyOperationalDrift(state, report.economy)
     StockEngine.UpdateAll(state)
 
     -- ========================================
@@ -461,6 +553,15 @@ function TurnEngine.EndTurn(state)
         end
     end
 
+    -- 在岗成员的腐败倾向会轻微影响监管压力；清廉团队则略微缓和。
+    local corruptionAvg = GameState.GetActiveFamilyHiddenAverage(state, "corruption")
+    if corruptionAvg >= 7 then
+        state.regulation_pressure = math.min(100, (state.regulation_pressure or 0) + 1)
+    elseif corruptionAvg > 0 and corruptionAvg <= 2 then
+        state.regulation_pressure = math.max(0, (state.regulation_pressure or 0) - 1)
+    end
+    UpdateSpecialContentFlags(state, report)
+
     -- ========================================
     -- 阶段 5: 武装士气衰减
     -- ========================================
@@ -481,6 +582,7 @@ function TurnEngine.EndTurn(state)
     for _, faction in ipairs(state.ai_factions) do
         local aiConfig = Balance.AI[faction.type]
         if aiConfig then
+            if faction.defeated then goto continue_faction end
             -- ── 瘫痪状态检测 ──
             local colCfg = Balance.AI.collapse
             if not faction.collapsed then
@@ -747,6 +849,10 @@ function TurnEngine.EndTurn(state)
     for _, msg in ipairs(combatResults) do
         table.insert(report.ai_changes, msg)
     end
+    for _, faction in ipairs(state.ai_factions or {}) do
+        CheckFactionDefeat(state, faction, report)
+    end
+    MapTilesData.SyncTilesFromRegions(state)
 
     -- ========================================
     -- 阶段 6.7: 大国博弈系统更新
@@ -791,6 +897,17 @@ function TurnEngine.EndTurn(state)
     -- ========================================
     -- 阶段 8: 家族培养进度
     -- ========================================
+    for _, member in ipairs((state.family and state.family.members) or {}) do
+        if member.status == "disabled" and (member.disabled_turns or 0) > 0 then
+            member.disabled_turns = member.disabled_turns - 1
+            if member.disabled_turns <= 0 then
+                member.status = "active"
+                member.disabled_turns = 0
+                table.insert(report.warnings, member.name .. " 已恢复行动")
+            end
+        end
+    end
+
     if state.family.training then
         state.family.training.progress = state.family.training.progress + 1
         if state.family.training.progress >= state.family.training.total then

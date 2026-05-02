@@ -85,24 +85,93 @@ function FamiliesData.CreateInitialMembers()
 end
 
 --- 获取属性匹配评级
---- 主属性 >= 7 满配, 5-6 半配, <= 4 负面
+--- 双属性 >= 7 满配；双属性 >= 5 半配；任一属性 <= 4 差配。
 ---@param member table
----@param attr1 string 主属性
----@param attr2 string 副属性
+---@param attr1 string 关键属性 1
+---@param attr2 string 关键属性 2
 ---@return string rating "excellent" / "good" / "poor"
 ---@return number bonus 加成系数 (1.0 / 0.5 / -0.1)
 function FamiliesData.GetPositionFit(member, attr1, attr2)
     local v1 = member.attrs[attr1] or 1
     local v2 = member.attrs[attr2] or 1
-    local primary = math.max(v1, v2)
 
-    if primary >= 7 then
+    if v1 >= 7 and v2 >= 7 then
         return "excellent", 1.0
-    elseif primary >= 5 then
+    elseif v1 >= 5 and v2 >= 5 then
         return "good", 0.5
-    else
+    elseif v1 <= 4 or v2 <= 4 then
         return "poor", -0.1
     end
+
+    -- 一高一中或一高一低的成员仍能胜任，但无法拿到完整加成。
+    return "good", 0.5
+end
+
+--- 获取隐藏倾向的可读线索，不直接暴露具体数值。
+---@param member table
+---@return string[]
+function FamiliesData.GetHiddenTraitHints(member)
+    local h = member.hidden or {}
+    local hints = {}
+    if (h.loyalty or 0) >= 8 then
+        table.insert(hints, "可靠")
+    elseif (h.loyalty or 10) <= 4 then
+        table.insert(hints, "易动摇")
+    end
+
+    if (h.corruption or 0) >= 7 then
+        table.insert(hints, "灰色倾向")
+    elseif (h.corruption or 10) <= 2 then
+        table.insert(hints, "清廉")
+    end
+
+    if (h.radical or 0) >= 7 then
+        table.insert(hints, "激进")
+    elseif (h.radical or 10) <= 3 then
+        table.insert(hints, "稳健")
+    end
+
+    return hints
+end
+
+--- 计算成员在灰色经营、战时强硬、制度路线中的倾向值。
+---@param member table
+---@param kind string corruption|loyalty|radical
+---@return number
+function FamiliesData.GetHiddenValue(member, kind)
+    return ((member.hidden or {})[kind]) or 0
+end
+
+--- 创建一个可培养的新成员模板。
+---@param index number|nil
+---@return table
+function FamiliesData.CreateTraineeTemplate(index)
+    index = index or math.random(1000, 9999)
+    local function attr()
+        return math.random(3, 7)
+    end
+    return {
+        id = "trainee_" .. tostring(index),
+        name = "新成员 " .. tostring(index),
+        title = "家族新秀",
+        portrait = "👥",
+        attrs = {
+            management = attr(),
+            strategy = attr(),
+            charisma = attr(),
+            knowledge = attr(),
+            ambition = attr(),
+        },
+        hidden = {
+            corruption = math.random(1, 7),
+            loyalty = math.random(4, 9),
+            radical = math.random(1, 8),
+        },
+        position = nil,
+        status = "active",
+        disabled_turns = 0,
+        bio = "通过家族培养进入核心圈层的新成员，能力与倾向会在长期经营中逐步显现。",
+    }
 end
 
 return FamiliesData

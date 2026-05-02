@@ -39,6 +39,15 @@ local FIT_LABELS = {
     poor      = "差配",
 }
 
+local TRAIT_CHIP_COLORS = {
+    ["可靠"] = "success",
+    ["清廉"] = "success",
+    ["稳健"] = "default",
+    ["易动摇"] = "warning",
+    ["灰色倾向"] = "warning",
+    ["激进"] = "error",
+}
+
 --- 创建家族页完整内容
 ---@param state table
 ---@param callbacks table { onStateChanged = function }
@@ -115,6 +124,26 @@ function FamilyPage._CreateSummaryCard(state)
                 fontColor = C.text_muted,
                 whiteSpace = "normal",
                 lineHeight = 1.4,
+            },
+            UI.Button {
+                text = state.family.training
+                    and string.format("培养中 %d/%d",
+                        state.family.training.progress or 0,
+                        state.family.training.total or 0)
+                    or "培养新成员",
+                fontSize = F.body_minor,
+                fontColor = C.text_primary,
+                backgroundColor = state.family.training and C.bg_elevated or C.paper_mid,
+                borderRadius = S.radius_btn,
+                paddingHorizontal = 10,
+                paddingVertical = 6,
+                disabled = state.family.training ~= nil
+                    or #state.family.members >= Balance.FAMILY.max_members,
+                onClick = function()
+                    local ok, msg = GameState.StartFamilyTraining(state)
+                    UI.Toast.Show(msg, { variant = ok and "success" or "warning", duration = 1.8 })
+                    if ok and onStateChanged_ then onStateChanged_() end
+                end,
             },
         },
     }
@@ -205,6 +234,15 @@ function FamilyPage._CreateMemberCard(state, member)
             label = "待命",
             color = "default",
             variant = "outlined",
+            size = "sm",
+        })
+    end
+
+    for _, hint in ipairs(FamiliesData.GetHiddenTraitHints(member)) do
+        table.insert(statusChips, UI.Chip {
+            label = hint,
+            color = TRAIT_CHIP_COLORS[hint] or "default",
+            variant = "soft",
             size = "sm",
         })
     end

@@ -7,6 +7,7 @@ local Balance = require("data.balance")
 local FamiliesData = require("data.families_data")
 local RegionsData = require("data.regions_data")
 local EuropeData = require("data.europe_data")
+local MapTilesData = require("data.map_tiles_data")
 
 --- 深拷贝（用于把 Balance.STOCKS 模板实例化进 state，避免共享引用）
 local function deepcopy(tbl)
@@ -144,6 +145,7 @@ function GameState.CreateNew()
         -- 地区
         -- ============================
         regions = RegionsData.CreateInitialRegions(),
+        map_tiles = MapTilesData.CreateInitialTiles(),
 
         -- ============================
         -- 矿山
@@ -248,6 +250,12 @@ function GameState.CreateNew()
         -- ============================
         passive_influence = 0,       -- 被动地区影响力增益/季（科技"印刷宣传"等）
         regulation_pressure = 0,     -- 监管压力（事件/外交行为累积）
+        special_content = {
+            quota_active = false,
+            black_market_active = false,
+            foreign_trade_window = false,
+            technocrat_route = false,
+        },
 
         -- ============================
         -- 全局状态标记
@@ -828,6 +836,62 @@ function GameState.GetPositionBonus(state, positionId)
 
     local _, bonus = FamiliesData.GetPositionFit(member, posConfig.attr1, posConfig.attr2)
     return bonus
+end
+
+--- 统计在岗成员的隐藏倾向，用于灰色经营、监管、强硬路线等轻量联动。
+---@param state table
+---@param kind string corruption|loyalty|radical
+---@return number avg
+function GameState.GetActiveFamilyHiddenAverage(state, kind)
+    local total = 0
+    local count = 0
+    for _, m in ipairs((state.family and state.family.members) or {}) do
+        if m.status == "active" and m.position then
+            total = total + FamiliesData.GetHiddenValue(m, kind)
+            count = count + 1
+        end
+    end
+    if count == 0 then return 0 end
+    return total / count
+end
+
+--- 开始培养新成员。
+---@param state table
+---@return boolean ok
+---@return string msg
+function GameState.StartFamilyTraining(state)
+    state.family = state.family or { members = {} }
+    if state.family.training then
+        return false, "已有成员正在培养"
+    end
+    if #state.family.members >= Balance.FAMILY.max_members then
+        return false, "家族成员已达上限"
+    end
+    local cost = Balance.FAMILY.train_cost
+        or (Balance.FAMILY.training and Balance.FAMILY.training.cost)
+        or 200
+    if state.cash < cost then
+        return false, "现金不足"
+    end
+    state.cash = state.cash - cost
+    local total = Balance.FAMILY.train_duration
+        or (Balance.FAMILY.training and Balance.FAMILY.training.turns)
+        or 10
+    state.family.training = {
+        progress = 0,
+        total = total,
+        member_template = FamiliesData.CreateTraineeTemplate((state.turn_count or 0) + #state.family.members + 1),
+    }
+    GameState.AddLog(state, string.format("开始培养新家族成员，预计 %d 季完成", total))
+    return true, "已开始培养新成员"
+end
+
+--- 通过 hex 模块控制状态重算本地 region 的控制度与 AI 存在度。
+---@param state table
+function GameState.SyncRegionsFromMapTiles(state)
+    local MapTilesData = require("data.map_tiles_data")
+    if not state.map_tiles then return end
+    MapTilesData.SyncRegionsFromTiles(state)
 end
 
 -- ============================================================================

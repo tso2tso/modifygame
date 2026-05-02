@@ -8,6 +8,7 @@ local Config = require("config")
 local GameState = require("game_state")
 local Balance = require("data.balance")
 local RegionsData = require("data.regions_data")
+local MapTilesData = require("data.map_tiles_data")
 local MapWidget = require("ui.ui_map_widget")
 local GrandPowers = require("systems.grand_powers")
 local PlayerActionsGP = require("systems.player_actions_gp")
@@ -69,7 +70,10 @@ local SUB_TABS = {
 function WorldPage.Create(state, callbacks)
     stateRef_ = state
     callbacksRef_ = callbacks or {}
-    selectedNodeId_ = state.regions[1] and state.regions[1].id or nil
+    MapTilesData.EnsureState(state)
+    MapTilesData.SyncTilesFromRegions(state)
+    selectedNodeId_ = state.map_tiles[1] and state.map_tiles[1].id
+        or (state.regions[1] and state.regions[1].id or nil)
     activeSubTab_ = "map"
     WorldPage.InvalidatePrecomputed()
     return WorldPage._BuildContent(state)
@@ -219,6 +223,7 @@ function WorldPage._BuildMapTab(state)
         end,
     }
     mapWidget_:SetRegions(state.regions)
+    mapWidget_:SetMapTiles(state.map_tiles)
     mapWidget_:SetSelected(selectedNodeId_)
     mapWidget_:UpdateUnlocks(state)
     mapWidget_:SetEuropeState(state.europe)
@@ -277,21 +282,39 @@ function WorldPage._RefreshDrawer(state)
         return
     end
 
-    -- 查找区域数据
+    -- 查找 hex 模块和关联区域数据
+    local tile = MapTilesData.GetTile(state, selectedNodeId_)
     local region = nil
     for _, r in ipairs(state.regions) do
-        if r.id == selectedNodeId_ then
+        if r.id == (tile and tile.region_id or selectedNodeId_) then
             region = r
             break
         end
     end
-    if not region then return end
+    if not region and not tile then return end
 
-    drawerPanel_:AddChild(WorldPage._CreateNodeDrawer(state, region))
+    drawerPanel_:AddChild(WorldPage._CreateNodeDrawer(state, region, tile))
 end
 
 --- 创建节点信息抽屉 — 遵循 §8.5 节点信息抽屉规范
-function WorldPage._CreateNodeDrawer(state, region)
+function WorldPage._CreateNodeDrawer(state, region, tile)
+    if not region and tile then
+        region = {
+            id = tile.id,
+            name = tile.label,
+            icon = tile.type == "capital" and "◆" or "⬡",
+            type = tile.type,
+            control = tile.controller == "player" and 100 or 0,
+            security = 3,
+            resources = {},
+            ai_presence = {},
+        }
+        if tile.controller == "local_clan" or tile.controller == "foreign_capital" then
+            region.ai_presence[tile.controller] = 100
+        end
+    end
+    local displayName = tile and tile.label or region.name
+    local controllerText = tile and (tile.controller or "contested") or nil
     local secColor = region.security <= 2 and C.accent_red
         or (region.security >= 4 and C.accent_green or C.accent_amber)
     local ctrlColor = region.control >= 60 and C.accent_green
@@ -314,6 +337,8 @@ function WorldPage._CreateNodeDrawer(state, region)
         typeBadge = "文化"; typeColors = { 243, 156, 18 }
     elseif region.type == "strategic" then
         typeBadge = "山口"; typeColors = { 44, 62, 80 }
+    elseif region.type == "rail" then
+        typeBadge = "铁路"; typeColors = { 46, 204, 113 }
     end
 
     -- 主导控制方
@@ -408,25 +433,69 @@ function WorldPage._CreateNodeDrawer(state, region)
             end,
         })
     end
-    local infCost = Balance.INFLUENCE.cost_infiltrate
-    local totalInfluence = GameState.CalcTotalInfluence(state)
-    local canInfiltrate = (state.ap.current + (state.ap.temp or 0)) >= 2
-        and totalInfluence >= infCost
-    table.insert(actionChildren, UI.Button {
-        text = string.format("政治渗透（2AP+%d影响力）", infCost),
-        fontSize = F.label,
-        fontColor = canInfiltrate and C.text_primary or C.text_muted,
-        backgroundColor = canInfiltrate and C.paper_mid or C.bg_elevated,
-        borderRadius = S.radius_btn,
-        paddingHorizontal = 10,
-        paddingVertical = 6,
-        flexGrow = 1,
-        disabled = not canInfiltrate,
-        onClick = function(self)
-            self.props.disabled = true
-            WorldPage._DoPoliticalInfiltration(state, region)
-        end,
-    })
+    if (not tile) or tile.region_id then
+        local infCost = Balance.INFLUENCE.cost_infiltrate
+        local totalInfluence = GameState.CalcTotalInfluence(state)
+        local canInfiltrate = (state.ap.current + (state.ap.temp or 0)) >= 2
+            and totalInfluence >= infCost
+        table.insert(actionChildren, UI.Button {
+            text = string.format("政治渗透（2AP+%d影响力）", infCost),
+            fontSize = F.label,
+            fontColor = canInfiltrate and C.text_primary or C.text_muted,
+            backgroundColor = canInfiltrate and C.paper_mid or C.bg_elevated,
+            borderRadius = S.radius_btn,
+            paddingHorizontal = 10,
+            paddingVertical = 6,
+            flexGrow = 1,
+            disabled = not canInfiltrate,
+            onClick = function(self)
+                self.props.disabled = true
+                WorldPage._DoPoliticalInfiltration(state, region)
+            end,
+        })
+    end
+
+    if tile and tile.region_id and tile.controller ~= "player" then
+        table.insert(actionChildren, UI.Button {
+            text = "占据模块（2AP）",
+            fontSize = F.label,
+            fontColor = C.text_primary,
+            backgroundColor = C.paper_mid,
+            borderRadius = S.radius_btn,
+            paddingHorizontal = 10,
+            paddingVertical = 6,
+            flexGrow = 1,
+            onClick = function()
+                WorldPage._ResolveTileOccupation(state, tile, "occupy")
+            end,
+        })
+        table.insert(actionChildren, UI.Button {
+            text = "吸纳地方（1AP）",
+            fontSize = F.label,
+            fontColor = C.text_primary,
+            backgroundColor = C.bg_elevated,
+            borderRadius = S.radius_btn,
+            paddingHorizontal = 10,
+            paddingVertical = 6,
+            flexGrow = 1,
+            onClick = function()
+                WorldPage._ResolveTileOccupation(state, tile, "absorb")
+            end,
+        })
+        table.insert(actionChildren, UI.Button {
+            text = "清算据点（2AP）",
+            fontSize = F.label,
+            fontColor = C.accent_red,
+            backgroundColor = C.bg_elevated,
+            borderRadius = S.radius_btn,
+            paddingHorizontal = 10,
+            paddingVertical = 6,
+            flexGrow = 1,
+            onClick = function()
+                WorldPage._ResolveTileOccupation(state, tile, "clear")
+            end,
+        })
+    end
 
     -- 构建控制比例 children
     local controlSectionChildren = {
@@ -460,7 +529,7 @@ function WorldPage._CreateNodeDrawer(state, region)
                 alignItems = "center",
                 gap = 8,
                 children = {
-                    UI.Label { text = region.icon, fontSize = 24 },
+                    UI.Label { text = region.icon or "⬡", fontSize = 24 },
                     UI.Panel {
                         flexGrow = 1,
                         flexShrink = 1,
@@ -473,7 +542,7 @@ function WorldPage._CreateNodeDrawer(state, region)
                                 gap = 6,
                                 children = {
                                     UI.Label {
-                                        text = region.name,
+                                        text = displayName,
                                         fontSize = F.card_title,
                                         fontWeight = "bold",
                                         fontColor = C.text_primary,
@@ -494,7 +563,7 @@ function WorldPage._CreateNodeDrawer(state, region)
                                 },
                             },
                             UI.Label {
-                                text = dominantText,
+                                text = tile and (dominantText .. " · 模块控制: " .. controllerText) or dominantText,
                                 fontSize = F.label,
                                 fontColor = C.text_secondary,
                             },
@@ -538,6 +607,8 @@ function WorldPage._CreateNodeDrawer(state, region)
                         tostring(region.culture), C.text_primary),
                     WorldPage._InfoRow("影响力",
                         tostring(region.influence or 0), C.accent_gold),
+                    tile and WorldPage._InfoRow("模块",
+                        string.format("%s / %s", tile.country_id or "-", tile.id), C.text_secondary) or nil,
                 },
             },
 
@@ -585,6 +656,36 @@ function WorldPage._CreateNodeDrawer(state, region)
             },
         },
     }
+end
+
+function WorldPage._ResolveTileOccupation(state, tile, mode)
+    local apCost = mode == "absorb" and 1 or 2
+    if not GameState.SpendAP(state, apCost) then
+        UI.Toast.Show("行动点不足", { variant = "warning", duration = 1.5 })
+        return
+    end
+
+    local oldController = tile.controller or "contested"
+    tile.controller = "player"
+    local region
+    for _, r in ipairs(state.regions or {}) do
+        if r.id == tile.region_id then region = r; break end
+    end
+    if region then
+        if mode == "absorb" then
+            region.security = math.min(5, (region.security or 3) + 1)
+            region.influence = (region.influence or 0) + 3
+        elseif mode == "clear" then
+            region.security = math.max(1, (region.security or 3) - 1)
+            state.regulation_pressure = math.min(100, (state.regulation_pressure or 0) + 3)
+        end
+    end
+    GameState.SyncRegionsFromMapTiles(state)
+    GameState.AddLog(state, string.format("地图模块[%s]由%s转入玩家控制（%s）",
+        tile.label or tile.id, oldController, mode))
+    UI.Toast.Show("地盘控制已更新", { variant = "success", duration = 1.5 })
+    if callbacksRef_ and callbacksRef_.onStateChanged then callbacksRef_.onStateChanged() end
+    WorldPage._RefreshDrawer(state)
 end
 
 -- ============================================================================
@@ -1308,6 +1409,34 @@ end
 
 --- 统一势力卡片：合并关系 + 势力详情为一体
 function WorldPage._CreateUnifiedFactionCard(state, faction, precomputed)
+    if faction.defeated then
+        return UI.Panel {
+            width = "100%",
+            padding = S.card_padding,
+            backgroundColor = { 35, 35, 38, 255 },
+            borderRadius = S.radius_card,
+            borderWidth = 1,
+            borderColor = { 95, 95, 95, 255 },
+            flexDirection = "column",
+            gap = 6,
+            opacity = 0.78,
+            children = {
+                UI.Label {
+                    text = (faction.icon or "×") .. " " .. faction.name .. "（已击败）",
+                    fontSize = F.card_title,
+                    fontWeight = "bold",
+                    fontColor = C.text_muted,
+                },
+                UI.Label {
+                    text = "该势力已失去主要地盘和行动能力，相关模块转入玩家或地方代理控制。",
+                    fontSize = F.body_minor,
+                    fontColor = C.text_secondary,
+                    whiteSpace = "normal",
+                    lineHeight = 1.4,
+                },
+            },
+        }
+    end
     -- ── 瘫痪状态：显示特殊卡片 ──
     if faction.collapsed then
         local colCfg = Balance.COLLAPSE or (Balance.AI and Balance.AI.collapse)

@@ -6,6 +6,7 @@
 
 local Widget = require("urhox-libs/UI/Core/Widget")
 local Config = require("config")
+local MapTilesData = require("data.map_tiles_data")
 
 local C = Config.COLORS
 local PI = math.pi
@@ -190,6 +191,7 @@ function MapWidget:Init(props)
     self.selectedNodeId_  = nil
     self.hoveredNodeId_   = nil
     self.regions_         = {}
+    self.mapTiles_        = MapTilesData.CreateInitialTiles()
     self.onRegionSelect_  = props.onRegionSelect
 
     -- 图层状态：control 始终开启
@@ -226,6 +228,10 @@ end
 -- ============================================================================
 
 function MapWidget:SetRegions(regions) self.regions_ = regions or {} end
+function MapWidget:SetMapTiles(tiles)
+    self.mapTiles_ = tiles or MapTilesData.CreateInitialTiles()
+    MapTilesData.RebuildNeighbors(self.mapTiles_)
+end
 function MapWidget:SetSelected(id) self.selectedNodeId_ = id end
 function MapWidget:GetSelected() return self.selectedNodeId_ end
 function MapWidget:SetEra(eraId) self.eraId_ = eraId or 1 end
@@ -502,18 +508,25 @@ function MapWidget:Render(nvg)
         self:_DrawPoly(nvg, er.poly, {c[1], c[2], c[3], fillA}, strokeC, strokeW, mx, my, mw, mh)
     end
 
-    -- ④ 控制层：游戏区域多边形按势力着色
+    -- ④ 控制层：宏观 hex 模块按势力着色
     if self.activeLayers_.control then
-        for _, gn in ipairs(GAME_NODES) do
-            local rd = self:_FindRegionData(gn.id)
+        for _, gn in ipairs(self.mapTiles_ or GAME_NODES) do
+            local rd = self:_FindRegionData(gn.region_id or gn.id)
             local isSel = (self.selectedNodeId_ == gn.id)
             local isHov = (self.hoveredNodeId_ == gn.id)
             local fc = self:_GetControlFill(rd, isSel, isHov)
+            if gn.controller and gn.controller ~= "player" and not rd then
+                local cc = FACTION_COLORS[gn.controller] or FACTION_COLORS.contested
+                fc = { cc[1], cc[2], cc[3], isSel and 145 or (isHov and 125 or 90) }
+            elseif gn.controller and gn.region_id then
+                local cc = FACTION_COLORS[gn.controller] or FACTION_COLORS.contested
+                fc = { cc[1], cc[2], cc[3], isSel and 150 or (isHov and 130 or 95) }
+            end
             local era = Config.GetEraByYear and Config.GetEraByYear(1904 + (self.eraId_ - 1) * 15) or nil
             local bc = isSel and C.accent_gold or C.paper_light
             local ba = isSel and 255 or (isHov and 200 or 120)
             local bw = isSel and 2.5 or (isHov and 1.8 or 1.0)
-            self:_DrawPoly(nvg, gn.poly, fc, {bc[1], bc[2], bc[3], ba}, bw, mx, my, mw, mh)
+            self:_DrawPoly(nvg, self:_GetNodePoly(gn), fc, {bc[1], bc[2], bc[3], ba}, bw, mx, my, mw, mh)
         end
     end
 
@@ -556,7 +569,7 @@ function MapWidget:Render(nvg)
     end
 
     -- ⑧ 游戏节点（类型化形状）
-    for _, gn in ipairs(GAME_NODES) do
+    for _, gn in ipairs(self.mapTiles_ or GAME_NODES) do
         self:_DrawGameNode(nvg, gn, mx, my, mw, mh)
     end
 
@@ -629,8 +642,8 @@ end
 
 --- 安全图层 — 区域热力色覆盖
 function MapWidget:_DrawSecurityLayer(nvg, mx, my, mw, mh)
-    for _, gn in ipairs(GAME_NODES) do
-        local rd = self:_FindRegionData(gn.id)
+    for _, gn in ipairs(self.mapTiles_ or GAME_NODES) do
+        local rd = self:_FindRegionData(gn.region_id or gn.id)
         if rd then
             local sec = rd.security or 3
             -- 1=红, 2=橙, 3=黄, 4=浅绿, 5=绿
@@ -640,7 +653,7 @@ function MapWidget:_DrawSecurityLayer(nvg, mx, my, mw, mh)
             elseif sec <= 3 then r, g, b = 200, 180, 60
             elseif sec <= 4 then r, g, b = 80, 160, 80
             else                 r, g, b = 40, 140, 60 end
-            self:_DrawPoly(nvg, gn.poly, {r, g, b, 50}, nil, 0, mx, my, mw, mh)
+            self:_DrawPoly(nvg, self:_GetNodePoly(gn), {r, g, b, 50}, nil, 0, mx, my, mw, mh)
         end
     end
 end
@@ -741,10 +754,11 @@ end
 
 --- 资源图层 — 在节点旁显示资源标签
 function MapWidget:_DrawResourceLayer(nvg, mx, my, mw, mh)
-    for _, gn in ipairs(GAME_NODES) do
-        local rd = self:_FindRegionData(gn.id)
+    for _, gn in ipairs(self.mapTiles_ or GAME_NODES) do
+        local rd = self:_FindRegionData(gn.region_id or gn.id)
         if rd and rd.resources then
-            local sx, sy = self:_W2S(gn.pos[1], gn.pos[2], mx, my, mw, mh)
+            local pos = self:_GetNodePos(gn)
+            local sx, sy = self:_W2S(pos[1], pos[2], mx, my, mw, mh)
             local offsetX = 0
             local iconSize = math.max(8, math.min(12, 6 + self.zoom_ * 1.0))
             nvgFontFace(nvg, "sans"); nvgFontSize(nvg, iconSize)
@@ -771,17 +785,46 @@ function MapWidget:_DrawResourceLayer(nvg, mx, my, mw, mh)
     end
 end
 
+function MapWidget:_GetNodePos(gn)
+    if gn.pos then return gn.pos end
+    -- axial hex → 归一化世界坐标。保持宏观地图在欧洲底图内居中。
+    local q, r = gn.q or 0, gn.r or 0
+    return {
+        0.50 + q * 0.055 + r * 0.028,
+        0.46 + r * 0.072,
+    }
+end
+
+function MapWidget:_GetNodePoly(gn)
+    if gn.poly then return gn.poly end
+    local pos = self:_GetNodePos(gn)
+    local radius = gn.region_id and 0.032 or 0.028
+    local poly = {}
+    for i = 0, 5 do
+        local a = PI / 6 + i * PI / 3
+        table.insert(poly, pos[1] + math.cos(a) * radius)
+        table.insert(poly, pos[2] + math.sin(a) * radius)
+    end
+    return poly
+end
+
 --- 绘制游戏节点（§8.5 节点类型视觉）
 function MapWidget:_DrawGameNode(nvg, gn, mx, my, mw, mh)
-    local rd = self:_FindRegionData(gn.id)
+    local rd = self:_FindRegionData(gn.region_id or gn.id)
     local isSel = (self.selectedNodeId_ == gn.id)
     local isHov = (self.hoveredNodeId_ == gn.id)
-    local sx, sy = self:_W2S(gn.pos[1], gn.pos[2], mx, my, mw, mh)
+    local pos = self:_GetNodePos(gn)
+    local sx, sy = self:_W2S(pos[1], pos[2], mx, my, mw, mh)
 
-    local nt = NODE_TYPES[gn.nodeType] or NODE_TYPES.mine
+    local nodeType = gn.nodeType or gn.type or "strategic"
+    local nt = NODE_TYPES[nodeType] or NODE_TYPES.mine
     local baseR = nt.size
     local r = math.max(6, baseR * (0.6 + self.zoom_ * 0.15))
     local nfill = self:_GetNodeFill(rd, isSel, isHov)
+    if gn.controller then
+        local cc = FACTION_COLORS[gn.controller] or FACTION_COLORS.contested
+        nfill = { cc[1], cc[2], cc[3], isSel and 255 or 220 }
+    end
 
     if self.zoom_ < 2.5 then
         local dotR = isSel and 7 or (isHov and 6 or math.max(4, self.zoom_ * 2.2))
@@ -809,7 +852,7 @@ function MapWidget:_DrawGameNode(nvg, gn, mx, my, mw, mh)
     end
 
     -- 节点形状
-    self:_DrawNodeShape(nvg, sx, sy, r, gn.nodeType)
+    self:_DrawNodeShape(nvg, sx, sy, r, nodeType)
     nvgFillColor(nvg, nvgRGBA(nfill[1], nfill[2], nfill[3], nfill[4]))
     nvgFill(nvg)
 
@@ -825,7 +868,7 @@ function MapWidget:_DrawGameNode(nvg, gn, mx, my, mw, mh)
         nvgFontSize(nvg, math.min(r * 1.0, 18))
         nvgTextAlign(nvg, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)
         nvgFillColor(nvg, nvgRGBA(255, 255, 255, 230))
-        nvgText(nvg, sx, sy, gn.icon)
+        nvgText(nvg, sx, sy, gn.icon or "")
     end
 
     -- 节点状态叠加图标（右上角 12pt）
@@ -1117,9 +1160,10 @@ function MapWidget:OnPointerMove(event)
         -- 悬停检测（节点）
         local mx, my, mw, mh = self:_MapAreaHit()
         self.hoveredNodeId_ = nil
-        for i = #GAME_NODES, 1, -1 do
-            if self:_HitPoly(px, py, GAME_NODES[i].poly, mx, my, mw, mh) then
-                self.hoveredNodeId_ = GAME_NODES[i].id
+        local nodes = self.mapTiles_ or GAME_NODES
+        for i = #nodes, 1, -1 do
+            if self:_HitPoly(px, py, self:_GetNodePoly(nodes[i]), mx, my, mw, mh) then
+                self.hoveredNodeId_ = nodes[i].id
                 break
             end
         end
@@ -1133,11 +1177,12 @@ function MapWidget:OnPointerUp(event)
     if not self.dragMoved_ then
         local px, py = event.x, event.y
         local mx, my, mw, mh = self:_MapAreaHit()
-        for i = #GAME_NODES, 1, -1 do
-            if self:_HitPoly(px, py, GAME_NODES[i].poly, mx, my, mw, mh) then
-                self.selectedNodeId_ = GAME_NODES[i].id
+        local nodes = self.mapTiles_ or GAME_NODES
+        for i = #nodes, 1, -1 do
+            if self:_HitPoly(px, py, self:_GetNodePoly(nodes[i]), mx, my, mw, mh) then
+                self.selectedNodeId_ = nodes[i].id
                 if self.onRegionSelect_ then
-                    self.onRegionSelect_(GAME_NODES[i].id)
+                    self.onRegionSelect_(nodes[i].id)
                 end
                 event:StopPropagation()
                 return

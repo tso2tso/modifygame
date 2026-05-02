@@ -1,0 +1,862 @@
+
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;500;700&family=Noto+Sans+SC:wght@300;400;500&display=swap');
+  
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  
+  html { scroll-behavior: smooth; }
+
+  .guide-root {
+    font-family: 'Noto Sans SC', var(--font-sans), sans-serif;
+    color: var(--color-text-primary);
+    max-width: min(1440px, 100%);
+    font-size: 12px;
+    line-height: 1.45;
+  }
+
+  .guide-board {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 10px;
+    counter-reset: guide-section;
+  }
+
+  .guide-section {
+    scroll-margin-top: 72px;
+    counter-increment: guide-section;
+    width: 100%;
+    margin: 0;
+    padding: 10px;
+    background: var(--color-background-secondary);
+    border: 0.5px solid var(--color-border-tertiary);
+    border-left: 4px solid var(--accent, var(--color-border-secondary));
+    border-radius: var(--border-radius-lg);
+    box-shadow: 0 1px 0 rgba(0, 0, 0, 0.03);
+  }
+  .guide-section:last-of-type {
+    margin-bottom: 0;
+  }
+
+  .guide-section:nth-child(1) { --accent: #0E8F73; }
+  .guide-section:nth-child(2) { --accent: #0C66A8; }
+  .guide-section:nth-child(3) { --accent: #7B4DB8; }
+  .guide-section:nth-child(4) { --accent: #8C6A13; }
+  .guide-section:nth-child(5) { --accent: #3E7A14; }
+  .guide-section:nth-child(6) { --accent: #B84E2E; }
+  .guide-section:nth-child(7) { --accent: #5865A6; }
+  .guide-section:nth-child(8) { --accent: #8F4A82; }
+  .guide-section:nth-child(9) { --accent: #A85F14; }
+  .guide-section:nth-child(10) { --accent: #4F46A6; }
+
+  .guide-header {
+    padding: 0.7rem 0 0.55rem;
+    margin-bottom: 0.65rem;
+    border-bottom: 1px solid var(--color-border-tertiary);
+  }
+
+  .guide-heading {
+    min-width: 0;
+  }
+
+  .guide-title {
+    font-family: 'Noto Serif SC', var(--font-serif), serif;
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    color: var(--color-text-primary);
+    margin-bottom: 4px;
+  }
+
+  .guide-sub {
+    font-size: 12px;
+    color: var(--color-text-secondary);
+    font-weight: 300;
+  }
+
+  .era-bar {
+    display: flex;
+    gap: 0;
+    margin-top: 0;
+    border-radius: var(--border-radius-md);
+    overflow: hidden;
+    border: 0.5px solid var(--color-border-tertiary);
+    font-size: 11px;
+  }
+
+  .era-seg {
+    flex: 1;
+    padding: 4px;
+    text-align: center;
+    font-size: 11px;
+    font-weight: 500;
+    font-family: inherit;
+    border: none;
+    border-radius: 0;
+    border-right: 0.5px solid var(--color-border-tertiary);
+    cursor: pointer;
+    transition: opacity 0.15s;
+  }
+  .era-seg:last-child { border-right: none; }
+  .era-seg.peace { background: #E1F5EE; color: #085041; }
+  .era-seg.war1 { background: #FAEEDA; color: #633806; }
+  .era-seg.inter { background: #EAF3DE; color: #27500A; }
+  .era-seg.war2 { background: #FAECE7; color: #4A1B0C; }
+  .era-seg.post { background: #EEEDFE; color: #26215C; }
+  .era-seg.socialist { background: #F2E6E3; color: #6D231C; }
+  .era-seg.siege { background: #E7E7E2; color: #34332F; }
+  .era-seg.modern { background: #E3F4F1; color: #0B554D; }
+  .era-seg:hover { opacity: 0.75; }
+
+  .section-title {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-family: 'Noto Serif SC', serif;
+    font-size: 15px;
+    font-weight: 500;
+    margin-bottom: 0.55rem;
+    padding-bottom: 5px;
+    border-bottom: 1px solid var(--color-border-tertiary);
+    color: var(--color-text-primary);
+  }
+
+  .section-title::before {
+    content: counter(guide-section, decimal-leading-zero);
+    flex: none;
+    min-width: 24px;
+    padding: 1px 5px;
+    border-radius: 999px;
+    background: var(--accent);
+    color: #fff;
+    font-family: 'Noto Sans SC', sans-serif;
+    font-size: 10px;
+    font-weight: 500;
+    line-height: 1.35;
+    text-align: center;
+  }
+
+  .card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+    gap: 6px;
+    margin-bottom: 0.65rem;
+  }
+
+  .card {
+    background: var(--color-background-primary);
+    border: 1px solid var(--color-border-tertiary);
+    border-radius: var(--border-radius-md);
+    padding: 8px 9px;
+  }
+
+  .card-label {
+    font-size: 10px;
+    color: var(--color-text-secondary);
+    font-weight: 400;
+    margin-bottom: 2px;
+    text-transform: none;
+  }
+
+  .card-value {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--color-text-primary);
+    margin-bottom: 3px;
+  }
+
+  .card-desc {
+    font-size: 11px;
+    color: var(--color-text-secondary);
+    line-height: 1.45;
+  }
+
+  .metric-card {
+    background: var(--color-background-primary);
+    border: 1px solid var(--color-border-tertiary);
+    border-radius: var(--border-radius-md);
+    padding: 7px 8px;
+  }
+
+  .info-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    padding: 5px 0;
+    border-bottom: 0.5px solid var(--color-border-tertiary);
+    font-size: 11px;
+    gap: 8px;
+  }
+  .info-row:last-child { border-bottom: none; }
+
+  .info-key {
+    color: var(--color-text-secondary);
+    flex-shrink: 0;
+    font-weight: 400;
+  }
+
+  .info-val {
+    color: var(--color-text-primary);
+    text-align: right;
+    line-height: 1.4;
+  }
+
+  .badge {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 10px;
+    font-size: 10px;
+    font-weight: 500;
+  }
+
+  .badge-teal { background: #E1F5EE; color: #085041; }
+  .badge-amber { background: #FAEEDA; color: #633806; }
+  .badge-coral { background: #FAECE7; color: #4A1B0C; }
+  .badge-purple { background: #EEEDFE; color: #26215C; }
+  .badge-green { background: #EAF3DE; color: #27500A; }
+  .badge-blue { background: #E6F1FB; color: #0C447C; }
+
+  .tip-box {
+    background: var(--color-background-primary);
+    border: 1px solid var(--color-border-tertiary);
+    border-left: 3px solid var(--accent, var(--color-border-secondary));
+    border-radius: 0 var(--border-radius-md) var(--border-radius-md) 0;
+    padding: 7px 9px;
+    font-size: 11px;
+    color: var(--color-text-secondary);
+    line-height: 1.45;
+    margin: 0.55rem 0;
+  }
+
+  .warn-box {
+    background: #FAEEDA;
+    border: 1px solid #E5C48C;
+    border-left: 3px solid #BA7517;
+    border-radius: 0 var(--border-radius-md) var(--border-radius-md) 0;
+    padding: 7px 9px;
+    font-size: 11px;
+    color: #633806;
+    line-height: 1.45;
+    margin: 0.55rem 0;
+  }
+
+  .tech-branch {
+    margin: 0.45rem 0;
+  }
+
+  .tech-line {
+    font-size: 12px;
+    font-weight: 500;
+    margin-bottom: 4px;
+    color: var(--color-text-primary);
+  }
+
+  .tech-options {
+    display: grid;
+    grid-template-columns: 1fr 20px 1fr;
+    gap: 5px;
+    margin-bottom: 0.55rem;
+  }
+
+  .tech-option {
+    background: var(--color-background-primary);
+    border: 1px solid var(--color-border-tertiary);
+    border-radius: var(--border-radius-md);
+    padding: 7px 8px;
+    font-size: 11px;
+    line-height: 1.4;
+    position: relative;
+  }
+
+  .tech-option-name {
+    font-weight: 500;
+    font-size: 11px;
+    margin-bottom: 2px;
+    color: var(--color-text-primary);
+  }
+
+  .tech-option-desc {
+    color: var(--color-text-secondary);
+    font-size: 10px;
+  }
+
+  .vs-divider {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    color: var(--color-text-secondary);
+    position: relative;
+  }
+
+  .history-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11px;
+    overflow: hidden;
+    border-radius: var(--border-radius-md);
+  }
+
+  .history-table th {
+    font-size: 11px;
+    color: var(--color-text-secondary);
+    font-weight: 400;
+    text-align: left;
+    padding: 4px 6px;
+    border-bottom: 0.5px solid var(--color-border-tertiary);
+  }
+
+  .history-table td {
+    padding: 5px 6px;
+    border-bottom: 0.5px solid var(--color-border-tertiary);
+    vertical-align: top;
+    line-height: 1.35;
+  }
+
+  .history-table tr:last-child td { border-bottom: none; }
+
+  .collab-row-hero td { background: #EAF3DE; }
+  .collab-row-resist td { background: #E1F5EE; }
+  .collab-row-neutral td { background: var(--color-background-secondary); }
+  .collab-row-gray td { background: #FAEEDA; }
+  .collab-row-bad td { background: #FAECE7; }
+
+  .dot-row {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+    margin: 4px 0;
+  }
+
+  .dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    border: 0.5px solid var(--color-border-secondary);
+    background: var(--color-background-secondary);
+  }
+
+  .dot.filled { background: var(--color-text-primary); border-color: var(--color-text-primary); }
+
+  .member-card {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .role-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 5px;
+  }
+
+  .role-card {
+    background: var(--color-background-primary);
+    border: 1px solid var(--color-border-tertiary);
+    border-radius: var(--border-radius-md);
+    padding: 7px 8px;
+  }
+
+  .role-name {
+    font-size: 11px;
+    font-weight: 500;
+    margin-bottom: 2px;
+  }
+
+  .role-attrs {
+    font-size: 10px;
+    color: var(--color-text-secondary);
+    margin-bottom: 2px;
+  }
+
+  .role-effect {
+    font-size: 10px;
+    color: var(--color-text-secondary);
+  }
+
+  .fit-indicator {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-right: 4px;
+  }
+  .fit-full { background: #1D9E75; }
+  .fit-half { background: #BA7517; }
+  .fit-bad { background: #D85A30; }
+  .fit-empty { background: #E24B4A; }
+
+  .timeline {
+    position: relative;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 6px;
+    padding-left: 0;
+  }
+
+  .timeline::before {
+    content: none;
+  }
+
+  .tl-item {
+    position: relative;
+    margin-bottom: 0;
+    padding: 7px 8px;
+    background: var(--color-background-primary);
+    border: 1px solid var(--color-border-tertiary);
+    border-radius: var(--border-radius-md);
+    scroll-margin-top: 72px;
+  }
+
+  .tl-dot {
+    display: none;
+  }
+
+  .tl-era {
+    font-size: 11px;
+    font-weight: 500;
+    margin-bottom: 4px;
+  }
+
+  .tl-title {
+    font-size: 12px;
+    font-weight: 500;
+    margin-bottom: 3px;
+    font-family: 'Noto Serif SC', serif;
+  }
+
+  .tl-tips {
+    list-style: none;
+    font-size: 11px;
+    color: var(--color-text-secondary);
+    line-height: 1.45;
+  }
+
+  .tl-tips li::before {
+    content: '— ';
+    color: var(--color-text-tertiary);
+  }
+
+  .guide-section [style*="margin-top:1rem"],
+  .guide-section [style*="margin-top:1.25rem"] {
+    margin-top: 0.55rem !important;
+  }
+
+  .guide-section [style*="margin-bottom: 1rem"],
+  .guide-section [style*="margin-bottom:1rem"],
+  .guide-section [style*="margin-bottom: 1.25rem"],
+  .guide-section [style*="margin-bottom:1.25rem"] {
+    margin-bottom: 0.55rem !important;
+  }
+
+  .guide-section [style*="padding: 9px 14px"],
+  .guide-section [style*="padding:9px 14px"],
+  .guide-section [style*="padding: 12px 14px"],
+  .guide-section [style*="padding:12px 14px"] {
+    padding: 5px 8px !important;
+  }
+
+  .guide-section [style*="font-size:13px"] {
+    font-size: 11px !important;
+  }
+
+  .guide-section [style*="gap: 6px"],
+  .guide-section [style*="gap:6px"],
+  .guide-section [style*="gap:10px"],
+  .guide-section [style*="gap: 10px"] {
+    gap: 5px !important;
+  }
+
+  @media (min-width: 820px) {
+    .guide-board {
+      grid-template-columns: 1fr 1fr;
+    }
+  }
+
+  @media (min-width: 1080px) {
+    .guide-board {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+    .guide-root {
+      font-size: 11px;
+    }
+    .timeline {
+      grid-template-columns: 1fr;
+    }
+    .card-grid {
+      grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+    }
+  }
+
+  @media (max-width: 819px) {
+    .guide-header {
+      gap: 8px;
+    }
+  }
+</style>
+
+<div class="guide-root">
+  <h2 class="sr-only" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);">萨拉热窝王朝——玩家攻略手册</h2>
+
+  <div class="guide-header">
+    <div class="guide-heading">
+      <div class="guide-title">萨拉热窝王朝 · 玩家攻略</div>
+      <div class="guide-sub">1904 — 2014 · 家族经营 · 时代事件 · 多路线胜利</div>
+    </div>
+  </div>
+
+  <main class="guide-board">
+  <section id="sec-start" class="guide-section">
+    <div class="section-title">开局节奏</div>
+    <div class="card-grid">
+      <div class="card">
+        <div class="card-label">行动点 AP</div>
+        <div class="card-value">每季最稀缺</div>
+        <div class="card-desc">多数主动操作都要花 AP。每季建议先确定主目标：经营、研发、扩张或防务。</div>
+      </div>
+      <div class="card">
+        <div class="card-label">季度流程</div>
+        <div class="card-value">先结算再行动</div>
+        <div class="card-desc">收入、工资、利息和事件会先结算。处理事件后，再把 AP 投到最紧急的方向。</div>
+      </div>
+      <div class="card">
+        <div class="card-label">胜利路线</div>
+        <div class="card-value">可以混合推进</div>
+        <div class="card-desc">经济、军事、科技、文化都会通向终局。前期不用锁死路线，但要避免资源过度分散。</div>
+      </div>
+      <div class="card">
+        <div class="card-label">失败风险</div>
+        <div class="card-value">现金流断裂</div>
+        <div class="card-desc">贷款压力和负资产会持续削弱经营。出现警告时，应优先稳定现金流。</div>
+      </div>
+    </div>
+
+    <div class="warn-box">现金不是永远安全的资产。战争、通胀、监管和事件都会改变钱的价值，黄金、矿山、影响力和武装有时比账面现金更重要。</div>
+    <div class="tip-box">部分操作不是开局常驻：科技、影响力里程碑、情报行动、历史事件和时代章节都会逐步打开新的选择。遇到金色边框或带条件提示的选项，通常表示已有路线或资源达标。</div>
+
+    <div class="section-title" style="margin-top:1.25rem">四类主动决策</div>
+    <div style="background: var(--color-background-primary); border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-lg); overflow: hidden;">
+      <div class="info-row" style="padding: 9px 14px;">
+        <span class="info-key">情报行动</span>
+        <span class="info-val" style="max-width:380px">看清对手、削弱威胁，适合扩张前探路</span>
+      </div>
+      <div class="info-row" style="padding: 9px 14px;">
+        <span class="info-key">科技研发</span>
+        <span class="info-val" style="max-width:380px">启动长期成长，一次选择会影响后续很多年</span>
+      </div>
+      <div class="info-row" style="padding: 9px 14px;">
+        <span class="info-key">政治外交</span>
+        <span class="info-val" style="max-width:380px">缓和 AI 态度，争取安全窗口</span>
+      </div>
+      <div class="info-row" style="padding: 9px 14px;">
+        <span class="info-key">资产交易</span>
+        <span class="info-val" style="max-width:380px">买卖资产，也可在必要时采取强硬手段</span>
+      </div>
+    </div>
+  </section>
+
+  <section id="sec-panel" class="guide-section">
+    <div class="section-title">主界面读法</div>
+    <div class="card-grid">
+      <div class="card">
+        <div class="card-label">事件流</div>
+        <div class="card-value">先看这里</div>
+        <div class="card-desc">主线、支线、警告和战斗结果都会在这里出现。历史事件往往会改变之后几年的经营环境。</div>
+      </div>
+      <div class="card">
+        <div class="card-label">焦点卡片</div>
+        <div class="card-value">矿山状态</div>
+        <div class="card-desc">产出、利用率、士气、维护费能快速判断矿山是否健康。异常时优先检查工人和投资。</div>
+      </div>
+      <div class="card">
+        <div class="card-label">季节概览</div>
+        <div class="card-value">看趋势</div>
+        <div class="card-desc">现金流、负债、库存、民心、影响力要连着看。单季亏损不可怕，趋势失控才危险。</div>
+      </div>
+      <div class="card">
+        <div class="card-label">结束回合</div>
+        <div class="card-value">确认计划</div>
+        <div class="card-desc">点下一季前先确认：利息能否承受、事件是否处理、AP 是否用在真正关键的地方。</div>
+      </div>
+    </div>
+    <div class="tip-box">新手建议：每季先处理事件，再查看现金流和警告，最后分配 AP。优先处理当前最影响经营的问题。</div>
+  </section>
+
+  <section id="sec-family" class="guide-section">
+    <div class="section-title">家族与岗位</div>
+    <div class="card-grid" style="grid-template-columns: repeat(5, 1fr); gap: 6px;">
+      <div class="metric-card" style="text-align:center">
+        <div class="card-label" style="text-align:center">管理</div>
+        <div style="font-size:13px;font-weight:500">经营</div>
+      </div>
+      <div class="metric-card" style="text-align:center">
+        <div class="card-label" style="text-align:center">谋略</div>
+        <div style="font-size:13px;font-weight:500">对抗</div>
+      </div>
+      <div class="metric-card" style="text-align:center">
+        <div class="card-label" style="text-align:center">魅力</div>
+        <div style="font-size:13px;font-weight:500">民心</div>
+      </div>
+      <div class="metric-card" style="text-align:center">
+        <div class="card-label" style="text-align:center">学识</div>
+        <div style="font-size:13px;font-weight:500">研发</div>
+      </div>
+      <div class="metric-card" style="text-align:center">
+        <div class="card-label" style="text-align:center">野心</div>
+        <div style="font-size:13px;font-weight:500">扩张</div>
+      </div>
+    </div>
+
+    <div class="section-title" style="margin-top:1.25rem">岗位倾向</div>
+    <div class="role-grid">
+      <div class="role-card">
+        <div class="role-name">矿业总监</div>
+        <div class="role-attrs">管理 / 学识</div>
+        <div class="role-effect">稳产与升级</div>
+      </div>
+      <div class="role-card">
+        <div class="role-name">军务主管</div>
+        <div class="role-attrs">谋略 / 野心</div>
+        <div class="role-effect">护卫与突袭</div>
+      </div>
+      <div class="role-card">
+        <div class="role-name">财务总监</div>
+        <div class="role-attrs">管理 / 谋略</div>
+        <div class="role-effect">贷款与扩张</div>
+      </div>
+      <div class="role-card">
+        <div class="role-name">文化顾问</div>
+        <div class="role-attrs">魅力 / 学识</div>
+        <div class="role-effect">影响力路线</div>
+      </div>
+      <div class="role-card">
+        <div class="role-name">科技顾问</div>
+        <div class="role-attrs">学识 / 野心</div>
+        <div class="role-effect">长期研发</div>
+      </div>
+      <div class="role-card">
+        <div class="role-name">外交总监</div>
+        <div class="role-attrs">魅力 / 谋略</div>
+        <div class="role-effect">缓和关系</div>
+      </div>
+    </div>
+
+    <div class="tip-box">岗位不追求完美才开始用。前期“有人负责”通常比空着更稳；中后期再慢慢换成高适配成员。</div>
+  </section>
+
+  <section id="sec-industry" class="guide-section">
+    <div class="section-title">产业与资产</div>
+    <div class="card-grid">
+      <div class="card">
+        <div class="card-label">矿山升级</div>
+        <div class="card-value">越早越省心</div>
+        <div class="card-desc">矿山是早期现金流核心。和平期投资矿山，通常比战时临时补课更从容。</div>
+      </div>
+      <div class="card">
+        <div class="card-label">探矿开发</div>
+        <div class="card-value">提前排队</div>
+        <div class="card-desc">新矿脉需要等待和资金。主矿进入衰退前，最好提前准备替代产能。</div>
+      </div>
+      <div class="card">
+        <div class="card-label">工人与士气</div>
+        <div class="card-value">产能不是免费</div>
+        <div class="card-desc">工人越多产出越高，但工资和士气会反过来影响经营稳定。</div>
+      </div>
+      <div class="card">
+        <div class="card-label">配额生产</div>
+        <div class="card-value">特定阶段出现</div>
+        <div class="card-desc">制度转型期或相关事件中会出现配额、超额生产与置换选择。通常需要政治关系或影响力支持。</div>
+      </div>
+    </div>
+
+    <div class="section-title" style="margin-top:1rem">黄金策略</div>
+    <div class="tip-box">黄金可以手动出售，也可以设置自动出售。和平期换现金便于扩张；战时和高通胀时期，保留部分黄金可降低现金贬值风险。</div>
+    <div class="warn-box">不要只看“本季净利润”。矿山等级、库存结构、工人士气、配额要求和未来事件，都会影响长期稳定性。贸易类地图信息通常也与矿山规模和资产基础有关。</div>
+  </section>
+
+  <section id="sec-market" class="guide-section">
+    <div class="section-title">市场与金融</div>
+    <div class="card-grid">
+      <div class="card">
+        <div class="card-label">股票</div>
+        <div class="card-value">事件与经营联动</div>
+        <div class="card-desc">不同板块会受时代事件影响；持股达到一定规模后，还会触发矿业、铁路、军工、金融等公司协同。</div>
+      </div>
+      <div class="card">
+        <div class="card-label">贷款</div>
+        <div class="card-value">杠杆扩张</div>
+        <div class="card-desc">贷款能加速发展，也会放大错误。负债高时，利息、清算和禁止续贷都会更麻烦。</div>
+      </div>
+      <div class="card">
+        <div class="card-label">商品</div>
+        <div class="card-value">价格信号</div>
+        <div class="card-desc">黄金、白银与通胀变化，是判断该持币、持货还是投资的重要参考。</div>
+      </div>
+      <div class="card">
+        <div class="card-label">黑市</div>
+        <div class="card-value">事件 / 战时入口</div>
+        <div class="card-desc">黑市多出现在物资短缺、管制或战争事件中。可处理补给和资金问题，但会提高监管与声望压力。</div>
+      </div>
+    </div>
+    <div class="warn-box">监管压力会受到声望、合法性、灰色收入和黑市交易等因素影响。相关检查通常由事件或压力累积触发，使用高收益路线时需要保留现金与关系缓冲。</div>
+  </section>
+
+  <section id="sec-military" class="guide-section">
+    <div class="section-title">武装与安全</div>
+    <div class="card-grid">
+      <div class="card">
+        <div class="card-label">护卫</div>
+        <div class="card-value">保护资产</div>
+        <div class="card-desc">护卫不只是进攻工具。治安下降、AI 扩张、战时事件都会考验你的保护能力。</div>
+      </div>
+      <div class="card">
+        <div class="card-label">编队</div>
+        <div class="card-value">战力成形</div>
+        <div class="card-desc">人员、装备、补给要配套。单纯增加人数，未必能形成有效战力。</div>
+      </div>
+      <div class="card">
+        <div class="card-label">外交</div>
+        <div class="card-value">降低冲突风险</div>
+        <div class="card-desc">AI 态度、协议和地区控制会影响冲突概率。外交投入可以减少不必要的作战压力。</div>
+      </div>
+      <div class="card">
+        <div class="card-label">武装突袭</div>
+        <div class="card-value">资产交易入口</div>
+        <div class="card-desc">对抗行动通常需要 AP、资金和足够武装基础。执行前应确认目标地区和 AI 态度变化。</div>
+      </div>
+    </div>
+
+    <div class="section-title" style="margin-top:1rem">装备系统</div>
+    <div style="display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; margin-bottom: 1rem;">
+      <div class="metric-card" style="text-align:center; padding: 8px;">
+        <div style="font-size:11px;color:var(--color-text-secondary)">T1</div>
+        <div style="font-size:12px;font-weight:500">步枪</div>
+      </div>
+      <div class="metric-card" style="text-align:center; padding: 8px;">
+        <div style="font-size:11px;color:var(--color-text-secondary)">T2</div>
+        <div style="font-size:12px;font-weight:500">轻炮</div>
+      </div>
+      <div class="metric-card" style="text-align:center; padding: 8px;">
+        <div style="font-size:11px;color:var(--color-text-secondary)">T3</div>
+        <div style="font-size:12px;font-weight:500">重炮</div>
+      </div>
+      <div class="metric-card" style="text-align:center; padding: 8px;">
+        <div style="font-size:11px;color:var(--color-text-secondary)">T4</div>
+        <div style="font-size:12px;font-weight:500">机甲</div>
+      </div>
+      <div class="metric-card" style="text-align:center; padding: 8px;">
+        <div style="font-size:11px;color:var(--color-text-secondary)">T5</div>
+        <div style="font-size:12px;font-weight:500">精锐</div>
+      </div>
+      <div class="metric-card" style="text-align:center; padding: 8px;">
+        <div style="font-size:11px;color:var(--color-text-secondary)">T6</div>
+        <div style="font-size:12px;font-weight:500">套件</div>
+      </div>
+    </div>
+
+    <div class="tip-box">高阶装备依赖军事或工业相关科技与生产能力。未解锁前，优先保持补给、编队和士气稳定。</div>
+  </section>
+
+  <section id="sec-world" class="guide-section">
+    <div class="section-title">世界与地图</div>
+    <div class="card-grid">
+      <div class="card"><div class="card-label">矿区</div><div class="card-value">资源命脉</div><div class="card-desc">矿产、治安、控制度决定你的早期根基。</div></div>
+      <div class="card"><div class="card-label">工业区</div><div class="card-value">生产转型</div><div class="card-desc">装备、工人、加工能力会在战争和重建期更重要。</div></div>
+      <div class="card"><div class="card-label">首都区</div><div class="card-value">政治中心</div><div class="card-desc">影响力、外交和历史选择通常会在这里产生更明显的影响。</div></div>
+      <div class="card"><div class="card-label">Hex 模块</div><div class="card-value">占领更清晰</div><div class="card-desc">关键地点以宏观六边形模块呈现。模块可被占据、吸纳或清算，并汇总回经营区域。</div></div>
+      <div class="card"><div class="card-label">外贸窗口</div><div class="card-value">事件触发</div><div class="card-desc">外资考察、技术引进和重建合作多由历史或地区事件开启，也可能带来外资渗透和审查压力。</div></div>
+      <div class="card"><div class="card-label">图层解锁</div><div class="card-value">按条件开放</div><div class="card-desc">贸易、军事、情报等地图信息会随矿山规模、护卫基础或侦察行动逐步显示。</div></div>
+    </div>
+
+    <div class="section-title" style="margin-top:1rem">地图判断</div>
+    <div class="tip-box">地图缩放后会显示不同层级的信息。情报等级越高，越容易提前看到事件预警和 AI 行动倾向。</div>
+    <div class="warn-box">AI 会根据地区价值、你的控制度和治安情况选择扩张目标。边缘地区失守往往不是突然发生的，地图会提前给出信号。</div>
+  </section>
+
+  <section id="sec-tech" class="guide-section">
+    <div class="section-title">科技路线</div>
+    <div class="tip-box" style="margin-bottom:1rem">科技是慢收益。同一时间通常只能专心推进一项，越早确定方向，后面的复利越明显。</div>
+
+    <div class="tech-branch">
+      <div class="tech-line"><span class="badge badge-teal" style="margin-right:8px">采矿线</span>稳现金流 · 提升矿山效率</div>
+      <div class="tech-options">
+        <div class="tech-option">
+          <div class="tech-option-name">适合谁</div>
+          <div class="tech-option-desc">想稳住前期经济、减少矿区事故、长期吃矿山收益的玩家。</div>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--color-text-tertiary)">→</div>
+        <div class="tech-option">
+          <div class="tech-option-name">注意</div>
+          <div class="tech-option-desc">矿山收益会受工人、治安和通胀影响，科技需要与运营一起配合。</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="tech-branch">
+      <div class="tech-line"><span class="badge badge-amber" style="margin-right:8px">经济线</span>贷款压力 · 贸易金融</div>
+      <div class="tech-options">
+        <div class="tech-option">
+          <div class="tech-option-name">适合谁</div>
+          <div class="tech-option-desc">喜欢扩张资产、操作股票、用现金流滚雪球的玩家。</div>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--color-text-tertiary)">→</div>
+        <div class="tech-option">
+          <div class="tech-option-name">注意</div>
+          <div class="tech-option-desc">贸易、金融网络和证券相关收益通常依赖经济线推进，也更容易与监管压力产生关联。</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="tech-branch">
+      <div class="tech-line"><span class="badge badge-coral" style="margin-right:8px">军事线</span>护产能力 · 地区对抗</div>
+      <div class="tech-options">
+        <div class="tech-option">
+          <div class="tech-option-name">适合谁</div>
+          <div class="tech-option-desc">想在战时保资产、主动争夺控制度、压制地方 AI 的玩家。</div>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--color-text-tertiary)">→</div>
+        <div class="tech-option">
+          <div class="tech-option-name">注意</div>
+          <div class="tech-option-desc">强武装能解决麻烦，也会带来补给、态度和战后评价压力。</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="tech-branch">
+      <div class="tech-line"><span class="badge badge-purple" style="margin-right:8px">文化线</span>影响力 · 民心 · 研发</div>
+      <div class="tech-options">
+        <div class="tech-option">
+          <div class="tech-option-name">适合谁</div>
+          <div class="tech-option-desc">想解锁更多事件选项、稳住民心，并通过教育、媒体和声望积累长期优势的玩家。</div>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--color-text-tertiary)">→</div>
+        <div class="tech-option">
+          <div class="tech-option-name">注意</div>
+          <div class="tech-option-desc">文化、教育和技术官僚相关选择多由影响力、学识型岗位、制度期事件或文化资产打开。</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="sec-history" class="guide-section">
+    <div class="section-title">历史事件</div>
+    <div style="display: flex; flex-direction: column; gap: 6px; margin-bottom: 1rem;">
+      <div style="display:flex;align-items:center;gap:10px;padding:9px 14px;background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);font-size:13px;"><span class="badge badge-amber">1914</span><span>萨拉热窝枪声，战争风险急升</span></div>
+      <div style="display:flex;align-items:center;gap:10px;padding:9px 14px;background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);font-size:13px;"><span class="badge badge-green">1929</span><span>大萧条冲击，金融与就业承压</span></div>
+      <div style="display:flex;align-items:center;gap:10px;padding:9px 14px;background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);font-size:13px;"><span class="badge badge-coral">1941</span><span>旧秩序瓦解，工厂与人员受威胁</span></div>
+      <div style="display:flex;align-items:center;gap:10px;padding:9px 14px;background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);font-size:13px;"><span class="badge badge-purple">1984</span><span>城市窗口期，文化、基建与对外合作迎来机会</span></div>
+      <div style="display:flex;align-items:center;gap:10px;padding:9px 14px;background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);font-size:13px;"><span class="badge badge-blue">2008</span><span>全球金融危机，外资与地产波动</span></div>
+    </div>
+
+    <div class="section-title">选择的后果</div>
+    <table class="history-table">
+      <thead><tr><th>路线倾向</th><th>短期收益</th><th>长期风险</th></tr></thead>
+      <tbody>
+        <tr class="collab-row-hero"><td><strong style="font-weight:500">救济 / 抵抗</strong></td><td>民心与声望更稳</td><td>需要更强现金流和武装底子</td></tr>
+        <tr class="collab-row-neutral"><td><strong style="font-weight:500">中立 / 观望</strong></td><td>风险较低，转向灵活</td><td>可能错过事件红利</td></tr>
+        <tr class="collab-row-gray"><td><strong style="font-weight:500">合作 / 灰色经营</strong></td><td>战时或管制期收益较快</td><td>战后评价、监管和民心压力更高</td></tr>
+      </tbody>
+    </table>
+    <div class="tip-box" style="margin-top:1rem">历史事件没有固定最优解。部分选项会要求足够的武装、影响力、现金、科技积累或特定路线倾向；未满足时通常不会显示，或只能选择较保守方案。</div>
+  </section>
+  </main>
+</div>

@@ -26,6 +26,10 @@ StockEngine.PRICE_CEIL      = 9999.0
 -- 历史最多保留 12 季（3 年），用于 UI 走势图
 StockEngine.HISTORY_KEEP    = 12
 
+local function clamp(value, minValue, maxValue)
+    return math.max(minValue, math.min(maxValue, value))
+end
+
 -- ============================================================================
 -- Box-Muller 变换：生成标准正态随机数 N(0, 1)
 -- Lua 标准库只给均匀分布，这里用经典方法转正态
@@ -176,6 +180,170 @@ function StockEngine.ApplyEventModifier(state, key, delta, duration, source)
     local stock = StockEngine.Find(state, key)
     if stock then
         StockEngine.InjectMod(stock, delta, duration, source)
+    end
+end
+
+--- 每季根据玩家实体经营对相关股票注入小幅基本面修正。
+--- 该修正走现有 event_mu_mods 管线，保持与历史事件同一套消费机制。
+---@param state table
+---@param report table|nil EconomyReport
+function StockEngine.ApplyOperationalDrift(state, report)
+    if not state or not state.stocks then return end
+
+    local function add(stockId, delta, source)
+        delta = clamp(delta or 0, -0.035, 0.035)
+        if math.abs(delta) < 0.002 then return end
+        StockEngine.ApplyEventModifier(state, stockId, delta, 1, source)
+    end
+
+    -- 矿业：矿山规模、等级和矿区控制度。
+    local activeMines, levelSum = 0, 0
+    for _, mine in ipairs(state.mines or {}) do
+        if mine.active ~= false then
+            activeMines = activeMines + 1
+            levelSum = levelSum + (mine.level or 1)
+        end
+    end
+    local mineControl = 0
+    for _, r in ipairs(state.regions or {}) do
+        if r.id == "mine_district" then
+            mineControl = r.control or 0
+            break
+        end
+    end
+    add("sarajevo_mining",
+        activeMines * 0.003 + levelSum * 0.0015 + (mineControl - 50) / 5000,
+        "operational_mining")
+
+    -- 军工：兵工厂、生产队列、战时压力。
+    local factoryLevel = state.military and state.military.factory and state.military.factory.level or 0
+    local queueSize = #(state.military and state.military.production_queue or {})
+    local warBonus = (state.flags and state.flags.at_war) and 0.006 or 0
+    add("military_industry", factoryLevel * 0.006 + queueSize * 0.004 + warBonus,
+        "operational_military")
+
+    -- 铁路/运输：铁路封锁直接利空，工业控制与贸易收入利好。
+    local GameState = require("game_state")
+    local blocked = GameState.GetModifierValue(state, "railway_blocked") > 0
+    local industrialControl = 0
+    for _, r in ipairs(state.regions or {}) do
+        if r.id == "industrial_town" then
+            industrialControl = r.control or 0
+            break
+        end
+    end
+    add("imperial_railway",
+        (industrialControl - 40) / 6000 + (blocked and -0.025 or 0.006),
+        "operational_railway")
+
+    -- 金融：贷款压力和监管压力偏负，金融网络收入偏正。
+    local totalDebt = GameState.CalcTotalDebt and GameState.CalcTotalDebt(state) or 0
+    local totalAssets = GameState.CalcTotalAssets and GameState.CalcTotalAssets(state) or 1
+    local leverage = totalDebt / math.max(1, totalAssets)
+    local regulation = (state.regulation_pressure or 0) / 100
+    local financeIncome = (state.finance_passive_income or 0) / 10000
+    add("austro_bank_trust", financeIncome - leverage * 0.018 - regulation * 0.012,
+        "operational_finance")
+
+    -- 贸易：贸易被动收入、外贸/铁路畅通、黑市压力。
+    local tradeIncome = (state.trade_passive_income or 0) / 10000
+    add("oriental_trading", tradeIncome + (blocked and -0.012 or 0.004) - regulation * 0.006,
+        "operational_trade")
+end
+
+--- 持股档位，用于公司协同和 UI 展示。
+---@param state table
+---@param stockId string
+---@return string level none|stake|influence|control
+---@return number shares
+function StockEngine.GetHoldingLevel(state, stockId)
+    local h = state.portfolio and state.portfolio.holdings and state.portfolio.holdings[stockId]
+    local shares = h and h.shares or 0
+    if shares >= 600 then return "control", shares end
+    if shares >= 300 then return "influence", shares end
+    if shares >= 100 then return "stake", shares end
+    return "none", shares
+end
+
+function StockEngine.GetHoldingLevelLabel(level)
+    if level == "control" then return "控股" end
+    if level == "influence" then return "重要持股" end
+    if level == "stake" then return "战略持股" end
+    return "金融持仓"
+end
+
+local function levelValue(level, stakeVal, influenceVal, controlVal)
+    if level == "control" then return controlVal end
+    if level == "influence" then return influenceVal end
+    if level == "stake" then return stakeVal end
+    return 0
+end
+
+local function clearCompanyModifiers(state)
+    local kept = {}
+    for _, mod in ipairs(state.modifiers or {}) do
+        if not (mod.id and mod.id:find("^company_")) then
+            table.insert(kept, mod)
+        end
+    end
+    state.modifiers = kept
+end
+
+--- 应用持股/控股带来的实体协同。每季重算，避免旧存档和长期堆叠。
+---@param state table
+function StockEngine.ApplyCompanySynergies(state)
+    if not state then return end
+    local GameState = require("game_state")
+    clearCompanyModifiers(state)
+    state.company_synergies = {}
+
+    local configs = {
+        {
+            stock = "sarajevo_mining",
+            label = "矿业供货协议",
+            target = "mine_output_mult",
+            values = { 0.015, 0.035, 0.060 },
+        },
+        {
+            stock = "military_industry",
+            label = "军工订单协同",
+            target = "military_industry_profit",
+            values = { 0.025, 0.060, 0.100 },
+        },
+        {
+            stock = "imperial_railway",
+            label = "铁路运输协同",
+            target = "income_mod",
+            values = { 0.008, 0.018, 0.030 },
+        },
+        {
+            stock = "austro_bank_trust",
+            label = "金融授信协同",
+            target = "tax_rate",
+            values = { -0.002, -0.005, -0.008 },
+        },
+        {
+            stock = "oriental_trading",
+            label = "贸易渠道协同",
+            target = "income_mod",
+            values = { 0.006, 0.014, 0.024 },
+        },
+    }
+
+    for _, cfg in ipairs(configs) do
+        local level, shares = StockEngine.GetHoldingLevel(state, cfg.stock)
+        local value = levelValue(level, cfg.values[1], cfg.values[2], cfg.values[3])
+        if value ~= 0 then
+            GameState.AddModifier(state, "company_" .. cfg.stock, cfg.target, value, 1)
+            table.insert(state.company_synergies, {
+                stock_id = cfg.stock,
+                label = cfg.label,
+                level = level,
+                shares = shares,
+                target = cfg.target,
+                value = value,
+            })
+        end
     end
 end
 

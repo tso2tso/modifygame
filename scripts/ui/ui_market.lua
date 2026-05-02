@@ -840,6 +840,9 @@ function MarketPage._StockRow(state, stock, index, accent)
     local holding = state.portfolio and state.portfolio.holdings
         and state.portfolio.holdings[stock.id]
     local holdingText = holding and string.format(" 持%d", holding.shares) or ""
+    local holdingLevel = StockEngine.GetHoldingLevel and StockEngine.GetHoldingLevel(state, stock.id) or "none"
+    local holdingLevelText = StockEngine.GetHoldingLevelLabel
+        and StockEngine.GetHoldingLevelLabel(holdingLevel) or ""
 
     return UI.Panel {
         width = "100%",
@@ -870,7 +873,9 @@ function MarketPage._StockRow(state, stock, index, accent)
                         alignItems = "center",
                         children = {
                             UI.Label {
-                                text = sectorLabel,
+                                text = holdingLevel ~= "none"
+                                    and (sectorLabel .. " · " .. holdingLevelText)
+                                    or sectorLabel,
                                 fontSize = F.label,
                                 fontColor = C.text_muted,
                                 pointerEvents = "none",

@@ -5,7 +5,7 @@
 
 local SaveLoad = {}
 
-local SAVE_VERSION = "0.4.0"
+local SAVE_VERSION = "0.6.0"
 local SAVE_DIR  = "saves"
 local SAVE_FILE = "saves/autosave.json"
 
@@ -222,6 +222,7 @@ function SaveLoad._SerializeState(state)
 
     -- 监管压力
     data.regulation_pressure = state.regulation_pressure or 0
+    data.special_content = state.special_content or {}
 
     -- 大国博弈系统
     data.europe = state.europe
@@ -271,6 +272,7 @@ function SaveLoad._SerializeState(state)
             ai_presence = r.ai_presence,
         })
     end
+    data.map_tiles = state.map_tiles or {}
 
     -- 矿山
     data.mines = {}
@@ -459,6 +461,16 @@ function SaveLoad._DeserializeState(data)
 
     -- 监管压力（v0.4.0 新增保存）
     data.regulation_pressure = data.regulation_pressure or 0
+    data.special_content = data.special_content or {
+        quota_active = false,
+        black_market_active = false,
+        foreign_trade_window = false,
+        technocrat_route = false,
+    }
+    data.special_content.quota_active = data.special_content.quota_active or false
+    data.special_content.black_market_active = data.special_content.black_market_active or false
+    data.special_content.foreign_trade_window = data.special_content.foreign_trade_window or false
+    data.special_content.technocrat_route = data.special_content.technocrat_route or false
 
     -- 大国博弈系统（v0.4.0 新增保存）
     if not data.europe then
@@ -469,6 +481,14 @@ function SaveLoad._DeserializeState(data)
     data.collaboration_score = data.collaboration_score or 0
     data.powers = data.powers or {}
     data.fronts = data.fronts or {}
+
+    -- 宏观 hex 地图模块（v0.6.0 新增，旧存档自动生成）
+    do
+        local MapTilesData = require("data.map_tiles_data")
+        if MapTilesData.EnsureState(data) then
+            print("[SaveLoad] 旧存档迁移：初始化宏观地图模块")
+        end
+    end
 
     -- 每回合重置的运行时标记（不需要持久化，但需要有默认值）
     if data.emergency_gold_sold == nil then data.emergency_gold_sold = false end
