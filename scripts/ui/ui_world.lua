@@ -306,6 +306,10 @@ function WorldPage._CreateNodeDrawer(state, region, tile)
             type = tile.type,
             control = tile.controller == "player" and 100 or 0,
             security = 3,
+            population = tile.population or 0,
+            development = tile.development or 1,
+            culture = tile.culture or 0,
+            influence = tile.influence or 0,
             resources = {},
             ai_presence = {},
         }

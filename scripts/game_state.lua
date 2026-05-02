@@ -889,7 +889,6 @@ end
 --- 通过 hex 模块控制状态重算本地 region 的控制度与 AI 存在度。
 ---@param state table
 function GameState.SyncRegionsFromMapTiles(state)
-    local MapTilesData = require("data.map_tiles_data")
     if not state.map_tiles then return end
     MapTilesData.SyncRegionsFromTiles(state)
 end

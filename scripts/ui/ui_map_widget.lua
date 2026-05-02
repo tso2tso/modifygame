@@ -1,6 +1,6 @@
 -- ============================================================================
--- 欧洲地图控件 v3 — 严格遵循 sarajevo_dynasty_ui_spec v1.1 §8.5
--- Civ6 式图层叠加 + 类型化节点 + 势力配色 + 时代主题
+-- 欧洲地图控件 v4 — Civ6 式六边形网格渲染
+-- 使用 MapTilesData 的 even-q flat-top hex 坐标
 -- 坐标系：X=0..1 (15°W→45°E), Y=0..1 (71°N→34°N, 北在上)
 -- ============================================================================
 
@@ -16,7 +16,7 @@ local PI = math.pi
 -- ============================================================================
 
 local MIN_ZOOM    = 1.0
-local MAX_ZOOM    = 6.0         -- §8.5: 最大 4× (放宽到 6 以保证波黑细节)
+local MAX_ZOOM    = 6.0
 local ZOOM_STEP   = 1.30
 local DRAG_THRESH = 5
 local BOSNIA_CX   = 0.510
@@ -25,14 +25,13 @@ local BOSNIA_ZOOM  = 5.0
 local BTN_SIZE    = 30
 local BTN_GAP     = 5
 local BTN_MARGIN  = 8
-local LAYER_BAR_H = 28         -- 图层选择器高度
-local LAYER_PILL_H = 22        -- 图层胶囊高度
+local LAYER_BAR_H = 28
+local LAYER_PILL_H = 22
 local LAYER_PILL_GAP = 3
 local LAYER_BAR_PAD = 6
 
 -- ============================================================================
 -- §8.5 图层定义（Civ6 式分层叠加）
--- 控制层始终开启(always_on)，其余最多同时激活 2 个
 -- ============================================================================
 
 local LAYERS = {
@@ -47,38 +46,76 @@ local LAYERS = {
 }
 
 -- ============================================================================
--- §8.5 势力颜色（节点控制状态着色）
+-- §8.5 势力颜色
 -- ============================================================================
 
 local FACTION_COLORS = {
-    player         = { 41, 128, 185 },  -- #2980B9 蓝
-    local_clan     = { 139, 69,  19 },  -- #8B4513 棕红
-    foreign_capital = { 39, 174,  96 },  -- #27AE60 资本绿
-    armed_group    = { 44,  62,  80 },  -- #2C3E50 钢铁灰
-    neutral        = { 110, 110, 110 },  -- 中立灰
-    contested      = { 170, 118,  48 },  -- 争议琥珀
+    player         = { 41, 128, 185 },
+    local_clan     = { 139, 69,  19 },
+    foreign_capital = { 39, 174,  96 },
+    armed_group    = { 44,  62,  80 },
+    neutral        = { 110, 110, 110 },
+    contested      = { 170, 118,  48 },
 }
 
 -- ============================================================================
--- 大国主权着色（占领方颜色覆盖）
+-- 大国主权着色
 -- ============================================================================
 
 local SOVEREIGN_COLORS = {
-    -- 帝国时代
-    austria_hungary = { 160, 130,  80 },  -- 哈布斯堡金
-    germany         = { 100, 100,  85 },  -- 普鲁士灰
-    russia          = { 130, 110,  85 },  -- 沙俄棕
-    britain         = { 120,  90, 100 },  -- 帝国紫红
-    france          = {  80,  95, 140 },  -- 法兰西蓝
-    ottoman         = { 165, 140,  75 },  -- 奥斯曼金
-    italy           = {  95, 130,  85 },  -- 意大利绿
-    serbia          = { 170,  75,  75 },  -- 塞尔维亚红
-    -- 继承国 / 二战
-    nazi_germany    = { 140,  55,  55 },  -- 纳粹深红
-    soviet_union    = { 175,  60,  50 },  -- 苏联红
-    yugoslavia      = {  70, 105, 145 },  -- 南斯拉夫蓝
-    turkey          = { 155, 130,  70 },  -- 土耳其橄榄
-    tito_yugoslavia = {  85, 115, 140 },  -- 铁托蓝灰
+    austria_hungary = { 160, 130,  80 },
+    germany         = { 100, 100,  85 },
+    russia          = { 130, 110,  85 },
+    britain         = { 120,  90, 100 },
+    france          = {  80,  95, 140 },
+    ottoman         = { 165, 140,  75 },
+    italy           = {  95, 130,  85 },
+    serbia          = { 170,  75,  75 },
+    nazi_germany    = { 140,  55,  55 },
+    soviet_union    = { 175,  60,  50 },
+    yugoslavia      = {  70, 105, 145 },
+    turkey          = { 155, 130,  70 },
+    tito_yugoslavia = {  85, 115, 140 },
+}
+
+-- ============================================================================
+-- 国家默认颜色（hex 填充底色）
+-- ============================================================================
+
+local COUNTRY_COLORS = {
+    bosnia          = {  60,  90, 130 },
+    scandinavia     = {  80, 100, 120 },
+    finland         = {  90, 110, 130 },
+    russia          = { 130, 110,  85 },
+    britain         = { 120,  90, 100 },
+    france          = {  80,  95, 140 },
+    iberia          = { 120,  90,  60 },
+    germany         = {  95,  92,  78 },
+    italy           = {  95, 130,  85 },
+    austria_hungary = { 160, 130,  80 },
+    serbia          = { 170,  75,  75 },
+    montenegro      = {  70,  92, 122 },
+    romania         = { 105,  98,  62 },
+    ottoman         = { 165, 140,  75 },
+    greece          = {  62,  92, 122 },
+    bulgaria        = {  92, 102,  72 },
+    lowlands        = {  88,  95,  80 },
+    denmark         = { 100,  88,  90 },
+    switzerland     = { 110, 100, 100 },
+}
+
+-- ============================================================================
+-- 地形色调微调（叠加在国家颜色上）
+-- ============================================================================
+
+local TERRAIN_TINT = {
+    plains   = {  0,  0,  0 },
+    hills    = { -8, -5,  5 },
+    mountain = { -15, -10, 10 },
+    forest   = { -10,  8, -5 },
+    coast    = {  5,  8, 20 },
+    urban    = { 10,  5, -5 },
+    steppe   = {  5, -3, -8 },
 }
 
 -- ============================================================================
@@ -86,25 +123,25 @@ local SOVEREIGN_COLORS = {
 -- ============================================================================
 
 local NODE_TYPES = {
-    mine       = { shape = "hex_pointy", size = 10, label = "矿山区" },
-    industrial = { shape = "hex_flat",   size = 12, label = "工业城" },
-    capital    = { shape = "star_hex",   size = 14, label = "首都" },
-    port       = { shape = "hex_flat",   size = 11, label = "港口" },
-    border     = { shape = "diamond",    size =  8, label = "边境" },
-    cultural   = { shape = "circle",     size = 10, label = "文化" },
-    strategic  = { shape = "triangle",   size =  8, label = "山口" },
+    mine       = { icon = "⛏️",  label = "矿山区" },
+    industrial = { icon = "🏭",  label = "工业城" },
+    capital    = { icon = "🏛️",  label = "首都" },
+    port       = { icon = "⚓",  label = "港口" },
+    border     = { icon = "🛡️",  label = "边境" },
+    cultural   = { icon = "🎭",  label = "文化" },
+    strategic  = { icon = "⚔",   label = "山口" },
 }
 
 -- ============================================================================
--- §3.1 时代地图主题（底图风格随时代变化）
+-- §3.1 时代地图主题
 -- ============================================================================
 
 local ERA_MAP_THEMES = {
-    [1] = { bg = { 45, 38, 28 }, grid = { 80, 68, 50, 20 }, polyA = 42, labelA = 125 },  -- 羊皮纸
-    [2] = { bg = { 38, 30, 25 }, grid = { 70, 50, 40, 20 }, polyA = 38, labelA = 115 },  -- 旧报纸
-    [3] = { bg = { 28, 35, 49 }, grid = { 50, 60, 80, 20 }, polyA = 45, labelA = 135 },  -- 深蓝钢
-    [4] = { bg = { 40, 40, 40 }, grid = { 60, 60, 60, 18 }, polyA = 35, labelA = 95 },   -- 混凝土灰
-    [5] = { bg = { 27, 40, 55 }, grid = { 40, 55, 75, 20 }, polyA = 42, labelA = 125 },  -- 冷战蓝
+    [1] = { bg = { 45, 38, 28 }, grid = { 80, 68, 50, 20 }, hexAlpha = 42, labelA = 125 },
+    [2] = { bg = { 38, 30, 25 }, grid = { 70, 50, 40, 20 }, hexAlpha = 38, labelA = 115 },
+    [3] = { bg = { 28, 35, 49 }, grid = { 50, 60, 80, 20 }, hexAlpha = 45, labelA = 135 },
+    [4] = { bg = { 40, 40, 40 }, grid = { 60, 60, 60, 18 }, hexAlpha = 35, labelA = 95 },
+    [5] = { bg = { 27, 40, 55 }, grid = { 40, 55, 75, 20 }, hexAlpha = 42, labelA = 125 },
 }
 
 -- ============================================================================
@@ -119,56 +156,6 @@ local RESOURCE_ICONS = {
 }
 
 local RESOURCE_ORDER = { "gold_reserve", "silver_reserve", "coal_reserve", "steel_capacity" }
-
--- ============================================================================
--- 欧洲国家/势力多边形（背景，不可交互）
--- ============================================================================
-
-local EUROPE_REGIONS = {
-    { id="scandinavia",    label="瑞典-挪威", color={80,100,120}, poly={0.30,0.02, 0.42,0.04, 0.47,0.15, 0.42,0.28, 0.36,0.38, 0.30,0.40, 0.27,0.34, 0.24,0.20, 0.28,0.08}, labelPos={0.35,0.20} },
-    { id="finland",        label="芬兰",     color={90,110,130}, poly={0.47,0.04, 0.58,0.04, 0.56,0.18, 0.50,0.28, 0.47,0.28, 0.47,0.15}, labelPos={0.51,0.15} },
-    { id="russia",         label="俄罗斯帝国", color={100,85,70}, poly={0.58,0.04, 0.98,0.04, 0.98,0.72, 0.78,0.68, 0.66,0.58, 0.56,0.48, 0.53,0.38, 0.50,0.28, 0.56,0.18}, labelPos={0.80,0.35} },
-    { id="britain",        label="大英帝国",   color={90,70,80},  poly={0.17,0.33, 0.22,0.34, 0.23,0.42, 0.21,0.50, 0.17,0.52, 0.14,0.47, 0.14,0.40, 0.15,0.35}, labelPos={0.18,0.43} },
-    { id="france",         label="法兰西",     color={70,80,110}, poly={0.20,0.50, 0.28,0.48, 0.33,0.52, 0.33,0.60, 0.30,0.68, 0.22,0.72, 0.15,0.68, 0.13,0.58, 0.15,0.52}, labelPos={0.23,0.60} },
-    { id="iberia",         label="西班牙",     color={120,90,60}, poly={0.13,0.68, 0.22,0.68, 0.22,0.72, 0.22,0.80, 0.18,0.88, 0.08,0.86, 0.05,0.78, 0.07,0.70}, labelPos={0.14,0.78} },
-    { id="germany",        label="德意志帝国", color={95,92,78},  poly={0.30,0.40, 0.36,0.38, 0.45,0.38, 0.53,0.38, 0.56,0.48, 0.48,0.55, 0.42,0.57, 0.33,0.52, 0.28,0.48}, labelPos={0.42,0.46} },
-    { id="italy",          label="意大利",     color={80,105,72}, poly={0.30,0.63, 0.33,0.60, 0.38,0.62, 0.42,0.68, 0.40,0.76, 0.38,0.82, 0.35,0.86, 0.30,0.80, 0.28,0.72, 0.28,0.67}, labelPos={0.35,0.74} },
-    { id="austria_hungary",label="奥匈帝国",   color={125,105,82}, poly={0.42,0.57, 0.48,0.55, 0.56,0.56, 0.58,0.60, 0.56,0.66, 0.52,0.70, 0.47,0.69, 0.42,0.68, 0.38,0.62}, labelPos={0.48,0.61} },
-    { id="serbia",         label="塞尔维亚",   color={140,62,62}, poly={0.56,0.66, 0.58,0.60, 0.62,0.62, 0.63,0.70, 0.58,0.74, 0.54,0.74, 0.52,0.70}, labelPos={0.57,0.68} },
-    { id="montenegro",     label="黑山",       color={70,92,122}, poly={0.47,0.74, 0.50,0.74, 0.54,0.74, 0.52,0.78, 0.48,0.80, 0.45,0.78}, labelPos={0.49,0.77} },
-    { id="romania",        label="罗马尼亚",   color={105,98,62}, poly={0.58,0.58, 0.66,0.56, 0.70,0.60, 0.70,0.67, 0.63,0.70, 0.62,0.62}, labelPos={0.64,0.63} },
-    { id="ottoman",        label="奥斯曼帝国", color={132,112,62}, poly={0.54,0.78, 0.58,0.74, 0.63,0.74, 0.70,0.70, 0.78,0.68, 0.83,0.76, 0.83,0.86, 0.72,0.88, 0.60,0.86, 0.52,0.82}, labelPos={0.70,0.80} },
-    { id="greece",         label="希腊",       color={62,92,122}, poly={0.52,0.78, 0.54,0.78, 0.58,0.80, 0.56,0.88, 0.52,0.90, 0.48,0.86, 0.48,0.82}, labelPos={0.52,0.84} },
-    { id="bulgaria",       label="保加利亚",   color={92,102,72}, poly={0.63,0.70, 0.70,0.67, 0.73,0.70, 0.72,0.76, 0.68,0.76, 0.63,0.74}, labelPos={0.67,0.72} },
-    { id="lowlands",       label="低地国家",   color={88,95,80},  poly={0.24,0.42, 0.28,0.40, 0.30,0.40, 0.28,0.48, 0.24,0.50, 0.22,0.48}, labelPos={0.26,0.45} },
-    { id="denmark",        label="丹麦",       color={100,88,90}, poly={0.30,0.34, 0.34,0.33, 0.36,0.38, 0.34,0.42, 0.30,0.40}, labelPos={0.33,0.37} },
-    { id="switzerland",    label="瑞士",       color={110,100,100}, poly={0.30,0.60, 0.33,0.58, 0.36,0.60, 0.35,0.63, 0.30,0.63}, labelPos={0.33,0.61} },
-}
-
--- ============================================================================
--- 波黑游戏节点（可交互）— §8.5 节点系统
--- ============================================================================
-
-local GAME_NODES = {
-    {
-        id = "mine_district", label = "巴科维奇矿区", icon = "⛏️",
-        nodeType = "mine",
-        poly = { 0.470,0.710, 0.486,0.698, 0.502,0.705, 0.504,0.722, 0.496,0.736, 0.480,0.732, 0.468,0.722 },
-        pos = { 0.486, 0.718 },
-    },
-    {
-        id = "industrial_town", label = "泽尼察工业区", icon = "🏭",
-        nodeType = "industrial",
-        poly = { 0.496,0.736, 0.504,0.722, 0.518,0.718, 0.524,0.732, 0.520,0.746, 0.510,0.752, 0.498,0.746 },
-        pos = { 0.510, 0.736 },
-    },
-    {
-        id = "capital_city", label = "萨拉热窝", icon = "🏛️",
-        nodeType = "capital",
-        poly = { 0.518,0.718, 0.530,0.710, 0.542,0.714, 0.548,0.728, 0.540,0.744, 0.528,0.748, 0.520,0.746, 0.524,0.732 },
-        pos = { 0.533, 0.730 },
-    },
-}
 
 -- ============================================================================
 -- MapWidget 类
@@ -194,16 +181,14 @@ function MapWidget:Init(props)
     self.mapTiles_        = MapTilesData.CreateInitialTiles()
     self.onRegionSelect_  = props.onRegionSelect
 
-    -- 图层状态：control 始终开启
+    -- 图层状态
     self.activeLayers_ = { control = true }
 
-    -- 时代（影响底图风格）
+    -- 时代
     self.eraId_ = 1
 
-    -- 大国博弈：欧洲领土状态
+    -- 大国博弈
     self.europeState_ = nil
-
-    -- 大国博弈：前线数据
     self.frontLineData_ = nil
 
     -- 拖拽状态
@@ -220,6 +205,9 @@ function MapWidget:Init(props)
     self.ptrInside_ = false
     self.showLegend_ = false
 
+    -- tile 坐标索引缓存
+    self.tileByCoord_ = nil
+
     Widget.Init(self, props)
 end
 
@@ -231,6 +219,7 @@ function MapWidget:SetRegions(regions) self.regions_ = regions or {} end
 function MapWidget:SetMapTiles(tiles)
     self.mapTiles_ = tiles or MapTilesData.CreateInitialTiles()
     MapTilesData.RebuildNeighbors(self.mapTiles_)
+    self:_RebuildCoordIndex()
 end
 function MapWidget:SetSelected(id) self.selectedNodeId_ = id end
 function MapWidget:GetSelected() return self.selectedNodeId_ end
@@ -239,20 +228,16 @@ function MapWidget:SetEuropeState(europeData) self.europeState_ = europeData end
 function MapWidget:SetFrontLineData(data) self.frontLineData_ = data end
 
 --- 根据游戏状态动态解锁地图图层
----@param state table 游戏状态
 function MapWidget:UpdateUnlocks(state)
     if not state then return end
     for _, layer in ipairs(LAYERS) do
         if layer.locked then
             local shouldUnlock = false
             if layer.id == "trade" then
-                -- 贸易层：拥有 ≥ 3 矿山（商业网络建立）
                 shouldUnlock = state.mines and #state.mines >= 3
             elseif layer.id == "military" then
-                -- 军事层：护卫 ≥ 10（军事力量成型）
                 shouldUnlock = state.military and state.military.guards >= 10
             elseif layer.id == "intel" then
-                -- 情报层：执行过任何情报行动
                 shouldUnlock = state.flags and state.flags.intel_unlocked
             end
             if shouldUnlock then
@@ -263,30 +248,26 @@ function MapWidget:UpdateUnlocks(state)
 end
 
 function MapWidget:ToggleLayer(layerId)
-    -- control 不可关闭
     if layerId == "control" then return end
-    -- 查找 layer 定义
     local layerDef = nil
     for _, l in ipairs(LAYERS) do
         if l.id == layerId then layerDef = l; break end
     end
     if not layerDef or layerDef.locked then return end
-
     if self.activeLayers_[layerId] then
         self.activeLayers_[layerId] = nil
     else
-        -- 最多同时激活 2 个额外图层
         local count = 0
         for k, _ in pairs(self.activeLayers_) do
             if k ~= "control" then count = count + 1 end
         end
-        if count >= 2 then return end -- 已满
+        if count >= 2 then return end
         self.activeLayers_[layerId] = true
     end
 end
 
 -- ============================================================================
--- 坐标变换（保持不变）
+-- 坐标变换
 -- ============================================================================
 
 function MapWidget:_W2S(wx, wy, mx, my, mw, mh)
@@ -328,91 +309,45 @@ function MapWidget:_MapAreaHit()
 end
 
 -- ============================================================================
--- 节点形状绘制
+-- Hex 渲染工具
 -- ============================================================================
 
---- 尖顶六边形（矿山区）
-function MapWidget:_ShapeHexPointy(nvg, cx, cy, r)
+--- 在屏幕坐标绘制一个 hex 路径（不调用 fill/stroke）
+function MapWidget:_BeginHexPath(nvg, q, r, mx, my, mw, mh)
+    local corners = MapTilesData.GetHexCorners(q, r)
     nvgBeginPath(nvg)
-    for i = 0, 5 do
-        local angle = PI / 180 * (60 * i - 30)
-        local x = cx + r * math.cos(angle)
-        local y = cy + r * math.sin(angle)
-        if i == 0 then nvgMoveTo(nvg, x, y) else nvgLineTo(nvg, x, y) end
+    for i = 1, 12, 2 do
+        local sx, sy = self:_W2S(corners[i], corners[i + 1], mx, my, mw, mh)
+        if i == 1 then
+            nvgMoveTo(nvg, sx, sy)
+        else
+            nvgLineTo(nvg, sx, sy)
+        end
     end
     nvgClosePath(nvg)
 end
 
---- 平顶六边形（工业城）
-function MapWidget:_ShapeHexFlat(nvg, cx, cy, r)
-    nvgBeginPath(nvg)
-    for i = 0, 5 do
-        local angle = PI / 180 * (60 * i)
-        local x = cx + r * math.cos(angle)
-        local y = cy + r * math.sin(angle)
-        if i == 0 then nvgMoveTo(nvg, x, y) else nvgLineTo(nvg, x, y) end
+--- 坐标索引缓存
+function MapWidget:_RebuildCoordIndex()
+    self.tileByCoord_ = {}
+    for _, t in ipairs(self.mapTiles_ or {}) do
+        self.tileByCoord_[(t.q or 0) .. "," .. (t.r or 0)] = t
     end
-    nvgClosePath(nvg)
 end
 
---- 星形六边形（首都/省会）— 外环六角 + 内环六角形成星芒
-function MapWidget:_ShapeStarHex(nvg, cx, cy, r)
-    local rInner = r * 0.65
-    nvgBeginPath(nvg)
-    for i = 0, 11 do
-        local angle = PI / 180 * (30 * i - 15)
-        local rad = (i % 2 == 0) and r or rInner
-        local x = cx + rad * math.cos(angle)
-        local y = cy + rad * math.sin(angle)
-        if i == 0 then nvgMoveTo(nvg, x, y) else nvgLineTo(nvg, x, y) end
-    end
-    nvgClosePath(nvg)
-end
-
---- 菱形（边境通道）
-function MapWidget:_ShapeDiamond(nvg, cx, cy, r)
-    nvgBeginPath(nvg)
-    nvgMoveTo(nvg, cx, cy - r)
-    nvgLineTo(nvg, cx + r * 0.7, cy)
-    nvgLineTo(nvg, cx, cy + r)
-    nvgLineTo(nvg, cx - r * 0.7, cy)
-    nvgClosePath(nvg)
-end
-
---- 三角形（战略山口）
-function MapWidget:_ShapeTriangle(nvg, cx, cy, r)
-    nvgBeginPath(nvg)
-    nvgMoveTo(nvg, cx, cy - r)
-    nvgLineTo(nvg, cx + r * 0.866, cy + r * 0.5)
-    nvgLineTo(nvg, cx - r * 0.866, cy + r * 0.5)
-    nvgClosePath(nvg)
-end
-
---- 绘制节点形状（根据类型派发）
-function MapWidget:_DrawNodeShape(nvg, cx, cy, r, nodeType)
-    local t = NODE_TYPES[nodeType] or NODE_TYPES.mine
-    local shape = t.shape
-    if shape == "hex_pointy" then self:_ShapeHexPointy(nvg, cx, cy, r)
-    elseif shape == "hex_flat" then self:_ShapeHexFlat(nvg, cx, cy, r)
-    elseif shape == "star_hex" then self:_ShapeStarHex(nvg, cx, cy, r)
-    elseif shape == "diamond" then self:_ShapeDiamond(nvg, cx, cy, r)
-    elseif shape == "triangle" then self:_ShapeTriangle(nvg, cx, cy, r)
-    else
-        nvgBeginPath(nvg)
-        nvgCircle(nvg, cx, cy, r)
-    end
+function MapWidget:_GetTileAtCoord(q, r)
+    if not self.tileByCoord_ then self:_RebuildCoordIndex() end
+    return self.tileByCoord_[q .. "," .. r]
 end
 
 -- ============================================================================
 -- 势力颜色工具
 -- ============================================================================
 
---- 获取区域的主导控制方
 function MapWidget:_GetDominantFaction(regionData)
     if not regionData then return "neutral" end
     local playerCtrl = regionData.control or 0
     if playerCtrl >= 50 then return "player" end
-
     local maxAI, maxAIId = 0, nil
     if regionData.ai_presence then
         for aiId, presence in pairs(regionData.ai_presence) do
@@ -420,31 +355,48 @@ function MapWidget:_GetDominantFaction(regionData)
         end
     end
     if maxAIId and maxAI >= 40 then return maxAIId end
-
-    -- 争议状态：没有单一势力主导
     return "contested"
 end
 
---- 获取势力填充颜色
 function MapWidget:_GetFactionColor(factionId)
     return FACTION_COLORS[factionId] or FACTION_COLORS.neutral
 end
 
---- 获取控制层的区域填充色
-function MapWidget:_GetControlFill(regionData, isSelected, isHovered)
-    local faction = self:_GetDominantFaction(regionData)
-    local fc = self:_GetFactionColor(faction)
-    local a = isSelected and 180 or (isHovered and 150 or 110)
-    local boost = (isSelected or isHovered) and 20 or 0
-    return { math.min(255, fc[1] + boost), math.min(255, fc[2] + boost), math.min(255, fc[3] + boost), a }
+-- ============================================================================
+-- Hex 填充色计算
+-- ============================================================================
+
+--- 获取 tile 的基础国家颜色（考虑时代主题和地形微调）
+function MapWidget:_GetHexBaseColor(tile, theme)
+    local cc = COUNTRY_COLORS[tile.country_id] or { 90, 85, 75 }
+    local tint = TERRAIN_TINT[tile.terrain] or { 0, 0, 0 }
+    local r = math.max(0, math.min(255, cc[1] + tint[1]))
+    local g = math.max(0, math.min(255, cc[2] + tint[2]))
+    local b = math.max(0, math.min(255, cc[3] + tint[3]))
+    return r, g, b
 end
 
---- 获取节点填充色（更饱和）
-function MapWidget:_GetNodeFill(regionData, isSelected, isHovered)
-    local faction = self:_GetDominantFaction(regionData)
-    local fc = self:_GetFactionColor(faction)
-    local a = isSelected and 245 or (isHovered and 220 or 200)
-    return { fc[1], fc[2], fc[3], a }
+--- 获取 tile 在控制层的颜色
+function MapWidget:_GetHexControlColor(tile, isSelected, isHovered)
+    -- 波黑 tile 有 region_id 的：用势力着色
+    if tile.region_id then
+        local rd = self:_FindRegionData(tile.region_id)
+        local faction = self:_GetDominantFaction(rd)
+        local fc = self:_GetFactionColor(faction)
+        local a = isSelected and 200 or (isHovered and 170 or 130)
+        return fc[1], fc[2], fc[3], a
+    end
+    -- 波黑 tile 无 region_id：用 controller
+    if tile.country_id == "bosnia" then
+        local fc = FACTION_COLORS[tile.controller] or FACTION_COLORS.contested
+        local a = isSelected and 180 or (isHovered and 150 or 110)
+        return fc[1], fc[2], fc[3], a
+    end
+    -- 外国 tile：用主权着色（如被占领）
+    local sc = SOVEREIGN_COLORS[tile.controller] or COUNTRY_COLORS[tile.country_id]
+    if not sc then sc = { 90, 85, 75 } end
+    local a = isSelected and 160 or (isHovered and 130 or 80)
+    return sc[1], sc[2], sc[3], a
 end
 
 -- ============================================================================
@@ -460,122 +412,54 @@ function MapWidget:Render(nvg)
     if self.ptrInside_ then
         local wheel = input:GetMouseMoveWheel()
         if wheel ~= 0 then
-            self:_ZoomAt(self.lastPtrX_, self.lastPtrY_, wheel > 0 and ZOOM_STEP or (1/ZOOM_STEP), mx, my, mw, mh)
+            self:_ZoomAt(self.lastPtrX_, self.lastPtrY_, wheel > 0 and ZOOM_STEP or (1 / ZOOM_STEP), mx, my, mw, mh)
         end
     end
 
-    -- ① 底板（时代主题色）
+    -- ① 底板
     nvgBeginPath(nvg)
     nvgRoundedRect(nvg, l.x, l.y, l.w, l.h, 6)
     nvgFillColor(nvg, nvgRGBA(theme.bg[1], theme.bg[2], theme.bg[3], 255))
     nvgFill(nvg)
 
-    -- 裁剪地图区域（不含图层选择器）
+    -- 裁剪地图区域
     nvgSave(nvg)
     nvgScissor(nvg, mx, my, mw, mh)
 
-    -- ② 经纬网格
-    self:_DrawGrid(nvg, mx, my, mw, mh, theme)
+    -- ② Hex 底色填充（国家颜色 + 地形微调）
+    self:_DrawHexFills(nvg, mx, my, mw, mh, theme)
 
-    -- ③ 欧洲背景多边形（根据主权状态动态着色）
-    for _, er in ipairs(EUROPE_REGIONS) do
-        local c = er.color
-        local fillA = theme.polyA
-        local strokeC = {85, 75, 60, 40}
-        local strokeW = 0.6
-
-        if self.europeState_ then
-            local cs = self.europeState_[er.id]
-            if cs and cs.sovereign ~= cs.original then
-                -- 被占领：使用占领方颜色，提高不透明度，红色边框
-                local sc = SOVEREIGN_COLORS[cs.sovereign]
-                if sc then
-                    c = sc
-                end
-                fillA = math.min(255, theme.polyA + 40)
-                strokeC = {180, 60, 50, 120}
-                strokeW = 1.2
-            elseif cs then
-                -- 自治：使用主权方颜色（可能与原始颜色不同，如继承国）
-                local sc = SOVEREIGN_COLORS[cs.sovereign]
-                if sc then
-                    c = sc
-                    fillA = math.min(255, theme.polyA + 10)
-                end
-            end
-        end
-
-        self:_DrawPoly(nvg, er.poly, {c[1], c[2], c[3], fillA}, strokeC, strokeW, mx, my, mw, mh)
-    end
-
-    -- ④ 控制层：宏观 hex 模块按势力着色
+    -- ③ 控制层叠加色
     if self.activeLayers_.control then
-        for _, gn in ipairs(self.mapTiles_ or GAME_NODES) do
-            local rd = self:_FindRegionData(gn.region_id or gn.id)
-            local isSel = (self.selectedNodeId_ == gn.id)
-            local isHov = (self.hoveredNodeId_ == gn.id)
-            local fc = self:_GetControlFill(rd, isSel, isHov)
-            if gn.controller and gn.controller ~= "player" and not rd then
-                local cc = FACTION_COLORS[gn.controller] or FACTION_COLORS.contested
-                fc = { cc[1], cc[2], cc[3], isSel and 145 or (isHov and 125 or 90) }
-            elseif gn.controller and gn.region_id then
-                local cc = FACTION_COLORS[gn.controller] or FACTION_COLORS.contested
-                fc = { cc[1], cc[2], cc[3], isSel and 150 or (isHov and 130 or 95) }
-            end
-            local era = Config.GetEraByYear and Config.GetEraByYear(1904 + (self.eraId_ - 1) * 15) or nil
-            local bc = isSel and C.accent_gold or C.paper_light
-            local ba = isSel and 255 or (isHov and 200 or 120)
-            local bw = isSel and 2.5 or (isHov and 1.8 or 1.0)
-            self:_DrawPoly(nvg, self:_GetNodePoly(gn), fc, {bc[1], bc[2], bc[3], ba}, bw, mx, my, mw, mh)
-        end
+        self:_DrawControlLayer(nvg, mx, my, mw, mh)
     end
 
-    -- ⑤ 安全图层：热力色覆盖
+    -- ④ 安全图层
     if self.activeLayers_.security then
         self:_DrawSecurityLayer(nvg, mx, my, mw, mh)
     end
 
-    -- ⑤.5 前线指示器（攻势箭头）
+    -- ⑤ Hex 网格线 + 国家边界
+    self:_DrawHexGrid(nvg, mx, my, mw, mh, theme)
+    self:_DrawCountryBorders(nvg, mx, my, mw, mh)
+
+    -- ⑥ 前线指示器
     self:_DrawFrontLines(nvg, mx, my, mw, mh)
 
-    -- ⑥ 欧洲标签 + 占领指示器
-    for _, er in ipairs(EUROPE_REGIONS) do
-        self:_DrawContextLabel(nvg, er, mx, my, mw, mh, theme)
+    -- ⑦ 国家标签
+    self:_DrawCountryLabels(nvg, mx, my, mw, mh, theme)
 
-        -- 占领指示器：缩放 >= 1.8 时显示
-        if self.europeState_ and self.zoom_ >= 1.8 then
-            local cs = self.europeState_[er.id]
-            if cs and cs.sovereign ~= cs.original then
-                local lp = er.labelPos
-                local sx, sy = self:_W2S(lp[1], lp[2], mx, my, mw, mh)
-                local tagSize = math.max(7, math.min(11, 6 + self.zoom_ * 0.8))
-                nvgFontFace(nvg, "sans")
-                nvgFontSize(nvg, tagSize)
-                nvgTextAlign(nvg, NVG_ALIGN_CENTER + NVG_ALIGN_TOP)
-                nvgFillColor(nvg, nvgRGBA(200, 70, 60, 200))
-                -- 显示占领方名称
-                local occupierLabel = cs.sovereign
-                if self.europeState_[cs.sovereign] then
-                    occupierLabel = self.europeState_[cs.sovereign].label
-                end
-                nvgText(nvg, sx, sy + tagSize * 0.6, "占" .. occupierLabel)
-            end
-        end
-    end
-
-    -- ⑦ 资源图层：在节点旁显示资源图标
+    -- ⑧ 资源图层
     if self.activeLayers_.resource then
         self:_DrawResourceLayer(nvg, mx, my, mw, mh)
     end
 
-    -- ⑧ 游戏节点（类型化形状）
-    for _, gn in ipairs(self.mapTiles_ or GAME_NODES) do
-        self:_DrawGameNode(nvg, gn, mx, my, mw, mh)
-    end
+    -- ⑨ 节点图标 & 标签
+    self:_DrawNodeIcons(nvg, mx, my, mw, mh)
 
     nvgRestore(nvg)  -- 恢复裁剪
 
-    -- 边框（时代主题）
+    -- 边框
     local era = Config.GetEraByYear and Config.GetEraByYear(1904 + (self.eraId_ - 1) * 15) or nil
     local borderC = era and era.border or C.border_gold
     nvgBeginPath(nvg)
@@ -584,128 +468,269 @@ function MapWidget:Render(nvg)
     nvgStrokeWidth(nvg, 1.5)
     nvgStroke(nvg)
 
-    -- ⑨ 图层选择器（顶部浮条）
+    -- ⑩ 图层选择器
     self:_DrawLayerSelector(nvg, l.x, l.y, l.w)
 
-    -- ⑩ 缩放控件（右侧）
+    -- ⑪ HUD 控件
     self:_DrawControls(nvg, l.x, l.y + LAYER_BAR_H, l.w, l.h - LAYER_BAR_H)
 end
 
 -- ============================================================================
--- 子渲染函数
+-- Hex 底色填充
 -- ============================================================================
 
-function MapWidget:_DrawGrid(nvg, mx, my, mw, mh, theme)
-    local g = theme.grid
-    nvgStrokeColor(nvg, nvgRGBA(g[1], g[2], g[3], g[4]))
-    nvgStrokeWidth(nvg, 0.5)
-    for wx = 0, 1, 0.1 do
-        local sx1, sy1 = self:_W2S(wx, 0, mx, my, mw, mh)
-        local sx2, sy2 = self:_W2S(wx, 1, mx, my, mw, mh)
-        nvgBeginPath(nvg); nvgMoveTo(nvg, sx1, sy1); nvgLineTo(nvg, sx2, sy2); nvgStroke(nvg)
-    end
-    for wy = 0, 1, 0.1 do
-        local sx1, sy1 = self:_W2S(0, wy, mx, my, mw, mh)
-        local sx2, sy2 = self:_W2S(1, wy, mx, my, mw, mh)
-        nvgBeginPath(nvg); nvgMoveTo(nvg, sx1, sy1); nvgLineTo(nvg, sx2, sy2); nvgStroke(nvg)
-    end
-end
-
-function MapWidget:_DrawPoly(nvg, poly, fillColor, strokeColor, strokeW, mx, my, mw, mh)
-    if #poly < 6 then return end
-    local sx, sy = self:_W2S(poly[1], poly[2], mx, my, mw, mh)
-    nvgBeginPath(nvg); nvgMoveTo(nvg, sx, sy)
-    for i = 3, #poly, 2 do
-        sx, sy = self:_W2S(poly[i], poly[i+1], mx, my, mw, mh)
-        nvgLineTo(nvg, sx, sy)
-    end
-    nvgClosePath(nvg)
-    nvgFillColor(nvg, nvgRGBA(fillColor[1], fillColor[2], fillColor[3], fillColor[4]))
-    nvgFill(nvg)
-    if strokeColor then
-        nvgStrokeColor(nvg, nvgRGBA(strokeColor[1], strokeColor[2], strokeColor[3], strokeColor[4]))
-        nvgStrokeWidth(nvg, strokeW or 1)
-        nvgStroke(nvg)
+function MapWidget:_DrawHexFills(nvg, mx, my, mw, mh, theme)
+    local alpha = theme.hexAlpha or 42
+    for _, tile in ipairs(self.mapTiles_) do
+        local r, g, b = self:_GetHexBaseColor(tile, theme)
+        local isSel = (self.selectedNodeId_ == tile.id)
+        local isHov = (self.hoveredNodeId_ == tile.id)
+        -- 主权覆盖：如果 europeState 中被占领，使用占领方颜色
+        if self.europeState_ and tile.country_id ~= "bosnia" then
+            local cs = self.europeState_[tile.country_id]
+            if cs then
+                local sc = SOVEREIGN_COLORS[cs.sovereign]
+                if sc then
+                    r, g, b = sc[1], sc[2], sc[3]
+                end
+                if cs.sovereign ~= cs.original then
+                    alpha = math.min(255, (theme.hexAlpha or 42) + 40)
+                end
+            end
+        end
+        local a = isSel and math.min(255, alpha + 60) or (isHov and math.min(255, alpha + 30) or alpha)
+        self:_BeginHexPath(nvg, tile.q, tile.r, mx, my, mw, mh)
+        nvgFillColor(nvg, nvgRGBA(r, g, b, a))
+        nvgFill(nvg)
     end
 end
 
-function MapWidget:_DrawContextLabel(nvg, er, mx, my, mw, mh, theme)
-    local lp = er.labelPos
-    local sx, sy = self:_W2S(lp[1], lp[2], mx, my, mw, mh)
-    local fontSize = math.max(8, math.min(16, 8 + self.zoom_ * 1.2))
-    local alpha = self.zoom_ <= 3 and theme.labelA or math.max(30, theme.labelA - (self.zoom_ - 3) * 18)
-    nvgFontFace(nvg, "sans"); nvgFontSize(nvg, fontSize)
-    nvgTextAlign(nvg, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)
-    nvgFillColor(nvg, nvgRGBA(160, 148, 125, math.floor(alpha)))
-    nvgText(nvg, sx, sy, er.label)
+-- ============================================================================
+-- 控制层叠加
+-- ============================================================================
+
+function MapWidget:_DrawControlLayer(nvg, mx, my, mw, mh)
+    for _, tile in ipairs(self.mapTiles_) do
+        local isSel = (self.selectedNodeId_ == tile.id)
+        local isHov = (self.hoveredNodeId_ == tile.id)
+        local r, g, b, a = self:_GetHexControlColor(tile, isSel, isHov)
+        self:_BeginHexPath(nvg, tile.q, tile.r, mx, my, mw, mh)
+        nvgFillColor(nvg, nvgRGBA(r, g, b, a))
+        nvgFill(nvg)
+    end
 end
 
---- 安全图层 — 区域热力色覆盖
+-- ============================================================================
+-- 安全图层
+-- ============================================================================
+
 function MapWidget:_DrawSecurityLayer(nvg, mx, my, mw, mh)
-    for _, gn in ipairs(self.mapTiles_ or GAME_NODES) do
-        local rd = self:_FindRegionData(gn.region_id or gn.id)
+    for _, tile in ipairs(self.mapTiles_) do
+        local rd = self:_FindRegionData(tile.region_id)
         if rd then
             local sec = rd.security or 3
-            -- 1=红, 2=橙, 3=黄, 4=浅绿, 5=绿
             local r, g, b
             if sec <= 1 then     r, g, b = 200, 40, 40
             elseif sec <= 2 then r, g, b = 200, 120, 40
             elseif sec <= 3 then r, g, b = 200, 180, 60
             elseif sec <= 4 then r, g, b = 80, 160, 80
             else                 r, g, b = 40, 140, 60 end
-            self:_DrawPoly(nvg, self:_GetNodePoly(gn), {r, g, b, 50}, nil, 0, mx, my, mw, mh)
+            self:_BeginHexPath(nvg, tile.q, tile.r, mx, my, mw, mh)
+            nvgFillColor(nvg, nvgRGBA(r, g, b, 50))
+            nvgFill(nvg)
         end
     end
 end
 
---- 前线指示器 — 大国攻势箭头
+-- ============================================================================
+-- Hex 网格线
+-- ============================================================================
+
+function MapWidget:_DrawHexGrid(nvg, mx, my, mw, mh, theme)
+    local g = theme.grid
+    nvgStrokeColor(nvg, nvgRGBA(g[1], g[2], g[3], g[4]))
+    nvgStrokeWidth(nvg, 0.5)
+    for _, tile in ipairs(self.mapTiles_) do
+        self:_BeginHexPath(nvg, tile.q, tile.r, mx, my, mw, mh)
+        nvgStroke(nvg)
+    end
+end
+
+-- ============================================================================
+-- 国家边界（不同 country_id 之间画粗线）
+-- ============================================================================
+
+function MapWidget:_DrawCountryBorders(nvg, mx, my, mw, mh)
+    -- even-q flat-top 各边对应的邻居方向
+    local evenDirs = { {1, -1}, {1, 0}, {0, -1}, {0, 1}, {-1, -1}, {-1, 0} }
+    local oddDirs  = { {1, 0}, {1, 1}, {0, -1}, {0, 1}, {-1, 0}, {-1, 1} }
+
+    nvgStrokeWidth(nvg, 1.8)
+    nvgLineCap(nvg, NVG_ROUND)
+
+    for _, tile in ipairs(self.mapTiles_) do
+        local q, r = tile.q, tile.r
+        local corners = MapTilesData.GetHexCorners(q, r)
+        local dirs = (q % 2 == 0) and evenDirs or oddDirs
+
+        for edgeIdx = 1, 6 do
+            local d = dirs[edgeIdx]
+            local nq, nr = q + d[1], r + d[2]
+            local neighbor = self:_GetTileAtCoord(nq, nr)
+
+            -- 画国界边：邻居不存在（外边界）或国家不同
+            local isBorder = (not neighbor) or (neighbor.country_id ~= tile.country_id)
+            if isBorder then
+                -- flat-top hex: 边 i 连接顶点 i 和 i+1
+                local i1 = edgeIdx
+                local i2 = (edgeIdx % 6) + 1
+                local wx1, wy1 = corners[(i1 - 1) * 2 + 1], corners[(i1 - 1) * 2 + 2]
+                local wx2, wy2 = corners[(i2 - 1) * 2 + 1], corners[(i2 - 1) * 2 + 2]
+                local sx1, sy1 = self:_W2S(wx1, wy1, mx, my, mw, mh)
+                local sx2, sy2 = self:_W2S(wx2, wy2, mx, my, mw, mh)
+
+                -- 波黑边界用金色
+                local isBosniaBorder = (tile.country_id == "bosnia") or (neighbor and neighbor.country_id == "bosnia")
+                if isBosniaBorder then
+                    nvgStrokeColor(nvg, nvgRGBA(201, 168, 76, 200))
+                else
+                    nvgStrokeColor(nvg, nvgRGBA(120, 110, 90, 150))
+                end
+
+                nvgBeginPath(nvg)
+                nvgMoveTo(nvg, sx1, sy1)
+                nvgLineTo(nvg, sx2, sy2)
+                nvgStroke(nvg)
+            end
+        end
+    end
+end
+
+-- ============================================================================
+-- 国家标签（基于 hex 中心聚合计算标签位置）
+-- ============================================================================
+
+function MapWidget:_DrawCountryLabels(nvg, mx, my, mw, mh, theme)
+    -- 先计算每个国家的所有 tile 中心的平均位置
+    local countryInfo = {}
+    for _, tile in ipairs(self.mapTiles_) do
+        local cid = tile.country_id
+        if not countryInfo[cid] then
+            countryInfo[cid] = { sumX = 0, sumY = 0, count = 0, label = nil }
+        end
+        local cx, cy = MapTilesData.GetHexCenter(tile.q, tile.r)
+        countryInfo[cid].sumX = countryInfo[cid].sumX + cx
+        countryInfo[cid].sumY = countryInfo[cid].sumY + cy
+        countryInfo[cid].count = countryInfo[cid].count + 1
+    end
+
+    -- 国家显示名称
+    local COUNTRY_LABELS = {
+        bosnia = "波斯尼亚", scandinavia = "瑞典-挪威", finland = "芬兰",
+        russia = "俄罗斯帝国", britain = "大英帝国", france = "法兰西",
+        iberia = "西班牙", germany = "德意志帝国", italy = "意大利",
+        austria_hungary = "奥匈帝国", serbia = "塞尔维亚", montenegro = "黑山",
+        romania = "罗马尼亚", ottoman = "奥斯曼帝国", greece = "希腊",
+        bulgaria = "保加利亚", lowlands = "低地国家", denmark = "丹麦",
+        switzerland = "瑞士",
+    }
+
+    local fontSize = math.max(8, math.min(16, 8 + self.zoom_ * 1.2))
+    local alpha = self.zoom_ <= 3 and theme.labelA or math.max(30, theme.labelA - (self.zoom_ - 3) * 18)
+
+    nvgFontFace(nvg, "sans")
+    nvgFontSize(nvg, fontSize)
+    nvgTextAlign(nvg, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)
+
+    for cid, info in pairs(countryInfo) do
+        local avgX = info.sumX / info.count
+        local avgY = info.sumY / info.count
+        local sx, sy = self:_W2S(avgX, avgY, mx, my, mw, mh)
+        local label = COUNTRY_LABELS[cid] or cid
+
+        -- 占领指示器
+        local occupierTag = nil
+        if self.europeState_ and cid ~= "bosnia" and self.zoom_ >= 1.8 then
+            local cs = self.europeState_[cid]
+            if cs and cs.sovereign ~= cs.original then
+                occupierTag = cs.sovereign
+            end
+        end
+
+        -- 国名文字阴影
+        nvgFillColor(nvg, nvgRGBA(0, 0, 0, math.floor(alpha * 0.5)))
+        nvgText(nvg, sx + 1, sy + 1, label)
+        -- 国名文字
+        nvgFillColor(nvg, nvgRGBA(190, 178, 155, math.floor(alpha)))
+        nvgText(nvg, sx, sy, label)
+
+        -- 占领指示
+        if occupierTag then
+            local tagSize = math.max(7, math.min(11, 6 + self.zoom_ * 0.8))
+            nvgFontSize(nvg, tagSize)
+            nvgFillColor(nvg, nvgRGBA(200, 70, 60, 200))
+            nvgText(nvg, sx, sy + fontSize * 0.7, "占" .. (COUNTRY_LABELS[occupierTag] or occupierTag))
+            nvgFontSize(nvg, fontSize)
+        end
+    end
+end
+
+-- ============================================================================
+-- 前线指示器
+-- ============================================================================
+
 function MapWidget:_DrawFrontLines(nvg, mx, my, mw, mh)
     if not self.frontLineData_ or #self.frontLineData_ == 0 then return end
 
-    -- 构建区域中心位置查找表
+    -- 构建国家中心位置查找表（基于 hex 平均位置）
     local posLookup = {}
-    for _, er in ipairs(EUROPE_REGIONS) do
-        posLookup[er.id] = er.labelPos
+    for _, tile in ipairs(self.mapTiles_) do
+        local cid = tile.country_id
+        if not posLookup[cid] then posLookup[cid] = { sumX = 0, sumY = 0, n = 0 } end
+        local cx, cy = MapTilesData.GetHexCenter(tile.q, tile.r)
+        posLookup[cid].sumX = posLookup[cid].sumX + cx
+        posLookup[cid].sumY = posLookup[cid].sumY + cy
+        posLookup[cid].n = posLookup[cid].n + 1
     end
 
     local t = os.clock()
 
     for _, fl in ipairs(self.frontLineData_) do
-        local fromPos = posLookup[fl.from_id]
-        local toPos = posLookup[fl.to_id]
-        if fromPos and toPos then
-            local sx1, sy1 = self:_W2S(fromPos[1], fromPos[2], mx, my, mw, mh)
-            local sx2, sy2 = self:_W2S(toPos[1], toPos[2], mx, my, mw, mh)
+        local fromInfo = posLookup[fl.from_id]
+        local toInfo = posLookup[fl.to_id]
+        if fromInfo and toInfo and fromInfo.n > 0 and toInfo.n > 0 then
+            local fromX = fromInfo.sumX / fromInfo.n
+            local fromY = fromInfo.sumY / fromInfo.n
+            local toX = toInfo.sumX / toInfo.n
+            local toY = toInfo.sumY / toInfo.n
 
-            -- 使用攻方主权颜色
+            local sx1, sy1 = self:_W2S(fromX, fromY, mx, my, mw, mh)
+            local sx2, sy2 = self:_W2S(toX, toY, mx, my, mw, mh)
+
             local c = SOVEREIGN_COLORS[fl.from_id] or {200, 60, 50}
-
-            -- 脉冲动画：每条前线有不同相位
             local pulse = 0.55 + 0.45 * math.sin(t * 2.5 + (fl._phase or 0))
             local alpha = math.floor(180 * pulse)
 
-            -- 计算方向
             local dx = sx2 - sx1
             local dy = sy2 - sy1
             local len = math.sqrt(dx * dx + dy * dy)
             if len < 5 then goto continue end
 
             local ux, uy = dx / len, dy / len
-
-            -- 缩短起止点，避免覆盖标签
             local shrink = math.min(len * 0.18, 16)
             local ax1 = sx1 + ux * shrink
             local ay1 = sy1 + uy * shrink
             local ax2 = sx2 - ux * shrink
             local ay2 = sy2 - uy * shrink
 
-            -- 主线（虚线效果通过多段短线模拟）
+            -- 虚线
             local segLen = math.max(4, 6 + self.zoom_ * 0.5)
             local gapLen = math.max(3, 4 + self.zoom_ * 0.3)
             local lineDx = ax2 - ax1
             local lineDy = ay2 - ay1
             local lineLen = math.sqrt(lineDx * lineDx + lineDy * lineDy)
-            local lux, luy = lineDx / math.max(1, lineLen), lineDy / math.max(1, lineLen)
+            local lux = lineDx / math.max(1, lineLen)
+            local luy = lineDy / math.max(1, lineLen)
             local lineW = math.max(1.2, math.min(2.5, 1.0 + self.zoom_ * 0.25))
 
             nvgStrokeColor(nvg, nvgRGBA(c[1], c[2], c[3], alpha))
@@ -721,7 +746,7 @@ function MapWidget:_DrawFrontLines(nvg, mx, my, mw, mh)
                 pos = segEnd + gapLen
             end
 
-            -- 箭头（目标端）
+            -- 箭头
             local arrowLen = math.max(5, math.min(10, lineLen * 0.12))
             local ahx = ax2 - ux * arrowLen
             local ahy = ay2 - uy * arrowLen
@@ -735,7 +760,7 @@ function MapWidget:_DrawFrontLines(nvg, mx, my, mw, mh)
             nvgFillColor(nvg, nvgRGBA(c[1], c[2], c[3], alpha))
             nvgFill(nvg)
 
-            -- 中点 ⚔ 图标（缩放 >= 1.5 时显示）
+            -- 中点 ⚔ 图标
             if self.zoom_ >= 1.5 then
                 local midX = (ax1 + ax2) * 0.5
                 local midY = (ay1 + ay2) * 0.5
@@ -752,13 +777,16 @@ function MapWidget:_DrawFrontLines(nvg, mx, my, mw, mh)
     end
 end
 
---- 资源图层 — 在节点旁显示资源标签
+-- ============================================================================
+-- 资源图层
+-- ============================================================================
+
 function MapWidget:_DrawResourceLayer(nvg, mx, my, mw, mh)
-    for _, gn in ipairs(self.mapTiles_ or GAME_NODES) do
-        local rd = self:_FindRegionData(gn.region_id or gn.id)
+    for _, tile in ipairs(self.mapTiles_) do
+        local rd = self:_FindRegionData(tile.region_id)
         if rd and rd.resources then
-            local pos = self:_GetNodePos(gn)
-            local sx, sy = self:_W2S(pos[1], pos[2], mx, my, mw, mh)
+            local cx, cy = MapTilesData.GetHexCenter(tile.q, tile.r)
+            local sx, sy = self:_W2S(cx, cy, mx, my, mw, mh)
             local offsetX = 0
             local iconSize = math.max(8, math.min(12, 6 + self.zoom_ * 1.0))
             nvgFontFace(nvg, "sans"); nvgFontSize(nvg, iconSize)
@@ -767,7 +795,6 @@ function MapWidget:_DrawResourceLayer(nvg, mx, my, mw, mh)
                 local resVal = rd.resources[resKey] or 0
                 if resVal > 0 and RESOURCE_ICONS[resKey] then
                     local tag = RESOURCE_ICONS[resKey]
-                    -- 背景胶囊
                     local tw = iconSize * #tag * 0.6 + 6
                     local tx = sx + 14 + offsetX
                     local ty = sy - 14
@@ -775,7 +802,6 @@ function MapWidget:_DrawResourceLayer(nvg, mx, my, mw, mh)
                     nvgRoundedRect(nvg, tx - 3, ty - iconSize * 0.5 - 1, tw, iconSize + 2, 3)
                     nvgFillColor(nvg, nvgRGBA(30, 28, 22, 180))
                     nvgFill(nvg)
-                    -- 文字
                     nvgFillColor(nvg, nvgRGBA(212, 175, 55, 220))
                     nvgText(nvg, tx, ty, tag)
                     offsetX = offsetX + tw + 2
@@ -785,136 +811,108 @@ function MapWidget:_DrawResourceLayer(nvg, mx, my, mw, mh)
     end
 end
 
-function MapWidget:_GetNodePos(gn)
-    if gn.pos then return gn.pos end
-    -- axial hex → 归一化世界坐标。保持宏观地图在欧洲底图内居中。
-    local q, r = gn.q or 0, gn.r or 0
-    return {
-        0.50 + q * 0.055 + r * 0.028,
-        0.46 + r * 0.072,
-    }
-end
+-- ============================================================================
+-- 节点图标 & 标签
+-- ============================================================================
 
-function MapWidget:_GetNodePoly(gn)
-    if gn.poly then return gn.poly end
-    local pos = self:_GetNodePos(gn)
-    local radius = gn.region_id and 0.032 or 0.028
-    local poly = {}
-    for i = 0, 5 do
-        local a = PI / 6 + i * PI / 3
-        table.insert(poly, pos[1] + math.cos(a) * radius)
-        table.insert(poly, pos[2] + math.sin(a) * radius)
-    end
-    return poly
-end
+function MapWidget:_DrawNodeIcons(nvg, mx, my, mw, mh)
+    for _, tile in ipairs(self.mapTiles_) do
+        local cx, cy = MapTilesData.GetHexCenter(tile.q, tile.r)
+        local sx, sy = self:_W2S(cx, cy, mx, my, mw, mh)
+        local isSel = (self.selectedNodeId_ == tile.id)
+        local isHov = (self.hoveredNodeId_ == tile.id)
+        local rd = self:_FindRegionData(tile.region_id)
 
---- 绘制游戏节点（§8.5 节点类型视觉）
-function MapWidget:_DrawGameNode(nvg, gn, mx, my, mw, mh)
-    local rd = self:_FindRegionData(gn.region_id or gn.id)
-    local isSel = (self.selectedNodeId_ == gn.id)
-    local isHov = (self.hoveredNodeId_ == gn.id)
-    local pos = self:_GetNodePos(gn)
-    local sx, sy = self:_W2S(pos[1], pos[2], mx, my, mw, mh)
+        local nt = NODE_TYPES[tile.type]
+        local icon = (nt and nt.icon) or ""
 
-    local nodeType = gn.nodeType or gn.type or "strategic"
-    local nt = NODE_TYPES[nodeType] or NODE_TYPES.mine
-    local baseR = nt.size
-    local r = math.max(6, baseR * (0.6 + self.zoom_ * 0.15))
-    local nfill = self:_GetNodeFill(rd, isSel, isHov)
-    if gn.controller then
-        local cc = FACTION_COLORS[gn.controller] or FACTION_COLORS.contested
-        nfill = { cc[1], cc[2], cc[3], isSel and 255 or 220 }
-    end
-
-    if self.zoom_ < 2.5 then
-        local dotR = isSel and 7 or (isHov and 6 or math.max(4, self.zoom_ * 2.2))
-        nvgBeginPath(nvg)
-        nvgCircle(nvg, sx, sy, dotR + (isSel and 3 or 0))
-        nvgFillColor(nvg, nvgRGBA(20, 18, 14, isSel and 180 or 120))
-        nvgFill(nvg)
-        nvgBeginPath(nvg)
-        nvgCircle(nvg, sx, sy, dotR)
-        nvgFillColor(nvg, nvgRGBA(nfill[1], nfill[2], nfill[3], isHov and 245 or 220))
-        nvgFill(nvg)
+        -- 选中/悬停高亮边框
         if isSel or isHov then
-            nvgStrokeColor(nvg, nvgRGBA(C.accent_gold[1], C.accent_gold[2], C.accent_gold[3], 220))
-            nvgStrokeWidth(nvg, 1.4)
+            self:_BeginHexPath(nvg, tile.q, tile.r, mx, my, mw, mh)
+            nvgStrokeColor(nvg, nvgRGBA(201, 168, 76, isSel and 255 or 180))
+            nvgStrokeWidth(nvg, isSel and 3.0 or 2.0)
             nvgStroke(nvg)
         end
-        return
-    end
 
-    -- 选中/悬停光环
-    if isSel or isHov then
-        self:_DrawNodeShape(nvg, sx, sy, r + 4)
-        nvgFillColor(nvg, nvgRGBA(201, 168, 76, isSel and 80 or 50))
-        nvgFill(nvg)
-    end
+        -- 缩放 < 2.5 时：只画小圆点
+        if self.zoom_ < 2.5 then
+            -- 波黑 tile 或有 region_id 的显示圆点
+            if tile.country_id == "bosnia" or tile.region_id then
+                local dotR = isSel and 5 or (isHov and 4 or 3)
+                nvgBeginPath(nvg)
+                nvgCircle(nvg, sx, sy, dotR)
+                local fc = FACTION_COLORS[tile.controller] or FACTION_COLORS.neutral
+                nvgFillColor(nvg, nvgRGBA(fc[1], fc[2], fc[3], 220))
+                nvgFill(nvg)
+                if isSel then
+                    nvgStrokeColor(nvg, nvgRGBA(201, 168, 76, 220))
+                    nvgStrokeWidth(nvg, 1.2)
+                    nvgStroke(nvg)
+                end
+            end
+            goto nextTile
+        end
 
-    -- 节点形状
-    self:_DrawNodeShape(nvg, sx, sy, r, nodeType)
-    nvgFillColor(nvg, nvgRGBA(nfill[1], nfill[2], nfill[3], nfill[4]))
-    nvgFill(nvg)
-
-    -- 节点边框
-    local borderC = isSel and C.accent_gold or { 200, 190, 170 }
-    nvgStrokeColor(nvg, nvgRGBA(borderC[1], borderC[2], borderC[3], isSel and 255 or 180))
-    nvgStrokeWidth(nvg, isSel and 2.0 or 1.2)
-    nvgStroke(nvg)
-
-    -- 节点内图标（缩放 >= 2.5 时显示）
-    if self.zoom_ >= 2.5 then
-        nvgFontFace(nvg, "sans")
-        nvgFontSize(nvg, math.min(r * 1.0, 18))
-        nvgTextAlign(nvg, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)
-        nvgFillColor(nvg, nvgRGBA(255, 255, 255, 230))
-        nvgText(nvg, sx, sy, gn.icon or "")
-    end
-
-    -- 节点状态叠加图标（右上角 12pt）
-    if rd then
-        local statusIcon = nil
-        if rd.security and rd.security <= 2 then statusIcon = "⚠" end
-        if rd.control and rd.control >= 60 then statusIcon = "⭐" end
-        if statusIcon and self.zoom_ >= 2.0 then
-            nvgFontSize(nvg, 10)
+        -- 缩放 >= 2.5：显示节点图标
+        if icon ~= "" then
+            nvgFontFace(nvg, "sans")
+            nvgFontSize(nvg, math.max(10, math.min(18, 8 + self.zoom_ * 1.5)))
             nvgTextAlign(nvg, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)
-            nvgFillColor(nvg, nvgRGBA(255, 220, 80, 230))
-            nvgText(nvg, sx + r + 2, sy - r, statusIcon)
+            nvgFillColor(nvg, nvgRGBA(255, 255, 255, 230))
+            nvgText(nvg, sx, sy, icon)
         end
-    end
 
-    -- 节点标签（缩放 >= 3.0 时显示）
-    if self.zoom_ >= 3.0 then
-        local nameSize = math.min(13, 7 + self.zoom_ * 0.8)
-        nvgFontFace(nvg, "sans"); nvgFontSize(nvg, nameSize)
-        nvgTextAlign(nvg, NVG_ALIGN_CENTER + NVG_ALIGN_TOP)
-        nvgFillColor(nvg, nvgRGBA(240, 230, 208, isSel and 255 or 190))
-        nvgText(nvg, sx, sy + r + 3, gn.label)
-
-        -- 控制比例（缩放 >= 4.0）
-        if rd and self.zoom_ >= 4.0 then
-            local ctrl = rd.control or 0
-            local ctrlC = ctrl >= 60 and C.accent_green or (ctrl >= 30 and C.accent_amber or C.accent_red)
-            nvgFontSize(nvg, math.min(11, 6 + self.zoom_ * 0.6))
-            nvgFillColor(nvg, nvgRGBA(ctrlC[1], ctrlC[2], ctrlC[3], 210))
-            nvgText(nvg, sx, sy + r + 3 + nameSize + 2, ctrl .. "%")
+        -- 状态叠加图标
+        if rd then
+            local statusIcon = nil
+            if rd.security and rd.security <= 2 then statusIcon = "⚠" end
+            if rd.control and rd.control >= 60 then statusIcon = "⭐" end
+            if statusIcon and self.zoom_ >= 2.5 then
+                nvgFontSize(nvg, 10)
+                nvgTextAlign(nvg, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)
+                nvgFillColor(nvg, nvgRGBA(255, 220, 80, 230))
+                local hexR = MapTilesData.HEX_SIZE * self.zoom_ * mw * 0.4
+                nvgText(nvg, sx + hexR, sy - hexR, statusIcon)
+            end
         end
+
+        -- 缩放 >= 3.0：显示 tile 名称
+        if self.zoom_ >= 3.0 then
+            local nameSize = math.min(13, 7 + self.zoom_ * 0.8)
+            nvgFontFace(nvg, "sans")
+            nvgFontSize(nvg, nameSize)
+            nvgTextAlign(nvg, NVG_ALIGN_CENTER + NVG_ALIGN_TOP)
+            -- 文字阴影
+            nvgFillColor(nvg, nvgRGBA(0, 0, 0, 120))
+            local hexScreenR = MapTilesData.HEX_SIZE * self.zoom_ * mw * 0.5
+            nvgText(nvg, sx + 1, sy + hexScreenR + 2, tile.label)
+            nvgFillColor(nvg, nvgRGBA(240, 230, 208, isSel and 255 or 190))
+            nvgText(nvg, sx, sy + hexScreenR + 1, tile.label)
+
+            -- 控制比例（缩放 >= 4.0，仅波黑）
+            if rd and self.zoom_ >= 4.0 then
+                local ctrl = rd.control or 0
+                local ctrlC = ctrl >= 60 and C.accent_green or (ctrl >= 30 and C.accent_amber or C.accent_red)
+                nvgFontSize(nvg, math.min(11, 6 + self.zoom_ * 0.6))
+                nvgFillColor(nvg, nvgRGBA(ctrlC[1], ctrlC[2], ctrlC[3], 210))
+                nvgText(nvg, sx, sy + hexScreenR + 1 + nameSize + 2, ctrl .. "%")
+            end
+        end
+
+        ::nextTile::
     end
 end
 
 -- ============================================================================
--- 图层选择器（§8.5 顶部悬浮条）
+-- 图层选择器
 -- ============================================================================
 
 function MapWidget:_DrawLayerSelector(nvg, wx, wy, ww)
-    -- 半透明背景条
     nvgBeginPath(nvg)
     nvgRoundedRect(nvg, wx + 1, wy + 1, ww - 2, LAYER_BAR_H, 5)
     nvgFillColor(nvg, nvgRGBA(25, 23, 18, 210))
     nvgFill(nvg)
 
-    -- 绘制各图层胶囊按钮
     local px = wx + LAYER_BAR_PAD
     local py = wy + (LAYER_BAR_H - LAYER_PILL_H) * 0.5
     nvgFontFace(nvg, "sans")
@@ -924,7 +922,6 @@ function MapWidget:_DrawLayerSelector(nvg, wx, wy, ww)
         local isLocked = layer.locked or false
         local pillW = 38
 
-        -- 胶囊背景
         nvgBeginPath(nvg)
         nvgRoundedRect(nvg, px, py, pillW, LAYER_PILL_H, 4)
         if isActive then
@@ -936,7 +933,6 @@ function MapWidget:_DrawLayerSelector(nvg, wx, wy, ww)
         end
         nvgFill(nvg)
 
-        -- 色块指示器 (4x4)
         if not isActive then
             nvgBeginPath(nvg)
             nvgRect(nvg, px + 4, py + (LAYER_PILL_H - 4) * 0.5, 4, 4)
@@ -944,7 +940,6 @@ function MapWidget:_DrawLayerSelector(nvg, wx, wy, ww)
             nvgFill(nvg)
         end
 
-        -- 文字
         nvgFontSize(nvg, 10)
         nvgTextAlign(nvg, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)
         if isActive then
@@ -961,14 +956,13 @@ function MapWidget:_DrawLayerSelector(nvg, wx, wy, ww)
 end
 
 -- ============================================================================
--- 地图 HUD 控件
+-- HUD 控件
 -- ============================================================================
 
 function MapWidget:_DrawControls(nvg, wx, wy, ww, wh)
     local bx = wx + ww - BTN_MARGIN - BTN_SIZE
     local by = wy + BTN_MARGIN
 
-    -- 缩放倍率
     nvgFontFace(nvg, "sans"); nvgFontSize(nvg, 9)
     nvgTextAlign(nvg, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)
     nvgFillColor(nvg, nvgRGBA(200, 185, 155, 140))
@@ -979,7 +973,6 @@ function MapWidget:_DrawControls(nvg, wx, wy, ww, wh)
     self:_DrawBtn(nvg, bx, by + (BTN_SIZE + BTN_GAP) * 2, "🌍")
     self:_DrawBtn(nvg, bx, by + (BTN_SIZE + BTN_GAP) * 3, "◎")
 
-    -- 图例按钮（右下角）
     local legendY = wy + wh - BTN_MARGIN - BTN_SIZE
     self:_DrawBtn(nvg, bx, legendY, "?")
 
@@ -987,7 +980,7 @@ function MapWidget:_DrawControls(nvg, wx, wy, ww, wh)
         self:_DrawLegendPanel(nvg, wx + ww - 178, legendY - 132)
     end
 
-    -- 势力图例（左下角微型）
+    -- 势力图例（左下角）
     if self.activeLayers_.control then
         local lx = wx + BTN_MARGIN
         local ly = wy + wh - BTN_MARGIN - 50
@@ -1035,7 +1028,7 @@ function MapWidget:_DrawLegendPanel(nvg, x, y)
         { "控制色：玩家/家族/外资/争议", C.accent_gold },
         { "安全层：红低、绿高", C.accent_red },
         { "资源：Au 金 / Ag 银 / C 煤 / Fe 钢", C.accent_amber },
-        { "◎ 聚焦波黑，地球显示全欧", C.accent_blue },
+        { "◎ 聚焦波黑，🌍 显示全欧", C.accent_blue },
     }
     nvgFontSize(nvg, 8)
     for i, row in ipairs(rows) do
@@ -1067,6 +1060,7 @@ end
 -- ============================================================================
 
 function MapWidget:_FindRegionData(regionId)
+    if not regionId then return nil end
     for _, r in ipairs(self.regions_) do
         if r.id == regionId then return r end
     end
@@ -1109,7 +1103,7 @@ function MapWidget:OnPointerDown(event)
     end
     by = by + BTN_SIZE + BTN_GAP
     if self:_HitRect(px, py, bx, by, BTN_SIZE, BTN_SIZE) then
-        self:_ZoomAt(l.x + l.w * 0.5, l.y + l.h * 0.5, 1/ZOOM_STEP, mx, my, mw, mh)
+        self:_ZoomAt(l.x + l.w * 0.5, l.y + l.h * 0.5, 1 / ZOOM_STEP, mx, my, mw, mh)
         event:StopPropagation(); return
     end
     by = by + BTN_SIZE + BTN_GAP
@@ -1157,13 +1151,14 @@ function MapWidget:OnPointerMove(event)
             event:StopPropagation()
         end
     else
-        -- 悬停检测（节点）
+        -- 悬停检测（hex 命中）
         local mx, my, mw, mh = self:_MapAreaHit()
         self.hoveredNodeId_ = nil
-        local nodes = self.mapTiles_ or GAME_NODES
-        for i = #nodes, 1, -1 do
-            if self:_HitPoly(px, py, self:_GetNodePoly(nodes[i]), mx, my, mw, mh) then
-                self.hoveredNodeId_ = nodes[i].id
+        local wx, wy = self:_S2W(px, py, mx, my, mw, mh)
+        for i = #self.mapTiles_, 1, -1 do
+            local tile = self.mapTiles_[i]
+            if MapTilesData.HitHex(wx, wy, tile.q, tile.r) then
+                self.hoveredNodeId_ = tile.id
                 break
             end
         end
@@ -1177,12 +1172,13 @@ function MapWidget:OnPointerUp(event)
     if not self.dragMoved_ then
         local px, py = event.x, event.y
         local mx, my, mw, mh = self:_MapAreaHit()
-        local nodes = self.mapTiles_ or GAME_NODES
-        for i = #nodes, 1, -1 do
-            if self:_HitPoly(px, py, self:_GetNodePoly(nodes[i]), mx, my, mw, mh) then
-                self.selectedNodeId_ = nodes[i].id
+        local wx, wy = self:_S2W(px, py, mx, my, mw, mh)
+        for i = #self.mapTiles_, 1, -1 do
+            local tile = self.mapTiles_[i]
+            if MapTilesData.HitHex(wx, wy, tile.q, tile.r) then
+                self.selectedNodeId_ = tile.id
                 if self.onRegionSelect_ then
-                    self.onRegionSelect_(nodes[i].id)
+                    self.onRegionSelect_(tile.id)
                 end
                 event:StopPropagation()
                 return
@@ -1203,22 +1199,6 @@ end
 
 function MapWidget:_HitRect(px, py, rx, ry, rw, rh)
     return px >= rx and px <= rx + rw and py >= ry and py <= ry + rh
-end
-
-function MapWidget:_HitPoly(px, py, poly, mx, my, mw, mh)
-    local n = #poly / 2
-    if n < 3 then return false end
-    local inside = false
-    local j = n
-    for i = 1, n do
-        local xi, yi = self:_W2S(poly[(i-1)*2+1], poly[(i-1)*2+2], mx, my, mw, mh)
-        local xj, yj = self:_W2S(poly[(j-1)*2+1], poly[(j-1)*2+2], mx, my, mw, mh)
-        if ((yi > py) ~= (yj > py)) and (px < (xj - xi) * (py - yi) / (yj - yi) + xi) then
-            inside = not inside
-        end
-        j = i
-    end
-    return inside
 end
 
 return MapWidget

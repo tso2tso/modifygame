@@ -254,6 +254,7 @@ end
 ---@param n number
 ---@return string
 function Config.FormatNumber(n)
+    n = n or 0
     local s = tostring(math.floor(math.abs(n)))
     local parts = {}
     while #s > 3 do
