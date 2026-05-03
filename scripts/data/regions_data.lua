@@ -13,11 +13,11 @@ function RegionsData.CreateInitialRegions()
             name = "巴科维奇矿区",
             icon = "⛏️",
             type = "mine",
-            desc = "波黑中部山区的金银矿脉，家族起家之地。矿脉品质优良但交通不便，需要稳定的劳工和护矿力量。",
+            desc = "波黑中部山区的金铜矿脉，家族起家之地。矿脉品质优良但交通不便，需要稳定的劳工和护矿力量。",
             -- 资源与产能
             resources = {
                 gold_reserve  = 500,   -- 黄金储量（单位）  200→500：Lv3+30工人约可采80季(20年)
-                silver_reserve = 1200, -- 白银储量          500→1200
+                copper_reserve = 1200, -- 铜储量            500→1200
                 base_output   = 2,     -- 基础每季产金量
             },
             -- 地区属性
@@ -67,7 +67,7 @@ function RegionsData.CreateInitialRegions()
             desc = "波黑首府，多民族多宗教聚居的文化名城。政治与外交行动的核心节点，也是文化路线的关键战场。",
             resources = {
                 gold_reserve   = 0,
-                silver_reserve = 0,
+                copper_reserve = 0,
                 base_output    = 0,
             },
             security    = 4,

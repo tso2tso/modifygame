@@ -75,6 +75,10 @@ function Tech.Start(state, techId)
     end
     local inflation = GameState.GetInflationFactor(state)
     local techCost = math.floor(tech.cost * inflation)
+    -- 科技顾问满配独有：学术权威，研发费用降低 20%
+    if GameState.HasExcellentPosition(state, "tech_advisor") then
+        techCost = math.floor(techCost * 0.8)
+    end
     if state.cash < techCost then
         return false, "资金不足"
     end
@@ -88,7 +92,7 @@ function Tech.Start(state, techId)
 
     -- 科技顾问加成：减少研发周期
     local bonus = GameState.GetPositionBonus(state, "tech_advisor")
-    total = math.max(1, math.floor(total * (1 - bonus * 0.5)))
+    total = math.max(1, math.floor(total * (1 - bonus * 0.3)))
 
     -- 影响力里程碑加成
     if GameState.HasInfluenceThreshold(state, 200) then
@@ -122,7 +126,7 @@ function Tech.Tick(state, report)
     ip.progress = ip.progress + 1
     -- 科技顾问加成：偶尔额外 +1 进度
     local bonus = GameState.GetPositionBonus(state, "tech_advisor")
-    if bonus > 0 and math.random() < bonus then
+    if bonus > 0 and math.random() < bonus * 0.4 then
         ip.progress = ip.progress + 1
     end
     if ip.progress >= ip.total then

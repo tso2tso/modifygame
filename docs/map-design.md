@@ -210,6 +210,19 @@ camY ∈ [halfH, 1 - halfH]
 10. 缩放控件按钮（右上角，裁剪区外，始终可见）
 ```
 
+### 6.1 外国矿产资源层
+
+在资源图层（`_DrawResourceLayer`）中，外国矿产地块根据侦察/开采状态叠加不同视觉标记：
+
+| 状态 | 图标/标签 | 颜色 | 说明 |
+|------|---------|------|------|
+| 未侦察 | "?" | 灰色 (160,160,160) | 已知有矿但储量未知 |
+| 正在侦察 | "⏳" | 绿色 (100,200,100) | 侦察进行中 |
+| 已侦察 | "Au/Ag/C" + 储量 | 琥珀色 (200,170,80) | 显示静态储量数据 |
+| 正在开采 | "Au/Ag/C" + 储量 | 绿色 (80,200,120) + 红色损毁% | 显示产出和设施状态 |
+
+外国矿产数据通过 `MapWidget:SetForeignOps(fo)` 注入，`fo` 结构包含 `scouted`、`scouting`、`active` 三个子表。
+
 ---
 
 ## 7. 颜色方案
@@ -256,6 +269,9 @@ local map = MapWidget {
 
 -- 设置游戏区域数据（来自 game_state.regions）
 map:SetRegions(state.regions)
+
+-- 设置外国矿产状态（来自 state.foreign_ops）
+map:SetForeignOps(state.foreign_ops)
 
 -- 设置/获取选中的区域 ID
 map:SetSelected("capital_city")

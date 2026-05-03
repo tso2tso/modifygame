@@ -41,14 +41,16 @@ function Start()
     --     此处将 UI 的鼠标处理函数替换为空操作，只保留触摸路径。
     --     Web 端触屏设备同样存在此问题，因此 Web 也需要去重。
     local plat = GetPlatform and GetPlatform() or ""
-    if plat == "Android" or plat == "iOS" or plat == "Web" then
+    local isTouchPlatform = (plat == "Android" or plat == "iOS"
+        or (plat == "Web" and input and input.touchEmulation))
+    if isTouchPlatform then
         local noop = function() end
         UI.HandleMouseDown = noop
         UI.HandleMouseUp   = noop
         UI.HandleMouseMove = noop
         print("[Touch] " .. plat .. "：已抑制模拟鼠标事件，使用纯触摸路径")
     else
-        print("[Input] 桌面端：使用鼠标事件路径")
+        print("[Input] " .. plat .. "：使用鼠标事件路径")
     end
 
     -- 1.5 初始化音频系统
@@ -440,7 +442,7 @@ function ShowBankruptcyRescueModal(state)
                         text = "观看广告，绝处逢生",
                         variant = "primary",
                         width = "100%",
-                        onClick = function(self)
+                        onClick = Config.ClickGuard(function(self)
                             modal:Close()
                             modal:Destroy()
                             ---@diagnostic disable-next-line: undefined-global
@@ -458,17 +460,17 @@ function ShowBankruptcyRescueModal(state)
                                 end
                                 ApplyBankruptcyRescue(state, rescueCash)
                             end)
-                        end,
+                        end),
                     },
                     UI.Button {
                         text = "放弃挣扎，接受命运",
                         variant = "ghost",
                         width = "100%",
-                        onClick = function(self)
+                        onClick = Config.ClickGuard(function(self)
                             modal:Close()
                             modal:Destroy()
                             ProceedBankruptcy(state)
-                        end,
+                        end),
                     },
                 },
             },

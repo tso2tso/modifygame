@@ -310,9 +310,9 @@ function MenuPage._CreateSaveCardInner(state, hasSave)
             backgroundColor = C.accent_gold,
             fontColor = C.bg_base,
             borderRadius = S.radius_btn,
-            onClick = function(self)
+            onClick = Config.ClickGuard(function(self)
                 MenuPage._OnQuickSave()
-            end,
+            end),
         },
         UI.Divider { color = C.divider },
         -- 双槽位读档
@@ -343,9 +343,9 @@ function MenuPage._CreateSaveCardInner(state, hasSave)
             fontColor = C.accent_red,
             borderColor = C.accent_red,
             borderRadius = S.radius_btn,
-            onClick = function(self)
+            onClick = Config.ClickGuard(function(self)
                 MenuPage._OnNewGame()
-            end,
+            end),
         },
         UI.Label {
             text = "新游戏将覆盖当前进度",
@@ -379,6 +379,7 @@ function MenuPage._CreateStatsCard(state)
     local totalExpense = state.total_expense or 0
     local members = #state.family.members
     local logCount = #state.history_log
+    state.victory = state.victory or { economic = 0, military = 0, claimed = false }
     local standing = GameState.GetVictoryStanding(state)
     local ecoTarget = (standing.best_ai.economic.score or 0)
         + (((Balance.VICTORY.relative.lead_margin or {}).economic) or 200)

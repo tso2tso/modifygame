@@ -61,10 +61,8 @@ function Combat.PlayerPower(state)
         local unassigned = Equipment.GetUnassignedGuards(state)
         totalPower = totalPower + unassigned * EquipmentData.SQUAD.unassigned_power
     else
-        -- 兼容：无编队时 fallback 旧公式基础部分
-        local base = m.guards * BMI.guard_base_power
-        local equipMul = 1.0 + ((m.equipment or 1) - 1) * BC.equipment_bonus
-        totalPower = base * equipMul
+        -- 兼容：无编队时所有护卫视为未编队，使用 unassigned_power 系数
+        totalPower = m.guards * BMI.guard_base_power * (EquipmentData.SQUAD.unassigned_power or 0.6)
     end
 
     local moraleMul = math.max(0.3, m.morale * BMI.morale_multiplier)
@@ -72,7 +70,7 @@ function Combat.PlayerPower(state)
     local chiefBonus = GameState.GetPositionBonus(state, "military_chief")
     -- 科技护卫战力加成
     local techBonus = state.guard_power_tech_bonus or 0
-    return totalPower * moraleMul * (1 + chiefBonus) * (1 + techBonus)
+    return totalPower * moraleMul * (1 + chiefBonus * 0.4) * (1 + techBonus)
 end
 
 ---@param faction table
@@ -202,7 +200,8 @@ end
 function Combat.ResolveAIActions(state)
     local messages = {}
     for _, faction in ipairs(state.ai_factions) do
-        -- 瘫痪状态的势力不会主动进攻
+        -- 已击败或瘫痪状态的势力不会主动进攻
+        if faction.defeated then goto continue_ai end
         if faction.collapsed then goto continue_ai end
         if not faction.pact_remaining or faction.pact_remaining <= 0 then
             local aiConfig = Balance.AI[faction.type] or {}
@@ -232,6 +231,8 @@ function Combat.PlayerAttack(state, factionId)
         if f.id == factionId then target = f; break end
     end
     if not target then return false, "目标不存在" end
+    if target.defeated then return false, "该势力已被击败" end
+    if target.collapsed then return false, "该势力已瘫痪，无法发起进攻" end
     local result = Combat.Resolve(state, target, false)
     local log = Combat.ApplyResult(state, target, result)
     return true, log

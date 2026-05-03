@@ -19,10 +19,12 @@ local StockEngine = {}
 -- 战争章节（第二章 1914-1918 / 第四章 1941-1945 / 第六章 1992-1995）
 -- 波动率乘数，对应真实战时股市放量震荡规律
 StockEngine.WAR_SIGMA_MULT  = 1.8
--- 价格下限保护（避免极端随机数打到 0）
-StockEngine.PRICE_FLOOR     = 1.0
--- 价格上限保护（避免指数爆炸造成整数溢出）
-StockEngine.PRICE_CEIL      = 9999.0
+-- 绝对价格保护（极端防御，正常不应触及）
+StockEngine.ABS_PRICE_FLOOR = 0.10
+StockEngine.ABS_PRICE_CEIL  = 99999.0
+-- 软限倍率：相对公允价值的上下限
+StockEngine.SOFT_CEIL_MULT  = 5.0    -- 最高 = fairValue × 5
+StockEngine.SOFT_FLOOR_MULT = 0.15   -- 最低 = fairValue × 0.15
 -- 历史最多保留 12 季（3 年），用于 UI 走势图
 StockEngine.HISTORY_KEEP    = 12
 
@@ -46,18 +48,25 @@ end
 -- 单步 GBM：返回新价格和涨跌幅
 -- ============================================================================
 ---@param price number  当前价格
----@param mu number     季度漂移率（已叠加所有修正）
+---@param mu number     季度漂移率（已叠加所有修正 + 均值回归）
 ---@param sigma number  季度波动率
 ---@param dt number|nil 时间步长（默认 1 季度）
+---@param fairValue number|nil 公允价值（用于软限价）
 ---@return number newPrice, number changePct
-function StockEngine.StepGBM(price, mu, sigma, dt)
+function StockEngine.StepGBM(price, mu, sigma, dt, fairValue)
     dt = dt or 1.0
     local eps   = StockEngine.RandNormal()
     local drift = (mu - 0.5 * sigma * sigma) * dt
     local shock = sigma * eps * math.sqrt(dt)
     local newPrice = price * math.exp(drift + shock)
-    newPrice = math.max(StockEngine.PRICE_FLOOR,
-        math.min(StockEngine.PRICE_CEIL, newPrice))
+    -- 软限价：基于公允价值
+    local priceCeil = StockEngine.ABS_PRICE_CEIL
+    local priceFloor = StockEngine.ABS_PRICE_FLOOR
+    if fairValue and fairValue > 0 then
+        priceCeil = math.min(priceCeil, fairValue * StockEngine.SOFT_CEIL_MULT)
+        priceFloor = math.max(priceFloor, fairValue * StockEngine.SOFT_FLOOR_MULT)
+    end
+    newPrice = math.max(priceFloor, math.min(priceCeil, newPrice))
     local changePct = (newPrice - price) / price * 100.0
     return newPrice, changePct
 end
@@ -103,8 +112,86 @@ function StockEngine._ConsumeEventMods(stock)
 end
 
 -- ============================================================================
--- 批量推进所有股票
+-- 板块加成：根据游戏实体经营状态计算板块基本面奖励/惩罚
+-- 返回 [-1, +1] 区间的加成系数
+-- ============================================================================
+---@param state table
+---@param stock table
+---@return number sectorBonus
+function StockEngine._GetSectorBonus(state, stock)
+    local sector = stock.sector
+    if not sector then return 0 end
+
+    if sector == "mining" then
+        -- 矿业：活跃矿山数量加成
+        local activeMines = 0
+        for _, mine in ipairs(state.mines or {}) do
+            if mine.active ~= false then activeMines = activeMines + 1 end
+        end
+        return math.min(0.5, activeMines * 0.03)
+
+    elseif sector == "military" then
+        -- 军工：战时大幅利好，和平微弱利空
+        local atWar = state.flags and state.flags.at_war
+        return atWar and 0.8 or -0.2
+
+    elseif sector == "transport" then
+        local GameState = require("game_state")
+        local blocked = GameState.GetModifierValue(state, "railway_blocked") > 0
+        if stock.id == "imperial_railway" then
+            -- 铁路：封锁利空，工业控制利好
+            local industrialControl = 0
+            for _, r in ipairs(state.regions or {}) do
+                if r.id == "industrial_town" then industrialControl = r.control or 0; break end
+            end
+            return (blocked and -0.3 or 0) + (industrialControl - 40) / 200
+        else
+            -- 航运：战时利空，和平利好
+            local atWar = state.flags and state.flags.at_war
+            return atWar and -0.3 or 0.1
+        end
+
+    elseif sector == "finance" then
+        -- 金融：危机期间利空，杠杆过高惩罚
+        local GameState = require("game_state")
+        local leverage = GameState.CalcLeverage and GameState.CalcLeverage(state) or 0
+        local crisis = GameState.GetModifierValue(state, "financial_crisis") ~= 0
+        return (crisis and -0.3 or 0) - math.min(0.3, leverage * 0.15)
+
+    elseif sector == "trade" then
+        -- 贸易：贸易收入加成，封锁利空
+        local GameState = require("game_state")
+        local blocked = GameState.GetModifierValue(state, "railway_blocked") > 0
+        local tradeIncome = (state.trade_passive_income or 0) / 5000
+        return math.min(0.3, tradeIncome) + (blocked and -0.2 or 0)
+    end
+
+    return 0
+end
+
+-- ============================================================================
+-- 计算公允价值：fairValue = base_value × inflation^alpha × (1 + sectorBonus)
+-- ============================================================================
+---@param state table
+---@param stock table
+---@return number fairValue
+function StockEngine.ComputeFairValue(state, stock)
+    local baseValue = stock.base_value or stock.price or 10
+    local alpha = stock.inflation_alpha or 1.0
+    local inflation = state.inflation_factor or 1.0
+    local sectorBonus = StockEngine._GetSectorBonus(state, stock)
+    -- 通胀锚定 + 板块基本面
+    local fv = baseValue * (inflation ^ alpha) * (1 + sectorBonus)
+    return math.max(0.10, fv)
+end
+
+-- ============================================================================
+-- 批量推进所有股票（Fair Value Anchored GBM）
 -- 每个季度结束时调用一次（TurnEngine.EndTurn 里）
+--
+-- 核心公式：
+--   effectiveMu = base_mu + eventDelta + θ × ln(fairValue / price)
+--   P_{t+1} = P_t × exp((effectiveMu - σ²/2) + σ × ε)
 -- ============================================================================
 ---@param state table 游戏状态（含 state.stocks）
 function StockEngine.UpdateAll(state)
@@ -117,14 +204,27 @@ function StockEngine.UpdateAll(state)
         -- 保留前一价用于 UI 对比
         stock.prev_price = stock.price
 
-        -- 组合 mu：基础 + 事件修正（并消耗一季）
+        -- 1. 计算公允价值
+        local fairValue = StockEngine.ComputeFairValue(state, stock)
+        stock.fair_value = fairValue
+
+        -- 2. 均值回归项：θ × ln(V / P)
+        local theta = stock.theta or 0.12
+        local reversionTerm = 0
+        if stock.price > 0 and fairValue > 0 then
+            reversionTerm = theta * math.log(fairValue / stock.price)
+        end
+
+        -- 3. 组合 mu：基础 + 事件修正 + 均值回归
         local eventDelta = StockEngine._ConsumeEventMods(stock)
-        local effectiveMu = (stock.mu or 0) + eventDelta
-        -- 组合 sigma：基础 * 战时倍率
+        local effectiveMu = (stock.mu or 0) + eventDelta + reversionTerm
+
+        -- 4. 组合 sigma：基础 × 战时倍率
         local effectiveSigma = (stock.sigma or 0.1) * sigmaMult
 
+        -- 5. 执行 GBM 步进（软限价基于公允价值）
         stock.price, stock.change_pct = StockEngine.StepGBM(
-            stock.price, effectiveMu, effectiveSigma)
+            stock.price, effectiveMu, effectiveSigma, 1.0, fairValue)
 
         -- 历史归档
         stock.history = stock.history or {}

@@ -20,42 +20,23 @@ local BW = Balance.WORKERS
 
 local IndustryPage = {}
 
---- 计算当前黄金实际单价（与自动售出逻辑保持一致）
----@param state table
----@return number price 每单位黄金的实际售价（已取整）
-local function calcGoldPrice(state)
-    local inflation = GameState.GetInflationFactor(state)
-    local price = BM.gold_price * inflation
-    -- 战时军需利润修正
-    local priceModifier = GameState.GetModifierValue(state, "military_industry_profit")
-    if priceModifier > 0 then
-        price = price * (1 + priceModifier * 0.5)
-    end
-    -- 科技金价加成
-    local goldPriceBonus = state.gold_price_bonus or 0
-    if goldPriceBonus > 0 then
-        price = price * (1 + goldPriceBonus)
-    end
-    -- 事件独立金价修正
-    local goldPriceMod = GameState.GetModifierValue(state, "gold_price_mod")
-    if goldPriceMod ~= 0 then
-        price = price * (1 + goldPriceMod)
-    end
-    return math.floor(price)
-end
+
 
 ---@type table 游戏状态引用
 local stateRef_ = nil
 ---@type function|nil 状态变化回调
 local onStateChanged_ = nil
+---@type function|nil 轻量刷新回调（仅更新 TopBar，不重建页面树）
+local onLightRefresh_ = nil
 
 --- 创建产业页完整内容
 ---@param state table
----@param callbacks table { onStateChanged = function }
+---@param callbacks table { onStateChanged = function, onLightRefresh = function }
 ---@return table widget
 function IndustryPage.Create(state, callbacks)
     stateRef_ = state
     onStateChanged_ = callbacks and callbacks.onStateChanged
+    onLightRefresh_ = callbacks and callbacks.onLightRefresh
 
     return IndustryPage._BuildContent(state)
 end
@@ -67,19 +48,23 @@ function IndustryPage._BuildContent(state)
     -- 1. 收支预估卡片
     table.insert(children, IndustryPage._CreateEstimateCard(state))
 
-    -- 2. 探矿卡片
+    -- 3. 煤炭动力分配面板
+    table.insert(children, IndustryPage._CreateCoalPowerCard(state))
+
+    -- 4. 探矿卡片
     table.insert(children, IndustryPage._CreateProspectCard(state))
 
-    -- 3. 矿山卡片（遍历所有矿山）
+    -- 4.5 铜/煤探矿卡片
+    table.insert(children, IndustryPage._CreateResourceProspectCard(state, "copper"))
+    table.insert(children, IndustryPage._CreateResourceProspectCard(state, "coal"))
+
+    -- 5. 矿山卡片（遍历所有矿山）
     for _, mine in ipairs(state.mines) do
         table.insert(children, IndustryPage._CreateMineCard(state, mine))
     end
 
-    -- 4. 工人管理卡片
+    -- 6. 工人管理卡片
     table.insert(children, IndustryPage._CreateWorkerCard(state))
-
-    -- 4. 操作按钮区
-    table.insert(children, IndustryPage._CreateActionCard(state))
 
     return UI.Panel {
         id = "industryContent",
@@ -129,7 +114,7 @@ function IndustryPage._CreateEstimateCard(state)
                         (estNet >= 0 and "+" or "") .. estNet, netColor),
                 },
             },
-            -- 副指标：白银库存 + 煤炭库存 + 通胀倍率
+            -- 副指标：铜库存 + 煤炭库存 + 通胀倍率
             UI.Panel {
                 width = "100%",
                 flexDirection = "row",
@@ -137,8 +122,8 @@ function IndustryPage._CreateEstimateCard(state)
                 flexWrap = "wrap",
                 gap = 4,
                 children = {
-                    IndustryPage._EstimateItem("⚪ 白银库存",
-                        tostring(state.silver or 0) .. " 单位", C.paper_light),
+                    IndustryPage._EstimateItem("🟠 铜库存",
+                        tostring(state.copper or 0) .. " 单位", C.paper_light),
                     IndustryPage._EstimateItem("⚫ 煤炭库存",
                         tostring(state.coal or 0) .. " 单位", { 140, 130, 120, 255 }),
                     IndustryPage._EstimateItem("潜在售金",
@@ -192,8 +177,11 @@ function IndustryPage._CreateMineCard(state, mine)
     local directorName = directorMember and directorMember.name or "空缺"
     local directorColor = directorMember and C.accent_green or C.accent_red
 
-    -- 白银储量
-    local silverReserve = region and region.resources.silver_reserve or 0
+    -- 铜储量（矿区资源）
+    local copperReserve = (region and region.resources and region.resources.copper_reserve) or 0
+    -- 煤储量：煤存储在工业区（industrial_town），不在矿区
+    local industrialRegion = GameState.GetRegion(state, "industrial_town")
+    local coalReserve = (industrialRegion and industrialRegion.resources and industrialRegion.resources.coal_reserve) or 0
 
     -- 升级费用
     local upgradeCost = math.floor(BM.upgrade_cost * mine.level * GameState.GetAssetPriceFactor(state))
@@ -254,10 +242,10 @@ function IndustryPage._CreateMineCard(state, mine)
             disabled = not canMigrate,
             backgroundColor = canMigrate and C.accent_blue or nil,
             borderRadius = S.radius_btn,
-            onClick = function(self)
+            onClick = Config.ClickGuard(function(self)
                 self.props.disabled = true
                 IndustryPage._OnMigrateMine(mine, migrateCost, migrateAP)
-            end,
+            end),
         })
         -- 善后处理
         table.insert(bottomChildren, UI.Button {
@@ -271,10 +259,10 @@ function IndustryPage._CreateMineCard(state, mine)
             disabled = not canCleanup,
             backgroundColor = canCleanup and C.accent_amber or nil,
             borderRadius = S.radius_btn,
-            onClick = function(self)
+            onClick = Config.ClickGuard(function(self)
                 self.props.disabled = true
                 IndustryPage._OnCleanupMine(mine, cleanupCost)
-            end,
+            end),
         })
         -- 搁置不管
         table.insert(bottomChildren, UI.Button {
@@ -285,10 +273,10 @@ function IndustryPage._CreateMineCard(state, mine)
             variant = "outlined",
             fontColor = C.accent_red,
             borderRadius = S.radius_btn,
-            onClick = function(self)
+            onClick = Config.ClickGuard(function(self)
                 self.props.disabled = true
                 IndustryPage._OnAbandonMine(mine)
-            end,
+            end),
         })
     else
         -- 正常：升级按钮
@@ -304,10 +292,10 @@ function IndustryPage._CreateMineCard(state, mine)
             backgroundColor = canUpgrade and C.accent_amber or nil,
             fontColor = canUpgrade and C.bg_base or C.text_muted,
             borderRadius = S.radius_btn,
-            onClick = function(self)
+            onClick = Config.ClickGuard(function(self)
                 self.props.disabled = true
                 Actions.UpgradeMine(stateRef_, mine, onStateChanged_)
-            end,
+            end),
         })
     end
 
@@ -403,16 +391,33 @@ function IndustryPage._CreateMineCard(state, mine)
                         trackColor = C.bg_surface,
                         fillColor = isDepleted and C.accent_red or (mineReserve < 100 and C.accent_amber or C.accent_gold),
                     },
-                    -- 白银储量（共享 region）
-                    IndustryPage._InfoRow("白银储量", silverReserve .. " 单位",
-                        silverReserve < 100 and C.accent_red or C.text_secondary),
+                    -- 矿业总监满配独有：矿脉洞察，显示预计枯竭季度
+                    (not isDepleted and currentOutput > 0 and GameState.HasExcellentPosition(state, "mine_director"))
+                        and IndustryPage._InfoRow("预计枯竭",
+                            string.format("约 %d 季度后", math.ceil(mineReserve / currentOutput)),
+                            mineReserve / currentOutput <= 4 and C.accent_red or C.accent_amber)
+                        or nil,
+                    -- 铜储量（共享 region）
+                    IndustryPage._InfoRow("铜储量", copperReserve .. " 单位",
+                        copperReserve < 100 and C.accent_red or C.text_secondary),
                     UI.ProgressBar {
-                        value = math.min(1, silverReserve / 500),
+                        value = math.min(1, copperReserve / 500),
                         width = "100%",
                         height = 6,
                         borderRadius = 3,
                         trackColor = C.bg_surface,
-                        fillColor = silverReserve < 100 and C.accent_red or { 192, 192, 192, 255 },
+                        fillColor = copperReserve < 100 and C.accent_red or { 184, 115, 51, 255 },
+                    },
+                    -- 煤储量（共享 region）
+                    IndustryPage._InfoRow("煤储量", coalReserve .. " 单位",
+                        coalReserve < 200 and C.accent_red or C.text_secondary),
+                    UI.ProgressBar {
+                        value = math.min(1, coalReserve / 2500),
+                        width = "100%",
+                        height = 6,
+                        borderRadius = 3,
+                        trackColor = C.bg_surface,
+                        fillColor = coalReserve < 200 and C.accent_red or { 140, 130, 120, 255 },
                     },
                     -- 治安
                     IndustryPage._InfoRow("矿区治安", secText,
@@ -493,7 +498,7 @@ function IndustryPage._CreateProspectCard(state)
                     string.format("%d / %d 季度", prospecting.progress, prospecting.total),
                     C.accent_blue),
                 UI.ProgressBar {
-                    value = prospecting.progress / prospecting.total,
+                    value = prospecting.total > 0 and (prospecting.progress / prospecting.total) or 0,
                     width = "100%",
                     height = 8,
                     borderRadius = 4,
@@ -536,10 +541,10 @@ function IndustryPage._CreateProspectCard(state)
             backgroundColor = canStart and C.accent_blue or nil,
             fontColor = canStart and C.bg_base or C.text_muted,
             borderRadius = S.radius_btn,
-            onClick = function(self)
+            onClick = Config.ClickGuard(function(self)
                 self.props.disabled = true
                 IndustryPage._OnStartProspect()
-            end,
+            end),
         })
     end
 
@@ -598,10 +603,10 @@ function IndustryPage._CreateProspectCard(state)
                         backgroundColor = hasSlot and C.accent_green or nil,
                         fontColor = hasSlot and C.bg_base or C.text_muted,
                         borderRadius = S.radius_btn,
-                        onClick = function(self)
+                        onClick = Config.ClickGuard(function(self)
                             self.props.disabled = true
                             IndustryPage._OnActivateReserve(i)
-                        end,
+                        end),
                     },
                 },
             })
@@ -622,10 +627,217 @@ function IndustryPage._CreateProspectCard(state)
     }
 end
 
+--- 铜/煤通用探矿卡片
+--- @param state table
+--- @param kind "copper"|"coal"
+function IndustryPage._CreateResourceProspectCard(state, kind)
+    local isCu = kind == "copper"
+    local cfgKey = isCu and "copper_prospect" or "coal_prospect"
+    local cfg = Balance.MINE[cfgKey]
+    if not cfg then return UI.Panel { width = 0, height = 0 } end
+
+    local label      = isCu and "铜矿" or "煤矿"
+    local icon       = isCu and "🔶" or "♦️"
+    local accentColor = isCu and { 184, 115, 51, 255 } or { 100, 100, 100, 255 }
+    local stateKey   = kind .. "_prospecting"      -- copper_prospecting / coal_prospecting
+    local countKey   = kind .. "_prospect_count"   -- copper_prospect_count / coal_prospect_count
+    local regionType = isCu and "mine" or "industrial"
+    local resKey     = isCu and "copper_reserve" or "coal_reserve"
+
+    local prospecting = state[stateKey]
+    local successCount = state[countKey] or 0
+    local availAP = state.ap.current + (state.ap.temp or 0)
+    local cost = math.floor(cfg.cash * GameState.GetAssetPriceFactor(state))
+
+    -- 当前成功率
+    local baseChance = math.max(cfg.min_success,
+        cfg.base_success - cfg.success_decay * successCount)
+    local currentChance = math.min(1.0, baseChance)
+
+    -- 当前储量
+    local currentReserve = 0
+    for _, r in ipairs(state.regions or {}) do
+        if r.type == regionType then
+            currentReserve = (r.resources and r.resources[resKey]) or 0
+            break
+        end
+    end
+
+    local children = {}
+
+    -- 标题栏
+    table.insert(children, UI.Panel {
+        width = "100%",
+        flexDirection = "row",
+        alignItems = "center",
+        gap = 8,
+        children = {
+            UI.Label {
+                text = icon .. " " .. label .. "勘探",
+                fontSize = F.subtitle,
+                fontWeight = "bold",
+                fontColor = C.text_primary,
+            },
+            UI.Panel { flexGrow = 1 },
+            UI.Chip {
+                label = string.format("储量 %d", currentReserve),
+                color = currentReserve > 200 and "info" or (currentReserve > 0 and "warning" or "error"),
+                variant = "soft",
+                size = "sm",
+            },
+            UI.Chip {
+                label = string.format("成功率 %d%%", math.floor(currentChance * 100)),
+                color = currentChance >= 0.5 and "success" or (currentChance >= 0.35 and "warning" or "error"),
+                variant = "soft",
+                size = "sm",
+            },
+        },
+    })
+
+    -- 探矿中：进度显示
+    if prospecting then
+        local remaining = prospecting.total - prospecting.progress
+        table.insert(children, UI.Panel {
+            width = "100%",
+            flexDirection = "column",
+            gap = 6,
+            children = {
+                IndustryPage._InfoRow("勘探进度",
+                    string.format("%d / %d 季度", prospecting.progress, prospecting.total),
+                    accentColor),
+                UI.ProgressBar {
+                    value = prospecting.total > 0 and (prospecting.progress / prospecting.total) or 0,
+                    width = "100%",
+                    height = 8,
+                    borderRadius = 4,
+                    trackColor = C.bg_surface,
+                    fillColor = accentColor,
+                },
+                UI.Label {
+                    text = string.format("预计 %d 季度后出结果（成功率 %d%%）",
+                        remaining, math.floor(prospecting.success_chance * 100)),
+                    fontSize = F.label,
+                    fontColor = C.text_muted,
+                },
+            },
+        })
+    else
+        -- 空闲：启动按钮
+        local canStart = availAP >= cfg.ap and state.cash >= cost
+        local disableReason = nil
+        if state.cash < cost then
+            disableReason = "资金不足"
+        elseif availAP < cfg.ap then
+            disableReason = "行动点不足"
+        end
+
+        table.insert(children, UI.Button {
+            text = canStart
+                and string.format("🔍 启动%s勘探（💰%d ⚡%d 周期 %d季）", label, cost, cfg.ap, cfg.turns)
+                or (disableReason
+                    and string.format("🔍 %s勘探（%s）", label, disableReason)
+                    or string.format("🔍 启动%s勘探", label)),
+            fontSize = F.body_minor,
+            height = S.btn_small_height,
+            width = "100%",
+            variant = canStart and "primary" or "outlined",
+            disabled = not canStart,
+            backgroundColor = canStart and accentColor or nil,
+            fontColor = canStart and C.bg_base or C.text_muted,
+            borderRadius = S.radius_btn,
+            onClick = Config.ClickGuard(function(self)
+                self.props.disabled = true
+                IndustryPage._OnStartResourceProspect(kind)
+            end),
+        })
+    end
+
+    -- 说明文字
+    table.insert(children, UI.Label {
+        text = string.format("勘探新%s矿脉，成功后直接补充到%s储量",
+            label, isCu and "矿区铜" or "工业区煤"),
+        fontSize = F.label,
+        fontColor = C.text_muted,
+    })
+
+    return UI.Panel {
+        id = kind .. "ProspectCard",
+        width = "100%",
+        backgroundColor = C.paper_dark,
+        borderRadius = S.radius_card,
+        borderWidth = 1,
+        borderColor = prospecting and accentColor or C.border_card,
+        padding = S.card_padding,
+        flexDirection = "column",
+        gap = 8,
+        children = children,
+    }
+end
+
+--- 启动铜/煤探矿
+--- @param kind "copper"|"coal"
+function IndustryPage._OnStartResourceProspect(kind)
+    if not stateRef_ then return end
+
+    local isCu = kind == "copper"
+    local cfgKey = isCu and "copper_prospect" or "coal_prospect"
+    local cfg = Balance.MINE[cfgKey]
+    local stateKey = kind .. "_prospecting"
+    local countKey = kind .. "_prospect_count"
+    local label = isCu and "铜矿" or "煤矿"
+
+    -- 防止覆盖进行中的勘探
+    if stateRef_[stateKey] then
+        UI.Toast.Show(label .. "勘探正在进行中", { variant = "warning", duration = 1.5 })
+        return
+    end
+
+    local cost = math.floor(cfg.cash * GameState.GetAssetPriceFactor(stateRef_))
+    local availAP = stateRef_.ap.current + (stateRef_.ap.temp or 0)
+
+    -- 先验证资源是否足够（不扣除），避免 AP 先扣后回退
+    if availAP < cfg.ap then
+        UI.Toast.Show("行动点不足", { variant = "error", duration = 1.5 })
+        return
+    end
+    if stateRef_.cash < cost then
+        UI.Toast.Show("资金不足", { variant = "error", duration = 1.5 })
+        return
+    end
+
+    -- 验证通过后一起扣除
+    if not GameState.SpendAP(stateRef_, cfg.ap) then
+        UI.Toast.Show("行动点不足", { variant = "error", duration = 1.5 })
+        return
+    end
+    stateRef_.cash = stateRef_.cash - cost
+
+    -- 计算成功率
+    local successCount = stateRef_[countKey] or 0
+    local baseChance = math.max(cfg.min_success,
+        cfg.base_success - cfg.success_decay * successCount)
+    local chance = math.min(1.0, baseChance)
+
+    stateRef_[stateKey] = {
+        progress = 0,
+        total = cfg.turns,
+        success_chance = chance,
+    }
+
+    GameState.AddLog(stateRef_, string.format(
+        "[矿业] 启动%s勘探（💰%d ⚡%d，成功率 %d%%，周期 %d 季度）",
+        label, cost, cfg.ap, math.floor(chance * 100), cfg.turns))
+    UI.Toast.Show(string.format("🔍 %s勘探已启动（成功率 %d%%）", label, math.floor(chance * 100)),
+        { variant = "info", duration = 2 })
+
+    if onStateChanged_ then onStateChanged_() end
+end
+
 --- 工人管理卡片
 function IndustryPage._CreateWorkerCard(state)
-    local workerWage = state.workers.hired * state.workers.wage
-    local morale = state.workers.morale
+    local workers = state.workers or { hired = 0, wage = 0, morale = 50 }
+    local workerWage = workers.hired * workers.wage
+    local morale = workers.morale
     local moraleColor = morale >= 60 and C.accent_green or (morale >= 40 and C.accent_amber or C.accent_red)
     local moraleText = morale >= 80 and "高涨" or (morale >= 60 and "正常"
         or (morale >= 40 and "低落" or "极差"))
@@ -675,8 +887,8 @@ function IndustryPage._CreateWorkerCard(state)
                 flexDirection = "column",
                 gap = 6,
                 children = {
-                    IndustryPage._InfoRow("雇佣人数", state.workers.hired .. " 人", C.text_primary),
-                    IndustryPage._InfoRow("每人工资", state.workers.wage .. " /季", C.text_primary),
+                    IndustryPage._InfoRow("雇佣人数", workers.hired .. " 人", C.text_primary),
+                    IndustryPage._InfoRow("每人工资", workers.wage .. " /季", C.text_primary),
                     IndustryPage._InfoRow("工资总计", workerWage .. " /季",
                         workerWage > state.cash * 0.3 and C.accent_amber or C.text_primary),
                     IndustryPage._InfoRow("工人士气", morale .. "%", moraleColor),
@@ -720,10 +932,10 @@ function IndustryPage._CreateWorkerCard(state)
                             and "primary" or "outlined",
                         disabled = state.cash < hireCost * 5 or (state.ap.current + (state.ap.temp or 0)) < 1,
                         borderRadius = S.radius_btn,
-                        onClick = function(self)
+                        onClick = Config.ClickGuard(function(self)
                             self.props.disabled = true
                             Actions.HireWorkers(stateRef_, 5, onStateChanged_)
-                        end,
+                        end),
                     },
                     UI.Button {
                         id = "fireWorker",
@@ -733,12 +945,12 @@ function IndustryPage._CreateWorkerCard(state)
                         flexGrow = 1,
                         flexBasis = 0,
                         variant = "outlined",
-                        disabled = state.workers.hired < 5,
+                        disabled = workers.hired < 5,
                         borderRadius = S.radius_btn,
-                        onClick = function(self)
+                        onClick = Config.ClickGuard(function(self)
                             self.props.disabled = true
                             IndustryPage._OnFireWorkers(5)
-                        end,
+                        end),
                     },
                 },
             },
@@ -746,241 +958,142 @@ function IndustryPage._CreateWorkerCard(state)
     }
 end
 
---- 操作卡片（§6.3 底部新增资产样式）— 支持部分出售
-function IndustryPage._CreateActionCard(state)
-    local goldPrice = calcGoldPrice(state)
-    local railwayBlocked = GameState.GetModifierValue(state, "railway_blocked") > 0
-    local canSell = state.gold > 0 and not railwayBlocked
+--- 煤炭动力分配面板
+function IndustryPage._CreateCoalPowerCard(state)
+    local BCOAL = Balance.COAL or {}
+    local coalStock = state.coal or 0
+    local coalToMines = state.coal_to_mines or 0
+    local powerBonus = state.mine_coal_power_bonus or 0
+    local powerCap = BCOAL.mine_power_cap or 0.30
+    local per5 = BCOAL.mine_power_per_5 or 0.15
 
-    -- 出售数量（闭包状态）
-    local sellQty = math.min(10, state.gold)
-    local qtyLabel  ---@type table
-    local revenueLabel ---@type table
-    local sellBtn ---@type table
-
-    local function refreshSellUI()
-        if qtyLabel then
-            qtyLabel:SetText(tostring(sellQty))
-        end
-        if revenueLabel then
-            revenueLabel:SetText(string.format("预计收入：💰%d", sellQty * goldPrice))
-        end
-        if sellBtn then
-            local canSellNow = stateRef_ and sellQty > 0 and sellQty <= (stateRef_.gold or 0)
-            sellBtn:SetText(canSellNow
-                and string.format("出售 %d 单位 → 💰%d", sellQty, sellQty * goldPrice)
-                or "无法出售")
-        end
+    -- 兵工厂煤耗
+    local factory = state.military and state.military.factory
+    local factoryConsumption = 0
+    if factory and factory.level and factory.level > 0 and not factory.building then
+        local consumptionTable = BCOAL.factory_consumption or { 3, 5, 8 }
+        factoryConsumption = consumptionTable[factory.level] or 0
     end
 
-    local function adjustQty(delta)
-        if not stateRef_ then return end
-        sellQty = math.max(1, math.min(stateRef_.gold, sellQty + delta))
-        refreshSellUI()
-    end
-
-    -- 数量显示标签
-    qtyLabel = UI.Label {
-        text = tostring(sellQty),
-        fontSize = F.card_title,
-        fontWeight = "bold",
-        fontColor = C.text_primary,
-        textAlign = "center",
-        minWidth = 50,
-    }
-
-    -- 预计收入标签
-    revenueLabel = UI.Label {
-        text = string.format("预计收入：💰%d", sellQty * goldPrice),
-        fontSize = F.body_minor,
-        fontColor = C.accent_gold,
-    }
-
-    -- 出售按钮
-    sellBtn = UI.Button {
-        id = "sellGoldQty",
-        text = canSell and string.format("出售 %d 单位 → 💰%d", sellQty, sellQty * goldPrice)
-            or (railwayBlocked and "🚂 铁路瘫痪，无法出售" or "无黄金可售"),
-        fontSize = F.body_minor,
-        height = S.btn_small_height,
-        width = "100%",
-        variant = canSell and "primary" or "outlined",
-        disabled = not canSell,
-        backgroundColor = canSell and C.accent_gold or nil,
-        fontColor = canSell and C.bg_base or C.text_muted,
-        borderRadius = S.radius_btn,
-        onClick = function(self)
-            self.props.disabled = true
-            IndustryPage._OnSellGold(sellQty)
-        end,
-    }
-
-    -- 数量调节按钮工厂
-    local function qtyBtn(label, delta)
-        return UI.Panel {
-            width = 36, height = 32,
-            borderRadius = S.radius_btn,
-            backgroundColor = C.bg_elevated,
-            borderWidth = 1, borderColor = C.paper_light,
-            justifyContent = "center", alignItems = "center",
-            pointerEvents = "auto",
-            onPointerUp = Config.TapGuard(function(self) adjustQty(delta) end),
-            children = {
-                UI.Label {
-                    text = label,
-                    fontSize = F.body,
-                    fontColor = C.text_primary,
-                    pointerEvents = "none",
-                },
-            },
-        }
-    end
+    -- 可分配给矿山的上限（总库存 - 工厂需求, 最低0）
+    local maxToMines = math.max(0, coalStock - factoryConsumption)
+    -- 每次 +5/-5 调节
+    local step = 5
 
     return UI.Panel {
-        id = "actionCard",
+        id = "coalPowerCard",
         width = "100%",
         backgroundColor = C.paper_dark,
         borderRadius = S.radius_card,
         borderWidth = 1,
-        borderColor = C.border_card,
+        borderColor = { 80, 70, 60, 255 },
         padding = S.card_padding,
         flexDirection = "column",
         gap = 8,
         children = {
-            UI.Label {
-                text = "手动交易",
-                fontSize = F.subtitle,
-                fontWeight = "bold",
-                fontColor = C.text_primary,
-            },
-            IndustryPage._InfoRow("黄金库存", state.gold .. " 单位", C.accent_gold),
-            IndustryPage._InfoRow("当前金价", goldPrice .. " /单位", C.text_primary),
-            -- 自动出售开关
+            -- 标题
             UI.Panel {
                 width = "100%",
                 flexDirection = "row",
-                justifyContent = "space-between",
                 alignItems = "center",
+                gap = 8,
                 children = {
-                    UI.Panel {
-                        flexDirection = "column",
-                        gap = 1,
-                        children = {
-                            UI.Label {
-                                text = "自动出售",
-                                fontSize = F.body_minor,
-                                fontColor = C.text_secondary,
-                            },
-                            UI.Label {
-                                text = "每季结算时自动售出，保留10%库存",
-                                fontSize = 10,
-                                fontColor = C.text_muted,
-                            },
-                        },
-                    },
-                    UI.Button {
-                        text = state.gold_auto_sell and "已开启" or "已关闭",
-                        fontSize = F.label,
+                    UI.Label {
+                        text = "⚡ 煤炭动力分配",
+                        fontSize = F.subtitle,
                         fontWeight = "bold",
-                        fontColor = state.gold_auto_sell and C.accent_green or C.text_muted,
-                        backgroundColor = state.gold_auto_sell
-                            and { C.accent_green[1], C.accent_green[2], C.accent_green[3], 40 }
-                            or C.bg_elevated,
-                        borderRadius = S.radius_btn,
-                        borderWidth = 1,
-                        borderColor = state.gold_auto_sell and C.accent_green or C.border_card,
-                        paddingHorizontal = 10,
-                        paddingVertical = 4,
-                        onClick = function()
-                            if stateRef_ then
-                                stateRef_.gold_auto_sell = not stateRef_.gold_auto_sell
-                                if onStateChanged_ then onStateChanged_() end
-                            end
-                        end,
+                        fontColor = C.text_primary,
+                    },
+                    UI.Panel { flexGrow = 1 },
+                    UI.Chip {
+                        label = coalStock .. " 煤",
+                        color = coalStock >= factoryConsumption and "success" or "error",
+                        variant = "soft",
+                        size = "sm",
                     },
                 },
             },
-            -- 数量选择器
-            canSell and UI.Panel {
+            -- 工厂煤耗
+            factoryConsumption > 0 and IndustryPage._InfoRow(
+                "🏭 兵工厂每季消耗",
+                factoryConsumption .. " 煤",
+                coalStock >= factoryConsumption and C.text_primary or C.accent_red
+            ) or IndustryPage._InfoRow("🏭 兵工厂", "未运行", C.text_muted),
+            -- 煤炭不足警告
+            coalStock < factoryConsumption and UI.Label {
+                text = "⚠ 煤炭不足以供应兵工厂，本季生产将暂停！",
+                fontSize = F.body_minor,
+                fontColor = C.accent_red,
+                whiteSpace = "normal",
+            } or nil,
+            UI.Divider { color = C.divider },
+            -- 分配给矿山
+            UI.Label {
+                text = "分配煤炭给矿山 — 每投入5煤，金矿产出+15%（上限+30%）",
+                fontSize = F.label,
+                fontColor = C.text_muted,
+                whiteSpace = "normal",
+            },
+            IndustryPage._InfoRow("当前分配", coalToMines .. " 煤", C.text_primary),
+            IndustryPage._InfoRow("矿山加成", string.format("+%d%%", math.floor(powerBonus * 100)),
+                powerBonus > 0 and C.accent_green or C.text_muted),
+            -- 调节按钮
+            UI.Panel {
                 width = "100%",
-                flexDirection = "column",
-                gap = 6,
+                flexDirection = "row",
+                gap = 8,
+                justifyContent = "center",
+                alignItems = "center",
                 children = {
+                    UI.Button {
+                        text = "-5",
+                        fontSize = F.body,
+                        width = 50, height = 32,
+                        variant = coalToMines >= step and "outlined" or "outlined",
+                        disabled = coalToMines < step,
+                        borderRadius = S.radius_btn,
+                        onClick = Config.ClickGuard(function()
+                            if stateRef_ then
+                                stateRef_.coal_to_mines = math.max(0, (stateRef_.coal_to_mines or 0) - step)
+                                -- 重算加成
+                                local units = math.floor(stateRef_.coal_to_mines / 5)
+                                stateRef_.mine_coal_power_bonus = math.min(
+                                    BCOAL.mine_power_cap or 0.30,
+                                    units * (BCOAL.mine_power_per_5 or 0.15))
+                                if onStateChanged_ then onStateChanged_() end
+                            end
+                        end),
+                    },
                     UI.Label {
-                        text = "出售数量",
-                        fontSize = F.body_minor,
-                        fontColor = C.text_secondary,
+                        text = tostring(coalToMines),
+                        fontSize = F.card_title,
+                        fontWeight = "bold",
+                        fontColor = C.text_primary,
+                        textAlign = "center",
+                        minWidth = 50,
                     },
-                    UI.Panel {
-                        width = "100%",
-                        flexDirection = "row",
-                        alignItems = "center",
-                        justifyContent = "center",
-                        gap = 6,
-                        children = {
-                            qtyBtn("-10", -10),
-                            qtyBtn("-1", -1),
-                            qtyLabel,
-                            qtyBtn("+1", 1),
-                            qtyBtn("+10", 10),
-                        },
+                    UI.Button {
+                        text = "+5",
+                        fontSize = F.body,
+                        width = 50, height = 32,
+                        variant = (coalToMines + step <= maxToMines and powerBonus < powerCap)
+                            and "primary" or "outlined",
+                        disabled = coalToMines + step > maxToMines or powerBonus >= powerCap,
+                        borderRadius = S.radius_btn,
+                        onClick = Config.ClickGuard(function()
+                            if stateRef_ then
+                                local newVal = math.min(maxToMines, (stateRef_.coal_to_mines or 0) + step)
+                                stateRef_.coal_to_mines = newVal
+                                local units = math.floor(newVal / 5)
+                                stateRef_.mine_coal_power_bonus = math.min(
+                                    BCOAL.mine_power_cap or 0.30,
+                                    units * (BCOAL.mine_power_per_5 or 0.15))
+                                if onStateChanged_ then onStateChanged_() end
+                            end
+                        end),
                     },
-                    -- 快捷按钮：半数 / 全部
-                    UI.Panel {
-                        width = "100%",
-                        flexDirection = "row",
-                        gap = 8,
-                        justifyContent = "center",
-                        children = {
-                            UI.Panel {
-                                paddingHorizontal = 12, paddingVertical = 4,
-                                borderRadius = S.radius_btn,
-                                backgroundColor = C.bg_elevated,
-                                borderWidth = 1, borderColor = C.paper_light,
-                                pointerEvents = "auto",
-                                onPointerUp = Config.TapGuard(function(self)
-                                    if stateRef_ then
-                                        sellQty = math.max(1, math.floor(stateRef_.gold / 2))
-                                        refreshSellUI()
-                                    end
-                                end),
-                                children = {
-                                    UI.Label {
-                                        text = "半数",
-                                        fontSize = F.label,
-                                        fontColor = C.text_secondary,
-                                        pointerEvents = "none",
-                                    },
-                                },
-                            },
-                            UI.Panel {
-                                paddingHorizontal = 12, paddingVertical = 4,
-                                borderRadius = S.radius_btn,
-                                backgroundColor = C.bg_elevated,
-                                borderWidth = 1, borderColor = C.paper_light,
-                                pointerEvents = "auto",
-                                onPointerUp = Config.TapGuard(function(self)
-                                    if stateRef_ then
-                                        sellQty = stateRef_.gold
-                                        refreshSellUI()
-                                    end
-                                end),
-                                children = {
-                                    UI.Label {
-                                        text = "全部",
-                                        fontSize = F.label,
-                                        fontColor = C.text_secondary,
-                                        pointerEvents = "none",
-                                    },
-                                },
-                            },
-                        },
-                    },
-                    revenueLabel,
                 },
-            } or UI.Panel { width = 0, height = 0 },
-            -- 出售按钮
-            sellBtn,
+            },
         },
     }
 end
@@ -1031,33 +1144,6 @@ function IndustryPage._OnFireWorkers(count)
 
     GameState.AddLog(stateRef_, string.format("解雇了 %d 名工人，补偿 %d", count, compensation))
     UI.Toast.Show(string.format("解雇 -%d 工人", count), { variant = "warning", duration = 1.5 })
-
-    if onStateChanged_ then onStateChanged_() end
-end
-
---- 手动出售指定数量黄金
-function IndustryPage._OnSellGold(amount)
-    if not stateRef_ then return end
-
-    -- 铁路瘫痪时禁止出售
-    if GameState.GetModifierValue(stateRef_, "railway_blocked") > 0 then
-        UI.Toast.Show("🚂 铁路瘫痪，黄金无法运出！", { variant = "error", duration = 2 })
-        return
-    end
-
-    if stateRef_.gold <= 0 then
-        UI.Toast.Show("没有黄金可出售", { variant = "warning", duration = 1.5 })
-        return
-    end
-
-    amount = math.max(1, math.min(amount or stateRef_.gold, stateRef_.gold))
-    local revenue = amount * calcGoldPrice(stateRef_)
-    stateRef_.gold = stateRef_.gold - amount
-    stateRef_.cash = stateRef_.cash + revenue
-
-    GameState.AddLog(stateRef_, string.format("手动出售 %d 单位黄金，获得 %d", amount, revenue))
-    UI.Toast.Show(string.format("出售 %d 金 → 💰+%d", amount, revenue),
-        { variant = "success", duration = 2 })
 
     if onStateChanged_ then onStateChanged_() end
 end
@@ -1178,15 +1264,21 @@ function IndustryPage._OnStartProspect()
     end
 
     local cost = math.floor(cfg.cash * GameState.GetAssetPriceFactor(stateRef_))
+    local availAP = stateRef_.ap.current + (stateRef_.ap.temp or 0)
 
-    -- 先验证 AP 是否足够
-    if not GameState.SpendAP(stateRef_, cfg.ap) then
+    -- 先验证资源是否足够（不扣除），避免 AP 先扣后回退
+    if availAP < cfg.ap then
         UI.Toast.Show("行动点不足", { variant = "error", duration = 1.5 })
         return
     end
-    -- AP 扣除成功后再扣现金
     if stateRef_.cash < cost then
         UI.Toast.Show("资金不足", { variant = "error", duration = 1.5 })
+        return
+    end
+
+    -- 验证通过后一起扣除
+    if not GameState.SpendAP(stateRef_, cfg.ap) then
+        UI.Toast.Show("行动点不足", { variant = "error", duration = 1.5 })
         return
     end
     stateRef_.cash = stateRef_.cash - cost

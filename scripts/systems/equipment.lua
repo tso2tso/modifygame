@@ -5,6 +5,8 @@
 
 local EquipmentData = require("data.equipment_data")
 local GameState = require("game_state")
+local Balance = require("data.balance")
+local BCOPPER = Balance.COPPER
 
 local SQUAD = EquipmentData.SQUAD
 local FACTORY = EquipmentData.FACTORY
@@ -336,7 +338,15 @@ function Equipment.StartProduction(state, equipId)
     if state.cash < cost then
         return false, "现金不足（需要 " .. cost .. "）"
     end
+    -- 铜耗检查
+    local copperNeed = BCOPPER.prod_copper_cost[equipId] or 0
+    if copperNeed > 0 and (state.copper or 0) < copperNeed then
+        return false, "铜不足（需要 " .. copperNeed .. "，持有 " .. (state.copper or 0) .. "）"
+    end
     state.cash = state.cash - cost
+    if copperNeed > 0 then
+        state.copper = (state.copper or 0) - copperNeed
+    end
     m.production_queue = m.production_queue or {}
     table.insert(m.production_queue, {
         equip_id = equipId,
@@ -344,7 +354,11 @@ function Equipment.StartProduction(state, equipId)
         total = equipData.prod_turns,
         source = "factory",
     })
-    return true, "开始生产 " .. equipData.name .. "（" .. equipData.prod_turns .. " 季）"
+    local msg = "开始生产 " .. equipData.name .. "（" .. equipData.prod_turns .. " 季）"
+    if copperNeed > 0 then
+        msg = msg .. " 消耗铜 " .. copperNeed
+    end
+    return true, msg
 end
 
 --- 开始代工装备
@@ -367,7 +381,15 @@ function Equipment.StartOutsource(state, equipId)
     if state.cash < cost then
         return false, "现金不足（需要 " .. cost .. "）"
     end
+    -- 铜耗检查（代工同样消耗铜）
+    local copperNeed = BCOPPER.prod_copper_cost[equipId] or 0
+    if copperNeed > 0 and (state.copper or 0) < copperNeed then
+        return false, "铜不足（需要 " .. copperNeed .. "，持有 " .. (state.copper or 0) .. "）"
+    end
     state.cash = state.cash - cost
+    if copperNeed > 0 then
+        state.copper = (state.copper or 0) - copperNeed
+    end
     m.outsource_slots = m.outsource_slots or {}
     local totalTurns = equipData.prod_turns + OUTSOURCE.time_bonus
     table.insert(m.outsource_slots, {
@@ -376,7 +398,11 @@ function Equipment.StartOutsource(state, equipId)
         total = totalTurns,
         source = "outsource",
     })
-    return true, "代工 " .. equipData.name .. "（" .. totalTurns .. " 季，+60% 成本）"
+    local msg = "代工 " .. equipData.name .. "（" .. totalTurns .. " 季，+60% 成本）"
+    if copperNeed > 0 then
+        msg = msg .. " 消耗铜 " .. copperNeed
+    end
+    return true, msg
 end
 
 --- 开始维修装备（从库存中选择，占用工厂槽位）
@@ -438,36 +464,47 @@ function Equipment.TickProduction(state)
         end
     end
 
-    -- 推进工厂生产队列
+    -- 推进工厂生产队列（煤炭短缺时暂停工厂生产/维修，代工不受影响）
     m.production_queue = m.production_queue or {}
+    local coalShortage = state.factory_coal_shortage
+    if coalShortage then
+        table.insert(messages, "燃煤不足，兵工厂生产暂停")
+        state.factory_coal_shortage = nil  -- 清除标记（已被消费）
+    end
     local keptQueue = {}
     for _, item in ipairs(m.production_queue) do
-        item.progress = item.progress + 1
-        if item.progress >= item.total then
-            if item.source == "repair" then
-                -- 维修完成：通过 uid 查找库存物品
-                local invItem = nil
-                for _, inv in ipairs(m.inventory or {}) do
-                    if inv.uid and inv.uid == item.inv_uid then
-                        invItem = inv
-                        break
+        local isFactoryItem = (item.source ~= "outsource")
+        if coalShortage and isFactoryItem then
+            -- 煤炭短缺：工厂项目不推进，直接保留
+            table.insert(keptQueue, item)
+        else
+            item.progress = item.progress + 1
+            if item.progress >= item.total then
+                if item.source == "repair" then
+                    -- 维修完成：通过 uid 查找库存物品
+                    local invItem = nil
+                    for _, inv in ipairs(m.inventory or {}) do
+                        if inv.uid and inv.uid == item.inv_uid then
+                            invItem = inv
+                            break
+                        end
                     end
-                end
-                if invItem then
-                    invItem.condition = math.min(100, (item.repair_condition or 0) + REPAIR.condition_per_turn)
-                    invItem.repairing = nil
+                    if invItem then
+                        invItem.condition = math.min(100, (item.repair_condition or 0) + REPAIR.condition_per_turn)
+                        invItem.repairing = nil
+                        local ed = CATALOG[item.equip_id]
+                        table.insert(messages, (ed and ed.name or item.equip_id) .. " 维修完成（耐久 " .. invItem.condition .. "）")
+                    end
+                else
+                    -- 生产完成 → 进入库存
+                    m.inventory = m.inventory or {}
+                    table.insert(m.inventory, { equip_id = item.equip_id, condition = 100, uid = genInvUid() })
                     local ed = CATALOG[item.equip_id]
-                    table.insert(messages, (ed and ed.name or item.equip_id) .. " 维修完成（耐久 " .. invItem.condition .. "）")
+                    table.insert(messages, (ed and ed.name or item.equip_id) .. " 生产完成，已入库")
                 end
             else
-                -- 生产完成 → 进入库存
-                m.inventory = m.inventory or {}
-                table.insert(m.inventory, { equip_id = item.equip_id, condition = 100, uid = genInvUid() })
-                local ed = CATALOG[item.equip_id]
-                table.insert(messages, (ed and ed.name or item.equip_id) .. " 生产完成，已入库")
+                table.insert(keptQueue, item)
             end
-        else
-            table.insert(keptQueue, item)
         end
     end
     m.production_queue = keptQueue
@@ -640,6 +677,14 @@ function Equipment.CalcMaintenanceCost(state)
         end
     end
     equipMaint = math.floor(equipMaint * inflation)
+
+    -- 铜库存维护费减免（每持有10铜 → -5%，上限25%）
+    local copperHeld = state.copper or 0
+    if copperHeld >= 10 then
+        local reduction = math.min(BCOPPER.maintenance_reduction_cap,
+            math.floor(copperHeld / 10) * BCOPPER.maintenance_reduction_per_10)
+        equipMaint = math.floor(equipMaint * (1 - reduction))
+    end
 
     -- 工厂维护
     local factoryMaint = 0

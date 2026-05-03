@@ -8,6 +8,7 @@ local Config = require("config")
 local GameState = require("game_state")
 local Equipment = require("systems.equipment")
 local EquipmentData = require("data.equipment_data")
+local Balance = require("data.balance")
 
 local AudioManager = require("systems.audio_manager")
 
@@ -664,6 +665,25 @@ function EquipModals.ShowProduction(state, accent)
         and not mil.factory.building
     local factoryFree = hasFactory and Equipment.GetFactoryFreeSlots(state) or 0
 
+    -- 统计工厂队列中生产/维修项数量
+    local factoryProdCount, factoryRepairCount = 0, 0
+    for _, item in ipairs(mil.production_queue or {}) do
+        if item.source == "repair" then
+            factoryRepairCount = factoryRepairCount + 1
+        else
+            factoryProdCount = factoryProdCount + 1
+        end
+    end
+
+    -- 煤炭警告判断
+    local BC = Balance.COAL or {}
+    local coalShortage = false
+    local factoryCoalNeed = 0
+    if hasFactory then
+        factoryCoalNeed = (BC.factory_consumption or {})[mil.factory.level] or 0
+        coalShortage = (state.coal or 0) < factoryCoalNeed
+    end
+
     if not mil.factory or (mil.factory.level == 0 and not mil.factory.building) then
         -- 未建造
         local lvData = EquipmentData.FACTORY.levels[1]
@@ -763,6 +783,17 @@ function EquipModals.ShowProduction(state, accent)
         local lvData = EquipmentData.FACTORY.levels[lvl]
         local canUpgrade = lvl < EquipmentData.FACTORY.max_level
 
+        -- 槽位明细：生产N + 维修N + 空闲N
+        local slotParts = {}
+        if factoryProdCount > 0 then
+            table.insert(slotParts, string.format("生产%d", factoryProdCount))
+        end
+        if factoryRepairCount > 0 then
+            table.insert(slotParts, string.format("维修%d", factoryRepairCount))
+        end
+        table.insert(slotParts, string.format("空闲%d", factoryFree))
+        local slotDetail = table.concat(slotParts, "+")
+
         local factoryChildren = {
             UI.Panel {
                 width = "100%",
@@ -777,14 +808,37 @@ function EquipModals.ShowProduction(state, accent)
                         fontColor = C.text_primary,
                     },
                     UI.Label {
-                        text = string.format("空槽 %d/%d | 维护 %d/季",
-                            factoryFree, lvData.slots, lvData.maintenance),
+                        text = string.format("%s/%d槽 | 维护%d/季",
+                            slotDetail, lvData.slots, lvData.maintenance),
                         fontSize = F.label,
                         fontColor = C.text_secondary,
                     },
                 },
             },
         }
+
+        -- 煤炭不足警告
+        if coalShortage then
+            table.insert(factoryChildren, UI.Panel {
+                width = "100%",
+                padding = 6,
+                backgroundColor = { 139, 69, 19, 30 },
+                borderRadius = 4,
+                borderWidth = 1,
+                borderColor = C.accent_red,
+                flexDirection = "row",
+                alignItems = "center",
+                gap = 6,
+                children = {
+                    UI.Label {
+                        text = string.format("⚠️ 煤炭不足！需 %d/季，现有 %d — 下回合工厂将暂停生产",
+                            factoryCoalNeed, state.coal or 0),
+                        fontSize = F.label,
+                        fontColor = C.accent_red,
+                    },
+                },
+            })
+        end
 
         if canUpgrade then
             local nextLv = EquipmentData.FACTORY.levels[lvl + 1]
@@ -943,17 +997,24 @@ function EquipModals.ShowProduction(state, accent)
                     fontColor = C.text_primary,
                 },
                 UI.Label {
-                    text = string.format("工厂%s%d槽 | 代工%d/%d槽",
-                        hasFactory and "空" or "无",
-                        factoryFree,
-                        #(mil.outsource_slots or {}),
-                        EquipmentData.OUTSOURCE.max_slots),
+                    text = hasFactory
+                        and string.format("工厂空%d槽 | 代工%d/%d槽",
+                            factoryFree,
+                            #(mil.outsource_slots or {}),
+                            EquipmentData.OUTSOURCE.max_slots)
+                        or string.format("无工厂 | 代工%d/%d槽",
+                            #(mil.outsource_slots or {}),
+                            EquipmentData.OUTSOURCE.max_slots),
                     fontSize = F.label,
-                    fontColor = C.text_secondary,
+                    fontColor = coalShortage and C.accent_red or C.text_secondary,
                 },
             },
         },
     }
+
+    local BCOPPER = Balance.COPPER or {}
+    local copperCostTable = BCOPPER.prod_copper_cost or {}
+    local copperStock = state.copper or 0
 
     local hasProdOptions = false
     for _, ed in ipairs(unlocked) do
@@ -963,10 +1024,12 @@ function EquipModals.ShowProduction(state, accent)
             local factoryCost = math.floor(ed.prod_cost * inflation)
             local outsourceCost = math.floor(
                 ed.prod_cost * EquipmentData.OUTSOURCE.cost_multiplier * inflation)
+            local copperNeed = copperCostTable[ed.id] or 0
+            local hasCopper = copperStock >= copperNeed
 
             local btns = {}
             if hasFactory then
-                local canFactory = factoryFree > 0 and state.cash >= factoryCost
+                local canFactory = factoryFree > 0 and state.cash >= factoryCost and hasCopper
                 table.insert(btns, miniBtn(
                     string.format("🏭%d/%d季", factoryCost, ed.prod_turns),
                     C.accent_green,
@@ -981,7 +1044,7 @@ function EquipModals.ShowProduction(state, accent)
                     not canFactory
                 ))
             end
-            local canOutsource = outsourceFree > 0 and state.cash >= outsourceCost
+            local canOutsource = outsourceFree > 0 and state.cash >= outsourceCost and hasCopper
             table.insert(btns, miniBtn(
                 string.format("📦%d/%d季", outsourceCost,
                     ed.prod_turns + EquipmentData.OUTSOURCE.time_bonus),
@@ -996,6 +1059,12 @@ function EquipModals.ShowProduction(state, accent)
                 end,
                 not canOutsource
             ))
+
+            -- 描述行：战力 + 维护 + 铜耗
+            local descParts = { string.format("战力×%.1f 维护%d/季", ed.power_mul, ed.maintenance) }
+            if copperNeed > 0 then
+                table.insert(descParts, string.format("🟠铜×%d", copperNeed))
+            end
 
             table.insert(prodChildren, UI.Panel {
                 width = "100%",
@@ -1021,10 +1090,10 @@ function EquipModals.ShowProduction(state, accent)
                                 fontColor = C.text_primary,
                             },
                             UI.Label {
-                                text = string.format("战力×%.1f 维护%d/季",
-                                    ed.power_mul, ed.maintenance),
+                                text = table.concat(descParts, " | "),
                                 fontSize = F.label,
-                                fontColor = C.text_muted,
+                                fontColor = (copperNeed > 0 and not hasCopper)
+                                    and C.accent_red or C.text_muted,
                             },
                         },
                     },
@@ -1049,6 +1118,30 @@ function EquipModals.ShowProduction(state, accent)
             flexDirection = "column",
             gap = 6,
             children = prodChildren,
+        })
+    else
+        table.insert(rows, UI.Panel {
+            width = "100%",
+            padding = 14,
+            backgroundColor = C.paper_dark,
+            borderRadius = S.radius_card,
+            borderWidth = 1,
+            borderColor = C.border_card,
+            flexDirection = "column",
+            alignItems = "center",
+            gap = 6,
+            children = {
+                UI.Label {
+                    text = "🔬 尚无可生产装备",
+                    fontSize = F.subtitle,
+                    fontColor = C.text_secondary,
+                },
+                UI.Label {
+                    text = "请在科技页研发军事科技以解锁高级装备生产",
+                    fontSize = F.label,
+                    fontColor = C.text_muted,
+                },
+            },
         })
     end
 

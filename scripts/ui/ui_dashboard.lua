@@ -628,7 +628,7 @@ end
 
 function Dashboard._FocusCard(state, mine, era)
     era = era or Config.GetEraByYear(state.year)
-    local accent = era.accent
+    local accent = (era and era.accent) or C.accent_gold
 
     -- 产量计算：显示实际可采量，按矿山剩余储量封顶。
     local output = math.min(Economy._CalcMineOutput(state, mine), mine.reserve or 0)
@@ -756,10 +756,10 @@ function Dashboard._FocusCard(state, mine, era)
                         variant = canHire and "primary" or "outlined",
                         disabled = not canHire,
                         borderRadius = S.radius_btn,
-                        onClick = function(self)
+                        onClick = Config.ClickGuard(function(self)
                             self.props.disabled = true
                             Actions.HireWorkers(stateRef_, 5, callbacks_.onLightRefresh)
-                        end,
+                        end),
                     },
                 },
             },
@@ -904,7 +904,7 @@ function Dashboard._QuickActions(state, era)
                     borderRadius = S.radius_btn,
                     backgroundColor = canAfford and C.bg_inset or C.bg_surface,
                     borderWidth = 1,
-                    borderColor = canAfford and era.accent or C.border_soft,
+                    borderColor = canAfford and (era and era.accent or C.accent_gold) or C.border_soft,
                     justifyContent = "center",
                     alignItems = "center",
                     children = {
@@ -1095,9 +1095,12 @@ function Dashboard._SeasonOverview(state)
                                 fontWeight = "bold",
                                 fontColor = C.text_secondary,
                             },
-                            Dashboard._ReserveRow("●", "金矿", mineResources.gold_reserve or 0, 500, C.accent_gold),
-                            Dashboard._ReserveRow("○", "银矿", mineResources.silver_reserve or 0, 1200, C.text_secondary),
-                            Dashboard._ReserveRow("◆", "煤矿", industrialResources.coal_reserve or 0, 2500, C.text_primary),
+                            Dashboard._ReserveRow("●", "金矿", mineResources.gold_reserve or 0,
+                                math.max(500, mineResources.gold_reserve or 0), C.accent_gold),
+                            Dashboard._ReserveRow("○", "铜矿", mineResources.copper_reserve or 0,
+                                math.max(1200, mineResources.copper_reserve or 0), { 184, 115, 51, 255 }),
+                            Dashboard._ReserveRow("◆", "煤矿", industrialResources.coal_reserve or 0,
+                                math.max(2500, industrialResources.coal_reserve or 0), C.text_primary),
                         },
                     },
                     Dashboard._OverviewDivider(),

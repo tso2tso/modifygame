@@ -323,7 +323,7 @@ Config.QUICK_ACTIONS = {
 Config.POSITIONS = {
     { id = "mine_director",   name = "矿业总监", attr1 = "management", attr2 = "knowledge" },
     { id = "military_chief",  name = "军务主管", attr1 = "strategy",   attr2 = "ambition" },
-    { id = "finance_director",name = "财务总监", attr1 = "management", attr2 = "strategy" },
+    { id = "civil_director",  name = "内政总监", attr1 = "management", attr2 = "strategy" },
     { id = "culture_advisor", name = "文化顾问", attr1 = "charisma",   attr2 = "knowledge" },
     { id = "tech_advisor",    name = "科技顾问", attr1 = "knowledge",  attr2 = "ambition" },
     { id = "diplomat",        name = "外交总监", attr1 = "charisma",   attr2 = "strategy" },
@@ -372,6 +372,22 @@ function Config.TapDown()
     Config._tapDownY = pos.y
     tapDownCounter_ = tapDownCounter_ + 1
     Config._tapDownCounter = tapDownCounter_
+end
+
+local clickGuardFrame_ = -1
+--- 包裹 onClick 回调，防止手机端 touch+mouse 双触发
+--- onClick 已经是引擎确认的点击，不需要滑动距离检测，只做帧号去重。
+---@param fn function 原始回调 function(self)
+---@return function 防抖后的回调
+function Config.ClickGuard(fn)
+    return function(self)
+        local frame = time.frameNumber
+        if frame == clickGuardFrame_ then
+            return  -- 同一帧内重复触发，阻止
+        end
+        clickGuardFrame_ = frame
+        fn(self)
+    end
 end
 
 --- 包裹 onPointerUp 回调，防止手机端双触发 + 滑动误触

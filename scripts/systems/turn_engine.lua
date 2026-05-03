@@ -110,19 +110,18 @@ local function PickAIExpansionRegion(state, faction)
     local bestRegion = nil
     local bestScore = -math.huge
     for _, r in ipairs(state.regions or {}) do
-        if r.ai_presence and r.ai_presence[faction.id] ~= nil then
-            local presence = r.ai_presence[faction.id] or 0
-            local control = r.control or 0
-            local resourceScore = 0
-            if r.type == "mine" then resourceScore = resourceScore + 20 end
-            if r.type == "industrial" then resourceScore = resourceScore + 16 end
-            if r.type == "capital" then resourceScore = resourceScore + 12 end
-            local score = presence * 1.2 + math.max(0, 70 - control) + resourceScore
-                + (5 - (r.security or 3)) * 4 + math.random(0, 8)
-            if score > bestScore then
-                bestScore = score
-                bestRegion = r
-            end
+        r.ai_presence = r.ai_presence or {}
+        local presence = r.ai_presence[faction.id] or 0
+        local control = r.control or 0
+        local resourceScore = 0
+        if r.type == "mine" then resourceScore = resourceScore + 20 end
+        if r.type == "industrial" then resourceScore = resourceScore + 16 end
+        if r.type == "capital" then resourceScore = resourceScore + 12 end
+        local score = presence * 1.2 + math.max(0, 70 - control) + resourceScore
+            + (5 - (r.security or 3)) * 4 + math.random(0, 8)
+        if score > bestScore then
+            bestScore = score
+            bestRegion = r
         end
     end
     return bestRegion
@@ -158,6 +157,14 @@ function TurnEngine.EndTurn(state)
     local era = Config.GetEraByYear and Config.GetEraByYear(state.year) or nil
     local isWarPressure = (state.flags and state.flags.at_war) or (era and era.war_stripe)
     local drift = isWarPressure and infl.quarter_drift_war or infl.quarter_drift_peace
+    -- 战后通缩恢复：和平期间若通胀高于阈值，额外施加负漂移使经济逐步恢复
+    if not isWarPressure then
+        local deflThreshold = infl.postwar_deflation_threshold or 2.0
+        local deflDrift = infl.postwar_deflation_drift or -0.015
+        if (state.inflation_factor or 1.0) > deflThreshold then
+            drift = drift + deflDrift
+        end
+    end
     drift = drift + GameState.GetModifierValue(state, "inflation_drift")
     drift = math.max(infl.quarter_drift_crisis_floor or -0.015, drift)
     -- 乘法模型：factor *= (1 + drift)，符合通胀的复利特征
@@ -416,6 +423,13 @@ function TurnEngine.EndTurn(state)
         table.insert(report.warnings, "家族破产！" .. reason)
     end
 
+    -- 贷款利息计入累计支出统计
+    if report.loan_interest and report.loan_interest > 0 then
+        state.total_expense = (state.total_expense or 0) + report.loan_interest
+        report.economy.total_expense = report.economy.total_expense + report.loan_interest
+        report.economy.net = report.economy.net - report.loan_interest
+    end
+
     -- ========================================
     -- 阶段 1.7: 科技研发推进
     -- ========================================
@@ -439,7 +453,7 @@ function TurnEngine.EndTurn(state)
     -- ========================================
     state.phase = "event"
     -- 随机事件冷却推进
-    for eventId, cd in pairs(state.random_cooldowns) do
+    for eventId, cd in pairs(state.random_cooldowns or {}) do
         if cd > 0 then
             state.random_cooldowns[eventId] = cd - 1
         end
@@ -468,7 +482,7 @@ function TurnEngine.EndTurn(state)
     local ecoDelta = 0
     if state.year >= BVE.gate_year then
         local cashPart    = state.cash > 0 and math.floor(state.cash / BVE.cash_divisor) or 0
-        local goldPart    = math.floor(state.gold * BVE.gold_multiplier)
+        local goldPart    = math.min(math.floor(state.gold * BVE.gold_multiplier), BVE.gold_vp_cap or 999)
         local controlPart = math.floor(totalControl / BVE.control_divisor)
         local influPart   = math.floor(totalInfluence / BVE.influence_divisor)
         ecoDelta = cashPart + goldPart + controlPart + influPart
@@ -533,9 +547,17 @@ function TurnEngine.EndTurn(state)
     -- 每季所有地区 influence 衰减，除非本季执行了文化行动
     -- ========================================
     if not state.culture_action_this_turn then
-        local decay = Balance.INFLUENCE.decay_per_season
-        for _, r in ipairs(state.regions) do
-            r.influence = math.max(0, (r.influence or 0) + decay)
+        -- 文化顾问满配独有：文化感召，免疫影响力衰减
+        if not GameState.HasExcellentPosition(state, "culture_advisor") then
+            local decay = Balance.INFLUENCE.decay_per_season    -- 负值，如 -1
+            -- 文化顾问减缓衰减：bonus×0.3
+            local cultureBonus = GameState.GetPositionBonus(state, "culture_advisor")
+            if cultureBonus > 0 then
+                decay = math.floor(decay * (1 - cultureBonus * 0.3))
+            end
+            for _, r in ipairs(state.regions) do
+                r.influence = math.max(0, (r.influence or 0) + decay)
+            end
         end
     end
     -- 重置本季文化行动标记
@@ -566,15 +588,19 @@ function TurnEngine.EndTurn(state)
     -- ========================================
     -- 阶段 5: 武装士气衰减
     -- ========================================
-    local moraleBefore = state.military.morale
-    state.military.morale = math.max(0, math.min(100,
-        state.military.morale + Balance.MILITARY.morale_decay))
-
-    -- 军务主管加成：减缓衰减
+    -- 军务主管加成：减少衰减量（而非全量衰减后再加性恢复）
     local milChiefBonus = GameState.GetPositionBonus(state, "military_chief")
+    local decayAmount = Balance.MILITARY.morale_decay  -- 负值，如 -2
     if milChiefBonus > 0 then
-        state.military.morale = math.min(100,
-            state.military.morale + math.floor(milChiefBonus * 3))
+        -- 主管减缓衰减：每点 bonus 减少衰减 1 点（向下取整）
+        local reduction = math.floor(milChiefBonus * 1.0)
+        decayAmount = math.min(0, decayAmount + reduction)  -- 确保不会变成正值
+    end
+    state.military.morale = math.max(0, math.min(100,
+        state.military.morale + decayAmount))
+    -- 军务主管满配独有：精锐操练，每季度自动恢复 +3 士气
+    if GameState.HasExcellentPosition(state, "military_chief") then
+        state.military.morale = math.min(100, state.military.morale + 3)
     end
 
     -- ========================================
@@ -640,18 +666,20 @@ function TurnEngine.EndTurn(state)
             end
 
             -- ── 正常状态：基础资产增长 ──
-            -- 基础资产增长率 + 情报渗透 debuff
-            local rate = aiConfig.growth_rate + (faction.growth_mod or 0)
-            if faction.growth_mod_remaining and faction.growth_mod_remaining > 0 then
-                faction.growth_mod_remaining = faction.growth_mod_remaining - 1
-                if faction.growth_mod_remaining <= 0 then
-                    faction.growth_mod = 0
-                end
-            end
+            local rate = aiConfig.growth_rate
             local growth = math.floor(faction.cash * math.max(0, rate))
             faction.cash = faction.cash + growth
-            -- 现金上限：防止复利爆炸增长
+            -- 现金上限：防止复利爆炸增长（按时代递增）
             local cashCap = aiConfig.cash_cap or 10000
+            local eraScaling = Balance.AI.era_scaling
+            if eraScaling then
+                for i = #eraScaling, 1, -1 do
+                    if state.year >= eraScaling[i].year then
+                        cashCap = math.floor(cashCap * (eraScaling[i].cash_cap_mul or 1.0))
+                        break
+                    end
+                end
+            end
             if faction.cash > cashCap then
                 faction.cash = cashCap
             end
@@ -664,22 +692,49 @@ function TurnEngine.EndTurn(state)
                     faction.power + math.floor(foreignControl / 12)))
             end
 
-            -- 势力增长（加速：每季 +2，上限 100）
-            if faction.power < 100 then
+            -- 招募封锁倒计时
+            if faction.recruit_blocked and faction.recruit_blocked > 0 then
+                faction.recruit_blocked = faction.recruit_blocked - 1
+                if faction.recruit_blocked <= 0 then
+                    faction.recruit_blocked = nil
+                    table.insert(report.ai_changes,
+                        string.format("%s 的招募渠道已恢复", faction.name))
+                end
+            end
+
+            -- 势力增长（每季 +2，上限随时代/战况浮动）
+            local powerCap = 100
+            -- 时代递增：后期 AI 更强
+            if eraScaling then
+                for i = #eraScaling, 1, -1 do
+                    if state.year >= eraScaling[i].year then
+                        powerCap = eraScaling[i].power_cap or powerCap
+                        break
+                    end
+                end
+            end
+            -- 战时临时上限提升
+            if state.flags and state.flags.at_war then
+                powerCap = math.max(powerCap, Balance.AI.war_power_cap or 120)
+            end
+            if faction.power < powerCap then
                 local powerGain = 2
                 -- 战时 AI 势力增长更快
                 if state.flags and state.flags.at_war then powerGain = 3 end
-                if faction.cash >= (aiConfig.expand_threshold or math.huge) then
-                    powerGain = powerGain + 1
-                    local targetRegion = PickAIExpansionRegion(state, faction)
-                    if targetRegion then
-                        local before = targetRegion.ai_presence[faction.id] or 0
-                        targetRegion.ai_presence[faction.id] = math.min(100, before + 2)
-                        table.insert(report.ai_changes,
-                            string.format("%s 扩大了在%s的地区存在度", faction.name, targetRegion.name))
+                -- 招募被封锁时跳过扩张
+                if not faction.recruit_blocked or faction.recruit_blocked <= 0 then
+                    if faction.cash >= (aiConfig.expand_threshold or math.huge) then
+                        powerGain = powerGain + 1
+                        local targetRegion = PickAIExpansionRegion(state, faction)
+                        if targetRegion then
+                            local before = targetRegion.ai_presence[faction.id] or 0
+                            targetRegion.ai_presence[faction.id] = math.min(100, before + 2)
+                            table.insert(report.ai_changes,
+                                string.format("%s 扩大了在%s的地区存在度", faction.name, targetRegion.name))
+                        end
                     end
                 end
-                faction.power = math.min(100, faction.power + powerGain)
+                faction.power = math.min(powerCap, faction.power + powerGain)
             end
 
             -- 协议保护期内 AI 不主动敌对
@@ -704,10 +759,10 @@ function TurnEngine.EndTurn(state)
             -- 1) 雇佣兵：有钱时花钱提升 power
             if faction.cash >= (spend.mercenary_cost or 500)
                 and faction.cash > (aiConfig.expand_threshold or 600)
-                and faction.power < 90
+                and faction.power < (powerCap - 10)
                 and math.random() < (spend.mercenary_chance or 0.25) then
                 faction.cash = faction.cash - spend.mercenary_cost
-                faction.power = math.min(100, faction.power + (spend.mercenary_power or 5))
+                faction.power = math.min(powerCap, faction.power + (spend.mercenary_power or 5))
                 table.insert(report.ai_changes,
                     string.format("%s 雇佣了私兵（power +%d）", faction.name, spend.mercenary_power or 5))
             end
@@ -747,7 +802,7 @@ function TurnEngine.EndTurn(state)
                     string.format("%s 操纵了货币供应，推高通胀（+%.1f%%/季，持续%d季）",
                         faction.name, (spend.inflate_drift or 0.012) * 100, spend.inflate_duration or 4))
             end
-            -- 5) 矿价波动：外资压低金银矿产品价格
+            -- 5) 矿价波动：外资压低金铜矿产品价格
             if faction.type == "foreign_capital"
                 and faction.attitude < -35
                 and faction.cash >= (spend.mine_price_cost or 700)
@@ -757,10 +812,10 @@ function TurnEngine.EndTurn(state)
                 local priceDur = spend.mine_price_duration or 3
                 GameState.AddModifier(state, "foreign_gold_dump",
                     "gold_price_mod", priceMod, priceDur)
-                GameState.AddModifier(state, "foreign_silver_dump",
-                    "silver_price_mod", priceMod, priceDur)
+                GameState.AddModifier(state, "foreign_copper_dump",
+                    "copper_price_mod", priceMod, priceDur)
                 table.insert(report.ai_changes,
-                    string.format("%s 压低了金银市场价格（%.0f%%，持续%d季）",
+                    string.format("%s 压低了金铜市场价格（%.0f%%，持续%d季）",
                         faction.name, priceMod * 100, priceDur))
             end
 
@@ -907,12 +962,109 @@ function TurnEngine.EndTurn(state)
                 table.insert(report.warnings, member.name .. " 已恢复行动")
             end
         end
+        -- 上岗适应期递减
+        if (member.onboarding_remaining or 0) > 0 then
+            member.onboarding_remaining = member.onboarding_remaining - 1
+            if member.onboarding_remaining <= 0 then
+                member.onboarding_remaining = 0
+                if member.position then
+                    local posName = member.position
+                    for _, p in ipairs(Config.POSITIONS or {}) do
+                        if p.id == member.position then posName = p.name; break end
+                    end
+                    table.insert(report.warnings,
+                        string.format("%s 已适应%s岗位，全额加成生效", member.name, posName))
+                end
+            end
+        end
+        -- 下岗冷却CD递减
+        if (member.cooldown_turns or 0) > 0 then
+            member.cooldown_turns = member.cooldown_turns - 1
+            if member.cooldown_turns <= 0 then
+                member.cooldown_turns = 0
+            end
+        end
+    end
+
+    -- ── P1: 低忠诚事件系统 ──
+    -- 触发条件：在岗成员 loyalty ≤ 4
+    -- 概率：(5 - loyalty) × 5%
+    -- 事件池：消极怠工(40%), 泄露情报(30%), 携款潜逃(20%), 投靠对手(10%, loyalty ≤ 2)
+    do
+        local FamiliesData = require("data.families_data")
+        local membersToRemove = {}  -- 收集需要移除的成员id（避免遍历中删除）
+        for _, member in ipairs((state.family and state.family.members) or {}) do
+            if member.status == "active" and member.position then
+                local loyalty = FamiliesData.GetHiddenValue(member, "loyalty")
+                if loyalty <= 4 then
+                    local chance = (5 - loyalty) * 0.05
+                    if math.random() < chance then
+                        -- 按权重选事件
+                        local roll = math.random(100)
+                        if loyalty <= 2 and roll <= 10 then
+                            -- 投靠对手（10%，仅 loyalty ≤ 2）
+                            table.insert(membersToRemove, member.id)
+                            table.insert(report.warnings,
+                                string.format("⚠ %s 忠诚极低，投靠了对手势力，永久离队！", member.name))
+                            GameState.AddLog(state,
+                                string.format("[家族危机] %s 投靠对手，携资出走", member.name))
+                            -- 扣除部分现金模拟携款
+                            local stolen = math.floor(state.cash * 0.05)
+                            state.cash = math.max(0, state.cash - stolen)
+                            if stolen > 0 then
+                                table.insert(report.warnings,
+                                    string.format("  携走 %d 现金", stolen))
+                            end
+                        elseif roll <= 30 then
+                            -- 携款潜逃（20%）
+                            local stolen = math.floor(state.cash * 0.03)
+                            state.cash = math.max(0, state.cash - stolen)
+                            table.insert(report.warnings,
+                                string.format("⚠ %s 携款潜逃，损失 %d 现金（已追回岗位）",
+                                    member.name, stolen))
+                            GameState.AddLog(state,
+                                string.format("[家族危机] %s 携款潜逃 %d 克朗", member.name, stolen))
+                        elseif roll <= 60 then
+                            -- 泄露情报（30%）
+                            -- 随机增加一个AI势力的态度
+                            local factions = state.ai_factions or {}
+                            if #factions > 0 then
+                                local f = factions[math.random(#factions)]
+                                f.attitude = math.min(100, (f.attitude or 0) + 5)
+                                table.insert(report.warnings,
+                                    string.format("⚠ %s 向 %s 泄露了情报",
+                                        member.name, f.name))
+                                GameState.AddLog(state,
+                                    string.format("[家族危机] %s 泄露情报给 %s",
+                                        member.name, f.name))
+                            end
+                        else
+                            -- 消极怠工（40%）
+                            member.status = "disabled"
+                            member.disabled_turns = 1
+                            member.position = nil
+                            table.insert(report.warnings,
+                                string.format("⚠ %s 消极怠工，暂时失能1季",
+                                    member.name))
+                            GameState.AddLog(state,
+                                string.format("[家族危机] %s 消极怠工，失能1季",
+                                    member.name))
+                        end
+                    end
+                end
+            end
+        end
+        -- 处理需要永久移除的成员
+        for _, mid in ipairs(membersToRemove) do
+            GameState.RemoveFamilyMember(state, mid)
+        end
     end
 
     if state.family.training then
         state.family.training.progress = state.family.training.progress + 1
         if state.family.training.progress >= state.family.training.total then
-            -- 培养完成
+            -- 培养完成：标记可重随1次（看广告）
+            state.family.training.member_template.reroll_available = 1
             table.insert(state.family.members, state.family.training.member_template)
             GameState.AddLog(state, string.format("新成员 %s 加入家族！",
                 state.family.training.member_template.name))
@@ -956,6 +1108,75 @@ function TurnEngine.EndTurn(state)
     end
 
     -- ========================================
+    -- 阶段 8.55: 铜矿探矿进度
+    -- ========================================
+    if state.copper_prospecting then
+        state.copper_prospecting.progress = state.copper_prospecting.progress + 1
+        if state.copper_prospecting.progress >= state.copper_prospecting.total then
+            local chance = state.copper_prospecting.success_chance
+            local roll = math.random()
+            if roll <= chance then
+                local cfg = Balance.MINE.copper_prospect
+                local added = math.random(cfg.reserve_min, cfg.reserve_max)
+                -- 补充到矿区的 copper_reserve
+                for _, r in ipairs(state.regions or {}) do
+                    if r.type == "mine" and r.resources then
+                        r.resources.copper_reserve = (r.resources.copper_reserve or 0) + added
+                        break
+                    end
+                end
+                state.copper_prospect_count = (state.copper_prospect_count or 0) + 1
+                GameState.AddLog(state, string.format(
+                    "[矿业] 铜矿勘探成功！发现新铜脉（储量 +%d），已注入矿区", added))
+                table.insert(report.warnings, "铜矿勘探成功！新增铜储量 " .. added)
+            else
+                GameState.AddLog(state, "[矿业] 铜矿勘探未果，未发现有价值铜脉")
+                table.insert(report.warnings, "铜矿勘探未果")
+            end
+            state.copper_prospecting = nil
+        end
+    end
+
+    -- ========================================
+    -- 阶段 8.56: 煤矿探矿进度
+    -- ========================================
+    if state.coal_prospecting then
+        state.coal_prospecting.progress = state.coal_prospecting.progress + 1
+        if state.coal_prospecting.progress >= state.coal_prospecting.total then
+            local chance = state.coal_prospecting.success_chance
+            local roll = math.random()
+            if roll <= chance then
+                local cfg = Balance.MINE.coal_prospect
+                local added = math.random(cfg.reserve_min, cfg.reserve_max)
+                -- 补充到工业区的 coal_reserve
+                for _, r in ipairs(state.regions or {}) do
+                    if r.type == "industrial" and r.resources then
+                        r.resources.coal_reserve = (r.resources.coal_reserve or 0) + added
+                        break
+                    end
+                end
+                state.coal_prospect_count = (state.coal_prospect_count or 0) + 1
+                GameState.AddLog(state, string.format(
+                    "[矿业] 煤矿勘探成功！发现新煤层（储量 +%d），已注入工业区", added))
+                table.insert(report.warnings, "煤矿勘探成功！新增煤储量 " .. added)
+            else
+                GameState.AddLog(state, "[矿业] 煤矿勘探未果，未发现有价值煤层")
+                table.insert(report.warnings, "煤矿勘探未果")
+            end
+            state.coal_prospecting = nil
+        end
+    end
+
+    -- ========================================
+    -- 阶段 8.6: 外国矿侦察进度 & 有效性检查
+    -- ========================================
+    do
+        local ForeignOps = require("systems.foreign_ops")
+        ForeignOps.TickScout(state)
+        ForeignOps.ValidateActive(state)
+    end
+
+    -- ========================================
     -- 阶段 9: 推进季度
     -- ========================================
     state.phase = "action"
@@ -965,9 +1186,9 @@ function TurnEngine.EndTurn(state)
 
     -- 日志
     local logText = string.format(
-        "采金:%d 产银:%d 收入:%d 支出:%d 净利:%d 现金:%d",
+        "采金:%d 产铜:%d 收入:%d 支出:%d 净利:%d 现金:%d",
         report.economy.gold_mined,
-        report.economy.silver_mined,
+        report.economy.copper_mined,
         report.economy.total_income,
         report.economy.total_expense,
         report.economy.net,
@@ -985,8 +1206,8 @@ function TurnEngine.FormatReportSummary(report)
 
     -- 经济
     local eco = report.economy
-    table.insert(lines, string.format("采金 %d | 产银 %d | 收入 %d",
-        eco.gold_mined, eco.silver_mined, eco.total_income))
+    table.insert(lines, string.format("采金 %d | 产铜 %d | 收入 %d",
+        eco.gold_mined, eco.copper_mined, eco.total_income))
     table.insert(lines, string.format("支出 %d (工资%d+军费%d+补给%d+税%d)",
         eco.total_expense, eco.worker_expense, eco.military_expense,
         eco.supply_expense, eco.tax))

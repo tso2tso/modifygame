@@ -150,6 +150,7 @@ ACTIONS.economic_sanction = {
         if not power or not power.active then return false, "大国不活跃" end
         local totalInfluence = GameState.CalcTotalInfluence(state)
         if totalInfluence < 30 then return false, "影响力不足（需≥30）" end
+        if state.cash < 100 then return false, "现金不足（需≥100）" end
         return true
     end,
     execute = function(state, powerId)
@@ -211,11 +212,13 @@ ACTIONS.support_guerrilla = {
         power.war_fatigue = math.min(100, power.war_fatigue + 2)
         state.cash = state.cash - 200
         state.collaboration_score = (state.collaboration_score or 0) - 8
-        -- 提升本地抵抗
+        -- 提升被占领区域的抵抗值（根据实际被占领的区域动态查找）
         if state.europe then
-            local ah = state.europe["austria_hungary"]
-            if ah then
-                ah.resistance = math.min(100, (ah.resistance or 0) + 5)
+            for _, regionId in ipairs({"austria_hungary", "serbia"}) do
+                local region = state.europe[regionId]
+                if region and region.sovereign ~= region.original then
+                    region.resistance = math.min(100, (region.resistance or 0) + 5)
+                end
             end
         end
         GameState.AddLog(state, string.format("资助对 %s 的游击队，花费 200 克朗", power.label))
@@ -254,7 +257,7 @@ ACTIONS.shelter_refugees = {
             r.influence = math.min(100, (r.influence or 0) + 3)
         end
         -- 人口增加
-        state.workers.count = state.workers.count + 50
+        state.workers.hired = state.workers.hired + 50
         power.attitude_to_player = math.max(-100, power.attitude_to_player - 5)
         state.collaboration_score = (state.collaboration_score or 0) - 5
         GameState.AddLog(state, "庇护了一批战争难民，声望提升，人口 +50")
@@ -359,8 +362,29 @@ function PlayerActionsGP.ExecuteAction(state, powerId, actionId)
     -- 扣 AP（优先消耗临时 AP）
     GameState.SpendAP(state, action.ap_cost)
 
+    -- 外交总监加成：记录好感度变化量，对正向变化额外加成
+    local power = GrandPowers.GetPower(state, powerId)
+    local attBefore = power and power.attitude_to_player or 0
+
     -- 执行
     local msg = action.execute(state, powerId)
+
+    -- 外交总监：正向好感度按比例加成
+    if power then
+        local attAfter = power.attitude_to_player or 0
+        local delta = attAfter - attBefore
+        if delta > 0 then
+            local dipBonus = GameState.GetPositionBonus(state, "diplomat")
+            if dipBonus > 0 then
+                local extra = math.floor(delta * dipBonus * 0.5)
+                power.attitude_to_player = math.min(100, attAfter + extra)
+            end
+        end
+        -- 外交总监满配独有：外交密件，额外 +3 固定好感度
+        if delta >= 0 and GameState.HasExcellentPosition(state, "diplomat") then
+            power.attitude_to_player = math.min(100, (power.attitude_to_player or 0) + 3)
+        end
+    end
     return true, msg
 end
 

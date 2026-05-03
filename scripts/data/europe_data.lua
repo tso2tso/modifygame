@@ -70,7 +70,7 @@ local COUNTRIES = {
         sovereign = "ottoman",
         stability = 45,
         resistance = 0,
-        adjacency = { "greece", "bulgaria", "romania", "russia" },
+        adjacency = { "greece", "bulgaria", "romania", "russia", "serbia" },
     },
 
     -- ── 中等国家 ──
@@ -199,6 +199,9 @@ local COUNTRIES = {
         adjacency = { "france" },
     },
 }
+
+-- 导出到模块表（供 UI 层获取国家标签等信息）
+EuropeData.COUNTRIES = COUNTRIES
 
 -- ============================================================================
 -- 公开 API

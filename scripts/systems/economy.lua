@@ -10,6 +10,8 @@ local BM = Balance.MINE
 local BW = Balance.WORKERS
 local BMI = Balance.MILITARY
 local BE = Balance.ECONOMY
+local BG = Balance.GOLD
+local BC = Balance.COAL
 
 local Economy = {}
 
@@ -18,13 +20,15 @@ local Economy = {}
 ---@field gold_mined number 本季采金量
 ---@field gold_sold number 本季售出黄金
 ---@field gold_income number 黄金销售收入
----@field silver_mined number 本季产银量
----@field silver_sold number 本季售出白银
----@field silver_income number 白银销售收入
+---@field copper_mined number 本季产铜量
+---@field copper_sold number 本季售出铜
+---@field copper_income number 铜销售收入
 ---@field worker_expense number 工人工资
 ---@field military_expense number 军事开支
 ---@field supply_expense number 补给开支
 ---@field tax number 税收
+---@field gold_reserve_interest number 黄金储备利息收入
+---@field gold_hedge_pct number 黄金通胀对冲百分比
 ---@field total_income number 总收入
 ---@field total_expense number 总支出
 ---@field net number 净收入
@@ -38,9 +42,11 @@ function Economy.Settle(state)
         gold_mined = 0,
         gold_sold = 0,
         gold_income = 0,
-        silver_mined = 0,
-        silver_sold = 0,
-        silver_income = 0,
+        copper_mined = 0,
+        copper_sold = 0,
+        copper_income = 0,
+        gold_reserve_interest = 0,
+        gold_hedge_pct = 0,
         worker_expense = 0,
         military_expense = 0,
         supply_expense = 0,
@@ -58,7 +64,7 @@ function Economy.Settle(state)
     local transportRisk = math.max(0, GameState.GetModifierValue(state, "transport_risk"))
 
     -- ============================
-    -- 1. 矿山产出（金 + 银）
+    -- 1. 矿山产出（金 + 铜）
     -- ============================
     -- 处理产能迁移（上季度标记的 migrating 矿山）
     Economy._ProcessMigrations(state)
@@ -74,15 +80,15 @@ function Economy.Settle(state)
                 state.gold = state.gold + output
                 report.gold_mined = report.gold_mined + output
             end
-            -- 白银副产物：按矿山等级产出（消耗 region 共享 silver_reserve）
+            -- 铜副产物：按矿山等级产出（消耗 region 共享 copper_reserve）
             local region = GameState.GetRegion(state, mine.region_id)
-            local silverOut = math.floor(BM.base_silver_output
+            local copperOut = math.floor(BM.base_copper_output
                 * (1 + (mine.level - 1) * BM.level_output_bonus))
-            if silverOut > 0 and region and (region.resources.silver_reserve or 0) > 0 then
-                silverOut = math.min(silverOut, region.resources.silver_reserve)
-                region.resources.silver_reserve = region.resources.silver_reserve - silverOut
-                state.silver = (state.silver or 0) + silverOut
-                report.silver_mined = report.silver_mined + silverOut
+            if copperOut > 0 and region and (region.resources.copper_reserve or 0) > 0 then
+                copperOut = math.min(copperOut, region.resources.copper_reserve)
+                region.resources.copper_reserve = region.resources.copper_reserve - copperOut
+                state.copper = (state.copper or 0) + copperOut
+                report.copper_mined = report.copper_mined + copperOut
             end
         end
     end
@@ -91,12 +97,38 @@ function Economy.Settle(state)
     Economy._SyncRegionGoldReserve(state)
 
     -- ============================
+    -- 1.2 外国矿产收入
+    -- ============================
+    report.foreign_gold_mined = 0
+    report.foreign_copper_mined = 0
+    report.foreign_coal_mined = 0
+    do
+        local ForeignOps = require("systems.foreign_ops")
+        local fo = state.foreign_ops
+        if fo and fo.active then
+            for tileId, _ in pairs(fo.active) do
+                local out = ForeignOps.CalcOutput(state, tileId)
+                if out then
+                    state.gold = state.gold + (out.gold or 0)
+                    state.copper = (state.copper or 0) + (out.copper or 0)
+                    state.coal = (state.coal or 0) + (out.coal or 0)
+                    report.foreign_gold_mined = report.foreign_gold_mined + (out.gold or 0)
+                    report.foreign_copper_mined = report.foreign_copper_mined + (out.copper or 0)
+                    report.foreign_coal_mined = report.foreign_coal_mined + (out.coal or 0)
+                end
+            end
+        end
+    end
+
+    -- ============================
     -- 1.5 煤炭采集（工业区）
     -- ============================
     report.coal_mined = 0
     for _, r in ipairs(state.regions) do
-        if r.type == "industrial" and (r.resources.coal_reserve or 0) > 0 then
-            local coalOut = math.floor(BM.base_coal_output * (1 + (r.development - 1) * 0.15))
+        if r.type == "industrial" and r.resources and (r.resources.coal_reserve or 0) > 0 then
+            -- 按控制度折算产量（控制度越低，可开采比例越少；设下限保证基础产量）
+            local controlFactor = math.max(BC.min_control_factor or 0.30, (r.control or 0) / 100)
+            local coalOut = math.floor(BM.base_coal_output * (1 + (r.development - 1) * 0.15) * controlFactor)
             coalOut = math.min(coalOut, r.resources.coal_reserve)
             r.resources.coal_reserve = r.resources.coal_reserve - coalOut
             state.coal = (state.coal or 0) + coalOut
@@ -112,7 +144,12 @@ function Economy.Settle(state)
         local reserveGold = math.floor(state.gold * 0.1 + 0.5)  -- 保留10%（四舍五入）
         local sellable = math.max(0, state.gold - reserveGold)
         if sellable > 0 then
-            local price = BM.gold_price * inflation
+            -- 金价 = base × inflation^1.2（超线性：通胀越高黄金越值钱）
+            local price = BM.gold_price * (inflation ^ BG.price_inflation_exponent)
+            -- 战时黄金溢价（恐慌性购买）
+            if state.flags and state.flags.at_war then
+                price = price * (1 + BG.war_premium)
+            end
             -- 战时军需利润修正
             local priceModifier = GameState.GetModifierValue(state, "military_industry_profit")
             if priceModifier > 0 then
@@ -137,47 +174,115 @@ function Economy.Settle(state)
     end
 
     -- ============================
-    -- 2.5 白银出售（保留 0，全量出售）
+    -- 2.5 铜出售（手动模式：玩家决定卖铜还是留铜用于装备生产/维护减免）
     -- ============================
-    local silverStock = state.silver or 0
-    if silverStock > 0 then
-        local silverPriceMod = GameState.GetModifierValue(state, "silver_price_mod")
-        local silverPrice = math.floor(BM.silver_price * inflation * (1 + silverPriceMod))
-        silverPrice = math.max(1, silverPrice)
-        report.silver_sold = silverStock
-        report.silver_income = silverStock * silverPrice
-        state.silver = 0
-        state.cash = state.cash + report.silver_income
+    if state.copper_auto_sell then
+        local copperStock = state.copper or 0
+        if copperStock > 0 then
+            local copperPriceMod = GameState.GetModifierValue(state, "copper_price_mod")
+            local copperPrice = math.floor(BM.copper_price * inflation * (1 + copperPriceMod))
+            copperPrice = math.max(1, copperPrice)
+            report.copper_sold = copperStock
+            report.copper_income = copperStock * copperPrice
+            state.copper = 0
+            state.cash = state.cash + report.copper_income
+        end
     end
 
     -- ============================
-    -- 2.6 煤炭出售（全量出售）
+    -- 2.6 煤炭消耗与出售（动力化机制）
     -- ============================
     report.coal_sold = 0
     report.coal_income = 0
-    local coalStock = state.coal or 0
-    if coalStock > 0 then
-        local coalPriceMod = GameState.GetModifierValue(state, "coal_price_mod")
-        local coalPrice = math.floor(BM.coal_price * inflation * (1 + coalPriceMod))
-        coalPrice = math.max(1, coalPrice)
-        report.coal_sold = coalStock
-        report.coal_income = coalStock * coalPrice
-        state.coal = 0
-        state.cash = state.cash + report.coal_income
+    report.coal_factory_consumed = 0
+    report.coal_mine_allocated = 0
+    report.factory_coal_shortage = false
+
+    -- 2.6a 兵工厂煤耗：工厂运转必须消耗煤炭
+    local factory = state.military and state.military.factory
+    if factory and factory.level and factory.level > 0 and not factory.building then
+        local factoryCoalNeed = BC.factory_consumption[factory.level] or 0
+        local coalAvail = state.coal or 0
+        if coalAvail >= factoryCoalNeed then
+            state.coal = coalAvail - factoryCoalNeed
+            report.coal_factory_consumed = factoryCoalNeed
+        else
+            -- 煤炭不足：标记短缺，兵工厂本季暂停生产（在 TickProduction 中检查）
+            report.coal_factory_consumed = coalAvail
+            state.coal = 0
+            report.factory_coal_shortage = true
+            state.factory_coal_shortage = true  -- 存入 state 供 TickProduction 读取
+        end
+    end
+
+    -- 2.6b 矿山电力分配：玩家可分配煤炭给矿山提升金矿产出
+    local mineCoalAlloc = state.coal_to_mines or 0
+    if mineCoalAlloc > 0 and (state.coal or 0) >= mineCoalAlloc then
+        state.coal = state.coal - mineCoalAlloc
+        report.coal_mine_allocated = mineCoalAlloc
+        -- 电力加成存入 state，供下季矿山产出使用
+        local powerBoost = math.min(BC.mine_power_cap,
+            math.floor(mineCoalAlloc / 5) * BC.mine_power_per_5)
+        state.mine_coal_power_bonus = powerBoost
+    else
+        state.mine_coal_power_bonus = 0
+    end
+
+    -- 2.6c 煤炭手动出售（类似黄金，玩家控制）
+    if state.coal_auto_sell then
+        local coalStock = state.coal or 0
+        if coalStock > 0 then
+            local coalPriceMod = GameState.GetModifierValue(state, "coal_price_mod")
+            local coalPrice = BM.coal_price * inflation * (1 + coalPriceMod)
+            -- 战时煤价溢价
+            if state.flags and state.flags.at_war then
+                coalPrice = coalPrice * (1 + BC.war_price_premium)
+            end
+            coalPrice = math.max(1, math.floor(coalPrice))
+            report.coal_sold = coalStock
+            report.coal_income = coalStock * coalPrice
+            state.coal = 0
+            state.cash = state.cash + report.coal_income
+        end
     end
 
     -- ============================
-    -- 3. 工资支出（通胀作用于所有人力成本）
+    -- 2.8 黄金储备利息（超过阈值的部分按季生息，折算现金）
+    -- ============================
+    local goldHeld = state.gold or 0
+    if goldHeld > BG.reserve_interest_threshold then
+        local excess = goldHeld - BG.reserve_interest_threshold
+        local goldInterestPrice = BM.gold_price * (inflation ^ BG.price_inflation_exponent)
+        if state.flags and state.flags.at_war then
+            goldInterestPrice = goldInterestPrice * (1 + BG.war_premium)
+        end
+        report.gold_reserve_interest = math.floor(excess * BG.reserve_interest_rate * goldInterestPrice)
+        if report.gold_reserve_interest > 0 then
+            state.cash = state.cash + report.gold_reserve_interest
+        end
+    end
+
+    -- ============================
+    -- 2.9 黄金通胀对冲（计算折扣比例，在支出计算中应用）
+    -- ============================
+    local goldHedgePct = math.min(BG.inflation_hedge_cap,
+        math.floor(goldHeld / 10) * BG.inflation_hedge_per_10)
+    report.gold_hedge_pct = goldHedgePct
+    -- hedgedInflation 用于支出计算：通胀因子被黄金储备部分抵消
+    local hedgedInflation = inflation * (1 - goldHedgePct)
+
+    -- ============================
+    -- 3. 工资支出（通胀作用于所有人力成本，黄金对冲降低通胀影响）
     -- ============================
     -- 工人雇佣成本（科技折扣）
     local hireCostMul = 1.0 + (state.hire_cost_discount or 0)  -- discount 为负值
     hireCostMul = math.max(0.5, hireCostMul)  -- 最低 50% 成本
     report.worker_expense = math.floor(state.workers.hired * state.workers.wage * laborCostFactor * hireCostMul)
-    report.military_expense = math.floor(state.military.guards * state.military.wage * inflation)
+    report.military_expense = math.floor(state.military.guards * state.military.wage * hedgedInflation)
     local supplyDiscount = 1.0 - (state.finance_supply_discount or 0)
     local supplyPerGuard = math.max(1, BMI.supply_per_guard - (state.supply_reduction_bonus or 0))
     report.supply_expense = math.floor(state.military.guards * supplyPerGuard
-        * BMI.supply_cost * inflation * supplyDiscount * (1 + math.min(0.5, transportRisk)))
+        * BMI.supply_cost * hedgedInflation * supplyDiscount * (1 + math.min(0.5, transportRisk)))
 
     -- 装备维护费 + 兵工厂维护费
     local equipMaint, factoryMaint = Equipment.CalcMaintenanceCost(state)
@@ -198,9 +303,15 @@ function Economy.Settle(state)
     end
 
     -- 被动地区影响力增益（科技"印刷宣传"等）
-    if state.passive_influence and state.passive_influence ~= 0 then
+    local passiveInfl = state.passive_influence or 0
+    -- 文化顾问加成：被动影响力 ×(1+bonus×0.5)（满配 +50%，良好 +25%）
+    local cultureBonus = GameState.GetPositionBonus(state, "culture_advisor")
+    if cultureBonus > 0 and passiveInfl > 0 then
+        passiveInfl = math.floor(passiveInfl * (1 + cultureBonus * 0.5))
+    end
+    if passiveInfl ~= 0 then
         for _, r in ipairs(state.regions) do
-            r.influence = (r.influence or 0) + state.passive_influence
+            r.influence = (r.influence or 0) + passiveInfl
         end
     end
 
@@ -252,17 +363,22 @@ function Economy.Settle(state)
 
     report.transport_penalty = 0
     if transportRisk > 0 then
-        local exposedIncome = report.gold_income + report.silver_income + report.region_income + report.shadow_income
+        local exposedIncome = report.gold_income + report.copper_income + report.region_income + report.shadow_income
         report.transport_penalty = math.floor(exposedIncome * math.min(0.30, transportRisk * 0.25))
     end
 
     report.income_mod_adjustment = 0
-    local grossIncome = report.gold_income + report.silver_income + (report.coal_income or 0)
+    local grossIncome = report.gold_income + report.copper_income + (report.coal_income or 0)
+        + report.gold_reserve_interest
         + report.region_income + report.finance_income + (report.trade_income or 0) + report.shadow_income
     local incomeMod = GameState.GetModifierValue(state, "income_mod")
     if incomeMod ~= 0 then
         incomeMod = math.max(-0.75, math.min(1.00, incomeMod))
         report.income_mod_adjustment = math.floor(grossIncome * incomeMod)
+        -- 负向修正不得超过本季度总收入，防止将现金推入深度负值
+        if report.income_mod_adjustment < 0 then
+            report.income_mod_adjustment = math.max(report.income_mod_adjustment, -grossIncome)
+        end
         state.cash = state.cash + report.income_mod_adjustment
     end
 
@@ -296,13 +412,18 @@ function Economy.Settle(state)
             taxRate = taxRate - taxReduction
         end
     end
+    -- 内政总监减税：bonus × 20%（满配时减 20% 税率）
+    local civilBonus = GameState.GetPositionBonus(state, "civil_director")
+    if civilBonus > 0 then
+        taxRate = taxRate * (1 - civilBonus * 0.2)
+    end
     taxRate = math.max(0, math.min(0.35, taxRate))
     report.tax = math.max(0, math.floor(state.cash * taxRate))
 
     -- ============================
     -- 5. 汇总并扣款
     -- ============================
-    -- 注意：gold_income / silver_income / region_income 已在步骤 2-3.5 加到 state.cash，此处只减支出
+    -- 注意：gold_income / copper_income / region_income 已在步骤 2-3.5 加到 state.cash，此处只减支出
     report.total_income = grossIncome + report.income_mod_adjustment
     report.total_expense = report.worker_expense + report.military_expense
         + report.supply_expense + report.tax + report.ai_penalty + report.transport_penalty
@@ -321,7 +442,7 @@ function Economy.Settle(state)
         report.bankrupt = true
         -- 紧急变卖黄金
         local needed = math.abs(state.cash)
-        local emergencyGoldPrice = math.max(1, math.floor(BM.gold_price * inflation))
+        local emergencyGoldPrice = math.max(1, math.floor(BM.gold_price * (inflation ^ BG.price_inflation_exponent)))
         local sellGold = math.min(state.gold, math.ceil(needed / emergencyGoldPrice))
         if sellGold > 0 then
             state.cash = state.cash + sellGold * emergencyGoldPrice
@@ -366,12 +487,17 @@ function Economy._CalcMineOutput(state, mine)
         + (state.mine_output_base_bonus or 0)
         + (mine.output_bonus or 0)
 
-    local total = (base + outputMod) * levelMul * (1 + posBonus) + workerBonus
+    local total = (base + outputMod) * levelMul * (1 + posBonus * 0.5) + workerBonus
     -- 科技乘法加成（mine_output_mult）
     local multBonus = (state.mine_output_mult_bonus or 0)
         + GameState.GetModifierValue(state, "mine_output_mult")
     if multBonus ~= 0 then
         total = total * (1 + multBonus)
+    end
+    -- 煤炭电力加成（玩家分配煤炭给矿山）
+    local coalPowerBonus = state.mine_coal_power_bonus or 0
+    if coalPowerBonus > 0 then
+        total = total * (1 + coalPowerBonus)
     end
     total = math.max(0, math.floor(total))
 
@@ -380,9 +506,13 @@ function Economy._CalcMineOutput(state, mine)
     local defaultInitial = mine.id == "main_mine" and 500
         or ((Balance.TRADE or {}).new_mine or {}).base_reserve
         or 1500
-    mine.initial_reserve = math.max(mine.initial_reserve or 0, mine.reserve or 0, defaultInitial)
+    local effectiveInitial = math.max(mine.initial_reserve or 0, mine.reserve or 0, defaultInitial)
+    -- 仅在实际结算时持久化（避免 GetEstimate 等只读调用产生副作用）
+    if not state._estimate_mode then
+        mine.initial_reserve = effectiveInitial
+    end
     local capRatio = BM.max_quarterly_depletion_ratio or 0.08
-    local quarterlyCap = math.max(1, math.floor(mine.initial_reserve * capRatio))
+    local quarterlyCap = math.max(1, math.floor(effectiveInitial * capRatio))
     return math.min(total, quarterlyCap)
 end
 
@@ -390,13 +520,24 @@ end
 ---@param state table
 ---@return number income, number expense, table details
 function Economy.GetEstimate(state)
+    state._estimate_mode = true  -- 标记只读模式，防止 _CalcMineOutput 等函数修改状态
+    local ok, r1, r2, r3 = pcall(Economy._GetEstimateImpl, state)
+    state._estimate_mode = nil   -- 确保无论成功/失败都清除标记
+    if not ok then
+        log:Write(LOG_WARNING, "[Economy] GetEstimate error: " .. tostring(r1))
+        return 0, 0, {}
+    end
+    return r1, r2, r3
+end
+
+function Economy._GetEstimateImpl(state)
     local inflation = GameState.GetInflationFactor(state)
     local laborCostFactor = GameState.GetLaborCostFactor(state)
     local income = 0
     local details = {
         gold_potential_income = 0,
         gold_auto_income = 0,
-        silver_income = 0,
+        copper_income = 0,
         coal_income = 0,
         region_income = 0,
         finance_income = state.finance_passive_income or 0,
@@ -407,8 +548,11 @@ function Economy.GetEstimate(state)
         tax = 0,
     }
 
-    -- 金价修正（与 Settle / calcGoldPrice 保持一致）
-    local estGoldPrice = BM.gold_price * inflation
+    -- 金价修正（与 Settle 保持一致：超线性 + 战时溢价）
+    local estGoldPrice = BM.gold_price * (inflation ^ BG.price_inflation_exponent)
+    if state.flags and state.flags.at_war then
+        estGoldPrice = estGoldPrice * (1 + BG.war_premium)
+    end
     local estPriceModifier = GameState.GetModifierValue(state, "military_industry_profit")
     if estPriceModifier > 0 then
         estGoldPrice = estGoldPrice * (1 + estPriceModifier * 0.5)
@@ -433,18 +577,21 @@ function Economy.GetEstimate(state)
                 details.gold_potential_income = details.gold_potential_income + goldOut * estGoldPrice
                 estTotalGoldOut = estTotalGoldOut + goldOut
             end
-            -- 白银
+            -- 铜
             local region = GameState.GetRegion(state, mine.region_id)
-            local silverOut = math.floor(BM.base_silver_output
+            local copperOut = math.floor(BM.base_copper_output
                 * (1 + (mine.level - 1) * BM.level_output_bonus))
-            if region and (region.resources.silver_reserve or 0) > 0 then
-                silverOut = math.min(silverOut, region.resources.silver_reserve)
+            if region and (region.resources.copper_reserve or 0) > 0 then
+                copperOut = math.min(copperOut, region.resources.copper_reserve)
             else
-                silverOut = 0
+                copperOut = 0
             end
-            local silverPriceMod = GameState.GetModifierValue(state, "silver_price_mod")
-            details.silver_income = details.silver_income
-                + math.floor(silverOut * BM.silver_price * inflation * (1 + silverPriceMod))
+            local copperPriceMod = GameState.GetModifierValue(state, "copper_price_mod")
+            -- 铜收入仅在手动出售模式开启时计算
+            if state.copper_auto_sell then
+                details.copper_income = details.copper_income
+                    + math.floor(copperOut * BM.copper_price * inflation * (1 + copperPriceMod))
+            end
         end
     end
     if state.gold_auto_sell then
@@ -454,15 +601,68 @@ function Economy.GetEstimate(state)
         details.gold_auto_income = sellable * estGoldPrice
     end
 
-    -- 煤炭预估
+    -- 煤炭预估（动力化：扣除工厂煤耗 + 矿山分配，剩余手动出售）
     local coalPriceMod = GameState.GetModifierValue(state, "coal_price_mod")
-    local estCoalPrice = math.max(1, math.floor(BM.coal_price * inflation * (1 + coalPriceMod)))
+    local estCoalPrice = BM.coal_price * inflation * (1 + coalPriceMod)
+    -- 战时煤价溢价（与 Settle 保持一致：先乘溢价再取整）
+    if state.flags and state.flags.at_war then
+        estCoalPrice = estCoalPrice * (1 + BC.war_price_premium)
+    end
+    estCoalPrice = math.max(1, math.floor(estCoalPrice))
+    local estCoalMined = 0
     for _, r in ipairs(state.regions) do
-        if r.type == "industrial" and (r.resources.coal_reserve or 0) > 0 then
-            local coalOut = math.floor(BM.base_coal_output * (1 + (r.development - 1) * 0.15))
+        if r.type == "industrial" and r.resources and (r.resources.coal_reserve or 0) > 0 then
+            local controlFactor = math.max(BC.min_control_factor or 0.30, (r.control or 0) / 100)
+            local coalOut = math.floor(BM.base_coal_output * (1 + (r.development - 1) * 0.15) * controlFactor)
             coalOut = math.min(coalOut, r.resources.coal_reserve)
-            details.coal_income = details.coal_income + coalOut * estCoalPrice
+            estCoalMined = estCoalMined + coalOut
         end
+    end
+
+    -- 外国矿预估收入
+    details.foreign_gold_income = 0
+    details.foreign_copper_income = 0
+    details.foreign_coal_income = 0
+    do
+        local ForeignOps = require("systems.foreign_ops")
+        local fo = state.foreign_ops
+        if fo and fo.active then
+            local copperPriceMod = GameState.GetModifierValue(state, "copper_price_mod")
+            local estCopperPrice = math.max(1, math.floor(BM.copper_price * inflation * (1 + copperPriceMod)))
+            for tileId, _ in pairs(fo.active) do
+                local out = ForeignOps.CalcOutput(state, tileId)
+                if out then
+                    details.foreign_gold_income = details.foreign_gold_income
+                        + (out.gold or 0) * estGoldPrice
+                    details.foreign_copper_income = details.foreign_copper_income
+                        + (out.copper or 0) * estCopperPrice
+                    details.foreign_coal_income = details.foreign_coal_income
+                        + (out.coal or 0) * estCoalPrice
+                end
+            end
+        end
+    end
+
+    -- 煤炭净出售预估：现有库存 + 本季采集 - 工厂煤耗 - 矿山分配
+    local estCoalStock = (state.coal or 0) + estCoalMined
+    -- 扣除工厂煤耗
+    details.est_coal_factory = 0
+    local estFactory = state.military and state.military.factory
+    if estFactory and estFactory.level and estFactory.level > 0 and not estFactory.building then
+        local factoryNeed = BC.factory_consumption[estFactory.level] or 0
+        details.est_coal_factory = math.min(estCoalStock, factoryNeed)
+        estCoalStock = math.max(0, estCoalStock - factoryNeed)
+    end
+    -- 扣除矿山分配
+    details.est_coal_mine = 0
+    local estMineAlloc = state.coal_to_mines or 0
+    if estMineAlloc > 0 then
+        details.est_coal_mine = math.min(estCoalStock, estMineAlloc)
+        estCoalStock = math.max(0, estCoalStock - estMineAlloc)
+    end
+    -- 手动出售部分
+    if state.coal_auto_sell and estCoalStock > 0 then
+        details.coal_income = estCoalStock * estCoalPrice
     end
 
     local civilianDemand = GameState.GetModifierValue(state, "civilian_consumption")
@@ -493,8 +693,30 @@ function Economy.GetEstimate(state)
         details.shadow_income = math.floor(shadowIncome * inflation)
     end
 
-    income = details.gold_auto_income + details.silver_income + details.coal_income
+    -- 黄金储备利息预估
+    details.gold_reserve_interest = 0
+    local estGoldHeld = (state.gold or 0) + estTotalGoldOut  -- 本季结束后预估黄金持有
+    if not state.gold_auto_sell then
+        -- 不卖金时按全量持有预估
+    else
+        local totalGold = (state.gold or 0) + estTotalGoldOut
+        local reserveGold = math.floor(totalGold * 0.1 + 0.5)
+        estGoldHeld = reserveGold  -- 卖金后剩余
+    end
+    if estGoldHeld > BG.reserve_interest_threshold then
+        local excess = estGoldHeld - BG.reserve_interest_threshold
+        details.gold_reserve_interest = math.floor(excess * BG.reserve_interest_rate * estGoldPrice)
+    end
+
+    -- 黄金通胀对冲预估
+    local estGoldHedge = math.min(BG.inflation_hedge_cap,
+        math.floor((state.gold or 0) / 10) * BG.inflation_hedge_per_10)
+    details.gold_hedge_pct = estGoldHedge
+
+    income = details.gold_auto_income + details.copper_income + details.coal_income
+        + details.gold_reserve_interest
         + details.region_income + details.finance_income + details.trade_income + details.shadow_income
+        + (details.foreign_gold_income or 0) + (details.foreign_copper_income or 0) + (details.foreign_coal_income or 0)
     local estimateIncomeMod = GameState.GetModifierValue(state, "income_mod")
     if estimateIncomeMod ~= 0 then
         estimateIncomeMod = math.max(-0.75, math.min(1.00, estimateIncomeMod))
@@ -502,8 +724,11 @@ function Economy.GetEstimate(state)
         income = income + details.income_mod_adjustment
     end
 
+    -- transport_penalty 基数与 Settle 保持一致：仅对暴露收入（金/铜/地区/暗线）征收
     if transportRisk > 0 then
-        details.transport_penalty = math.floor(income * math.min(0.30, transportRisk * 0.25))
+        local estExposedIncome = details.gold_auto_income + details.copper_income
+            + details.region_income + details.shadow_income
+        details.transport_penalty = math.floor(estExposedIncome * math.min(0.30, transportRisk * 0.25))
     end
 
     -- 工人工资（含科技折扣，与 Settle 保持一致）
@@ -514,9 +739,10 @@ function Economy.GetEstimate(state)
     local estEquipMaint, estFactoryMaint = Equipment.CalcMaintenanceCost(state)
     details.equip_maintenance = estEquipMaint
     details.factory_maintenance = estFactoryMaint
+    local estHedgedInflation = inflation * (1 - estGoldHedge)
     local expenseBeforeTax = math.floor(state.workers.hired * state.workers.wage * laborCostFactor * estHireCostMul)
-        + math.floor(state.military.guards * state.military.wage * inflation)
-        + math.floor(state.military.guards * estSupplyPerGuard * BMI.supply_cost * inflation
+        + math.floor(state.military.guards * state.military.wage * estHedgedInflation)
+        + math.floor(state.military.guards * estSupplyPerGuard * BMI.supply_cost * estHedgedInflation
             * estSupplyDiscount * (1 + math.min(0.5, transportRisk)))
         + details.transport_penalty
         + estEquipMaint + estFactoryMaint

@@ -122,6 +122,7 @@ function UIManager.Create(state, callbacks)
     ActionModals.SetRoot(uiRoot_)
     EquipModals.SetRoot(uiRoot_)
     MarketPage.SetRoot(uiRoot_)
+    FamilyPage.SetRoot(uiRoot_)
     EndingModal.SetRoot(uiRoot_)
     EndingModal.SetCallbacks({
         onNewGame = onNewGame_,
@@ -203,6 +204,9 @@ function UIManager._CreatePageContent(tabId, state)
     local callbacks = {
         onStateChanged = function()
             UIManager.RefreshAll(stateRef_)
+        end,
+        onLightRefresh = function()
+            UIManager.RefreshLight(stateRef_)
         end,
         onSwitchTab = function(targetTabId)
             UIManager.SwitchTab(targetTabId)

@@ -150,12 +150,12 @@ local ERA_MAP_THEMES = {
 
 local RESOURCE_ICONS = {
     gold_reserve   = "Au",
-    silver_reserve = "Ag",
+    copper_reserve = "Cu",
     coal_reserve   = "C",
     steel_capacity = "Fe",
 }
 
-local RESOURCE_ORDER = { "gold_reserve", "silver_reserve", "coal_reserve", "steel_capacity" }
+local RESOURCE_ORDER = { "gold_reserve", "copper_reserve", "coal_reserve", "steel_capacity" }
 
 -- ============================================================================
 -- MapWidget 类
@@ -222,6 +222,7 @@ function MapWidget:SetMapTiles(tiles)
     self:_RebuildCoordIndex()
 end
 function MapWidget:SetSelected(id) self.selectedNodeId_ = id end
+function MapWidget:SetForeignOps(fo) self.foreignOps_ = fo end
 function MapWidget:GetSelected() return self.selectedNodeId_ end
 function MapWidget:SetEra(eraId) self.eraId_ = eraId or 1 end
 function MapWidget:SetEuropeState(europeData) self.europeState_ = europeData end
@@ -821,8 +822,14 @@ end
 -- ============================================================================
 
 function MapWidget:_DrawResourceLayer(nvg, mx, my, mw, mh)
+    local fo = self.foreignOps_ or {}
+    local scouted = fo.scouted or {}
+    local active  = fo.active or {}
+    local scouting = fo.scouting
+
     for _, tile in ipairs(self.mapTiles_) do
         local rd = self:_FindRegionData(tile.region_id)
+        -- 波黑本国矿：原有逻辑
         if rd and rd.resources then
             local cx, cy = MapTilesData.GetHexCenter(tile.q, tile.r)
             local sx, sy = self:_W2S(cx, cy, mx, my, mw, mh)
@@ -844,6 +851,86 @@ function MapWidget:_DrawResourceLayer(nvg, mx, my, mw, mh)
                     nvgFillColor(nvg, nvgRGBA(212, 175, 55, 220))
                     nvgText(nvg, tx, ty, tag)
                     offsetX = offsetX + tw + 2
+                end
+            end
+        end
+
+        -- 外国矿：根据侦察状态显示
+        local fmr = MapTilesData.FOREIGN_MINE_RESOURCES[tile.id]
+        if fmr and tile.country_id ~= "bosnia" then
+            local cx, cy = MapTilesData.GetHexCenter(tile.q, tile.r)
+            local sx, sy = self:_W2S(cx, cy, mx, my, mw, mh)
+            local iconSize = math.max(8, math.min(12, 6 + self.zoom_ * 1.0))
+
+            if active[tile.id] then
+                -- 开采中：绿色资源标签 + 损毁%
+                local act = active[tile.id]
+                local dmgPct = math.floor((act.damage or 0) * 100)
+                nvgFontFace(nvg, "sans"); nvgFontSize(nvg, iconSize)
+                nvgTextAlign(nvg, NVG_ALIGN_LEFT + NVG_ALIGN_MIDDLE)
+                local offsetX = 0
+                local FOREIGN_RES_ORDER = { "gold", "copper", "coal" }
+                local FOREIGN_RES_ICONS = { gold = "Au", copper = "Cu", coal = "C" }
+                local resv = act.reserve or fmr
+                for _, rk in ipairs(FOREIGN_RES_ORDER) do
+                    local rv = resv[rk] or 0
+                    if rv > 0 then
+                        local tag = FOREIGN_RES_ICONS[rk]
+                        local tw = iconSize * #tag * 0.6 + 6
+                        local tx = sx + 14 + offsetX
+                        local ty = sy - 14
+                        nvgBeginPath(nvg)
+                        nvgRoundedRect(nvg, tx - 3, ty - iconSize * 0.5 - 1, tw, iconSize + 2, 3)
+                        nvgFillColor(nvg, nvgRGBA(20, 40, 20, 180))
+                        nvgFill(nvg)
+                        nvgFillColor(nvg, nvgRGBA(46, 204, 113, 220))
+                        nvgText(nvg, tx, ty, tag)
+                        offsetX = offsetX + tw + 2
+                    end
+                end
+                -- 损毁百分比
+                if dmgPct > 0 and self.zoom_ >= 3.0 then
+                    local dmgText = "损" .. dmgPct .. "%"
+                    nvgFontSize(nvg, math.max(8, iconSize - 1))
+                    nvgTextAlign(nvg, NVG_ALIGN_CENTER + NVG_ALIGN_TOP)
+                    nvgFillColor(nvg, nvgRGBA(231, 76, 60, 220))
+                    nvgText(nvg, sx, sy + 12, dmgText)
+                end
+            elseif scouted[tile.id] then
+                -- 已侦察：显示资源（琥珀色）
+                nvgFontFace(nvg, "sans"); nvgFontSize(nvg, iconSize)
+                nvgTextAlign(nvg, NVG_ALIGN_LEFT + NVG_ALIGN_MIDDLE)
+                local offsetX = 0
+                local FOREIGN_RES_ORDER = { "gold", "copper", "coal" }
+                local FOREIGN_RES_ICONS = { gold = "Au", copper = "Cu", coal = "C" }
+                for _, rk in ipairs(FOREIGN_RES_ORDER) do
+                    local rv = fmr[rk] or 0
+                    if rv > 0 then
+                        local tag = FOREIGN_RES_ICONS[rk]
+                        local tw = iconSize * #tag * 0.6 + 6
+                        local tx = sx + 14 + offsetX
+                        local ty = sy - 14
+                        nvgBeginPath(nvg)
+                        nvgRoundedRect(nvg, tx - 3, ty - iconSize * 0.5 - 1, tw, iconSize + 2, 3)
+                        nvgFillColor(nvg, nvgRGBA(40, 30, 15, 180))
+                        nvgFill(nvg)
+                        nvgFillColor(nvg, nvgRGBA(243, 156, 18, 220))
+                        nvgText(nvg, tx, ty, tag)
+                        offsetX = offsetX + tw + 2
+                    end
+                end
+            elseif self.zoom_ >= 2.5 then
+                -- 未侦察：显示 "?" 图标
+                local isCurrentlyScouting = scouting and scouting.tile_id == tile.id
+                nvgFontFace(nvg, "sans")
+                nvgFontSize(nvg, math.max(10, iconSize + 2))
+                nvgTextAlign(nvg, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)
+                if isCurrentlyScouting then
+                    nvgFillColor(nvg, nvgRGBA(46, 204, 113, 180))
+                    nvgText(nvg, sx + 14, sy - 14, "⏳")
+                else
+                    nvgFillColor(nvg, nvgRGBA(180, 160, 130, 140))
+                    nvgText(nvg, sx + 14, sy - 14, "?")
                 end
             end
         end
@@ -1031,8 +1118,8 @@ function MapWidget:_DrawControls(nvg, wx, wy, ww, wh)
         nvgTextAlign(nvg, NVG_ALIGN_LEFT + NVG_ALIGN_MIDDLE)
         local legendItems = {
             { "玩家", FACTION_COLORS.player },
-            { "家族", FACTION_COLORS.local_clan },
-            { "外资", FACTION_COLORS.foreign_capital },
+            { "米洛舍维奇", FACTION_COLORS.local_clan },
+            { "维也纳矿业", FACTION_COLORS.foreign_capital },
             { "争议", FACTION_COLORS.contested },
         }
         for i, item in ipairs(legendItems) do
@@ -1064,9 +1151,9 @@ function MapWidget:_DrawLegendPanel(nvg, x, y)
     nvgText(nvg, x + 10, y + 14, "地图图例")
 
     local rows = {
-        { "控制色：玩家/家族/外资/争议", C.accent_gold },
+        { "控制色：玩家/米洛舍维奇/维也纳矿业/争议", C.accent_gold },
         { "安全层：红低、绿高", C.accent_red },
-        { "资源：Au 金 / Ag 银 / C 煤 / Fe 钢", C.accent_amber },
+        { "资源：Au 金 / Cu 铜 / C 煤", C.accent_amber },
         { "◎ 聚焦波黑，🌍 显示全欧", C.accent_blue },
     }
     nvgFontSize(nvg, 8)

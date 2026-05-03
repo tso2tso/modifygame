@@ -41,9 +41,14 @@ function GameState.CreateNew()
         -- ============================
         cash = BS.cash,
         gold = BS.gold,
-        silver = 0,     -- 白银库存（副产品，每季可售卖）
+        copper = 0,     -- 铜库存（矿山副产品，工业原料）
         coal   = 0,     -- 煤炭库存（工业区开采，每季可售卖）
         gold_auto_sell = false,  -- 黄金自动出售开关（默认关闭，玩家手动在产业页出售）
+        copper_auto_sell = false,  -- 铜自动出售开关
+        coal_auto_sell = false,    -- 煤炭自动出售开关
+        coal_to_mines = 0,         -- 分配给矿山的煤炭数量
+        factory_coal_shortage = false,  -- 工厂煤炭短缺标记
+        mine_coal_power_bonus = 0, -- 运行时计算的煤炭动力加成
 
         -- ============================
         -- 行动点
@@ -71,6 +76,7 @@ function GameState.CreateNew()
                 inst.change_pct = 0
                 inst.history    = { inst.price }
                 inst.event_mu_mods = {}
+                inst.fair_value = inst.price  -- 初始公允价值 = 初始价格（inflation=1, sectorBonus≈0）
                 table.insert(list, inst)
             end
             return list
@@ -168,6 +174,13 @@ function GameState.CreateNew()
         prospect_success_count = 0, -- 累计成功次数（驱动递减）
         prospect_success_bonus = 0, -- 科技提供的成功率加成
 
+        -- 铜矿探矿
+        copper_prospecting = nil,           -- 进行中 { progress, total, success_chance }
+        copper_prospect_count = 0,          -- 累计铜探矿成功次数
+        -- 煤矿探矿
+        coal_prospecting = nil,             -- 进行中 { progress, total, success_chance }
+        coal_prospect_count = 0,            -- 累计煤探矿成功次数
+
         -- ============================
         -- 工人
         -- ============================
@@ -203,6 +216,12 @@ function GameState.CreateNew()
         collaboration_score = 0,              -- 玩家合作度（-100~+100）
         powers = {},                          -- 活跃大国AI（Phase 2 填充）
         fronts = {},                          -- 活跃前线（Phase 2 填充）
+        _gp_initialized = false,              -- 大国博弈初始化标志
+
+        -- ============================
+        -- 事件干旱计数器
+        -- ============================
+        event_drought_counter = 0,
 
         -- ============================
         -- AI 势力
@@ -217,6 +236,9 @@ function GameState.CreateNew()
                 attitude = -5,   -- 对玩家态度 -100~100（初始微妙敌意）
                 power = 38,      -- 势力值（起步更强）
                 victory = { economic = 0, military = 0 },
+                battle_wins_unclaimed = 0,
+                recruit_blocked = 0,
+                attack_cooldown = 0,
                 desc = "扎根当地百年的传统望族，控制着大片土地和人脉网络。",
             },
             {
@@ -228,6 +250,9 @@ function GameState.CreateNew()
                 attitude = 5,    -- 外资初始中立偏友好
                 power = 45,      -- 资本集团势力更强
                 victory = { economic = 0, military = 0 },
+                battle_wins_unclaimed = 0,
+                recruit_blocked = 0,
+                attack_cooldown = 0,
                 desc = "来自帝国首都的资本集团，资金雄厚但在本地根基较浅。",
             },
         },
@@ -247,6 +272,15 @@ function GameState.CreateNew()
         -- 格式: { id, target, value, remaining_turns }
 
         -- ============================
+        -- 外国矿产操作
+        -- ============================
+        foreign_ops = {
+            scouted = {},       -- { [tile_id] = true } 已侦察的外国矿
+            scouting = nil,     -- { tile_id=string, remaining=number } 进行中侦察
+            active = {},        -- { [tile_id] = { damage=0.8, reserve={gold,copper,coal} } }
+        },
+
+        -- ============================
         -- 被动效果（科技/事件累积）
         -- ============================
         passive_influence = 0,       -- 被动地区影响力增益/季（科技"印刷宣传"等）
@@ -257,6 +291,22 @@ function GameState.CreateNew()
             foreign_trade_window = false,
             technocrat_route = false,
         },
+
+        -- ============================
+        -- 科技派生效果（运行时由科技系统累计，存档持久化）
+        -- ============================
+        mine_output_base_bonus = 0,
+        mine_output_mult_bonus = 0,
+        worker_efficiency_bonus = 0,
+        guard_power_tech_bonus = 0,
+        research_speed_bonus = 0,
+        trade_passive_income = 0,
+        finance_passive_income = 0,
+        finance_supply_discount = 0,
+        gold_price_bonus = 0,
+        hire_cost_discount = 0,
+        supply_reduction_bonus = 0,
+        accident_rate_mod = 0,
 
         -- ============================
         -- 全局状态标记
@@ -762,13 +812,14 @@ end
 ---@param cost number
 ---@return boolean 是否成功
 function GameState.SpendAP(state, cost)
-    local available = state.ap.current + state.ap.temp
+    local temp = state.ap.temp or 0
+    local available = state.ap.current + temp
     if available >= cost then
         -- 优先消耗临时 AP
-        if state.ap.temp >= cost then
-            state.ap.temp = state.ap.temp - cost
+        if temp >= cost then
+            state.ap.temp = temp - cost
         else
-            cost = cost - state.ap.temp
+            cost = cost - temp
             state.ap.temp = 0
             state.ap.current = state.ap.current - cost
         end
@@ -800,11 +851,13 @@ end
 ---@param positionId string|nil nil 表示解除岗位
 ---@return boolean
 function GameState.AssignPosition(state, memberId, positionId)
-    -- 如果目标岗位已有人，先清除
+    -- 如果目标岗位已有人，先清除（即时下岗，进入冷却）
     if positionId then
         for _, m in ipairs(state.family.members) do
             if m.position == positionId then
                 m.position = nil
+                m.onboarding_remaining = 0
+                m.cooldown_turns = Balance.FAMILY.unassign_cooldown or 2
             end
         end
     end
@@ -812,7 +865,17 @@ function GameState.AssignPosition(state, memberId, positionId)
     -- 分配
     for _, m in ipairs(state.family.members) do
         if m.id == memberId then
-            m.position = positionId
+            if positionId then
+                -- 上岗：设置适应期
+                m.position = positionId
+                m.onboarding_remaining = Balance.FAMILY.onboarding_turns or 2
+                m.cooldown_turns = 0  -- 上岗清除冷却
+            else
+                -- 下岗：即时生效，进入冷却期
+                m.position = nil
+                m.onboarding_remaining = 0
+                m.cooldown_turns = Balance.FAMILY.unassign_cooldown or 2
+            end
             return true
         end
     end
@@ -840,6 +903,11 @@ function GameState.GetPositionBonus(state, positionId)
     if not posConfig then return 0 end
 
     local _, bonus = FamiliesData.GetPositionFit(member, posConfig.attr1, posConfig.attr2)
+    -- 适应期间仅获得部分加成
+    if (member.onboarding_remaining or 0) > 0 then
+        local ratio = Balance.FAMILY.onboarding_bonus_ratio or 0.3
+        bonus = bonus * ratio
+    end
     return bonus
 end
 
@@ -860,6 +928,22 @@ function GameState.GetActiveFamilyHiddenAverage(state, kind)
     return total / count
 end
 
+--- 判断某岗位是否达到满配（excellent）。
+---@param state table
+---@param positionId string
+---@return boolean
+function GameState.HasExcellentPosition(state, positionId)
+    local bonus = GameState.GetPositionBonus(state, positionId)
+    return bonus >= 1.0
+end
+
+--- 内政总监满配时是否可揭示隐藏属性（便捷别名）。
+---@param state table
+---@return boolean
+function GameState.CanRevealHiddenAttrs(state)
+    return GameState.HasExcellentPosition(state, "civil_director")
+end
+
 --- 开始培养新成员。
 ---@param state table
 ---@return boolean ok
@@ -869,14 +953,40 @@ function GameState.StartFamilyTraining(state)
     if state.family.training then
         return false, "已有成员正在培养"
     end
-    if #state.family.members >= Balance.FAMILY.max_members then
+    local memberCount = #state.family.members
+    if memberCount >= Balance.FAMILY.max_members then
         return false, "家族成员已达上限"
     end
-    local cost = Balance.FAMILY.train_cost
-        or (Balance.FAMILY.training and Balance.FAMILY.training.cost)
-        or 200
+    -- 立绘池耗尽检查（peek：不实际分配，只检查是否还有可用立绘）
+    local hasPortrait = false
+    for i = 1, #FamiliesData.PORTRAIT_POOL do
+        if not FamiliesData.IsPoolPortraitUsed(i) then
+            hasPortrait = true
+            break
+        end
+    end
+    if not hasPortrait then
+        return false, "无可用立绘，无法培养"
+    end
+    -- 递增培养费用：根据当前成员数查阶梯表
+    local cost = Balance.FAMILY.train_cost or 200
+    local tiers = Balance.FAMILY.train_cost_tiers
+    if tiers then
+        -- 新成员将成为第 memberCount+1 个成员
+        local nextCount = memberCount + 1
+        for _, tier in ipairs(tiers) do
+            if nextCount <= tier.max_count then
+                cost = tier.cost
+                break
+            end
+        end
+        -- 超出所有阶梯则使用最后一档
+        if nextCount > tiers[#tiers].max_count then
+            cost = tiers[#tiers].cost
+        end
+    end
     if state.cash < cost then
-        return false, "现金不足"
+        return false, string.format("现金不足（需要 %d）", cost)
     end
     state.cash = state.cash - cost
     local total = Balance.FAMILY.train_duration
@@ -885,10 +995,42 @@ function GameState.StartFamilyTraining(state)
     state.family.training = {
         progress = 0,
         total = total,
-        member_template = FamiliesData.CreateTraineeTemplate((state.turn_count or 0) + #state.family.members + 1),
+        member_template = FamiliesData.CreateTraineeTemplate(
+            (state.turn_count or 0) + #state.family.members + 1,
+            (function()
+                local names = {}
+                for _, m in ipairs(state.family.members) do
+                    table.insert(names, m.name)
+                end
+                return names
+            end)()
+        ),
     }
     GameState.AddLog(state, string.format("开始培养新家族成员，预计 %d 季完成", total))
     return true, "已开始培养新成员"
+end
+
+--- 永久移除家族成员（投靠离队等P1事件调用）。
+--- 释放立绘回池、清除岗位、从列表中删除。
+---@param state table
+---@param memberId string
+---@return boolean ok
+---@return string|nil removedName
+function GameState.RemoveFamilyMember(state, memberId)
+    local members = (state.family and state.family.members) or {}
+    for i, m in ipairs(members) do
+        if m.id == memberId then
+            -- 释放池立绘
+            if m.portraitImage then
+                FamiliesData.ReleasePoolPortrait(m.portraitImage)
+            end
+            local name = m.name
+            table.remove(members, i)
+            GameState.AddLog(state, string.format("%s 永久离开了家族", name))
+            return true, name
+        end
+    end
+    return false, nil
 end
 
 --- 通过 hex 模块控制状态重算本地 region 的控制度与 AI 存在度。
@@ -1026,13 +1168,18 @@ end
 ---@return table details { cash, gold_value, mine_value, stock_value }
 function GameState.CalcTotalAssets(state)
     local inflation = GameState.GetInflationFactor(state)
-    local goldPrice = math.floor(Balance.MINE.gold_price * inflation)
-    local silverPrice = math.floor(Balance.MINE.silver_price * inflation)
+    local BG = Balance.GOLD
+    local goldPrice = math.floor(Balance.MINE.gold_price * (inflation ^ BG.price_inflation_exponent))
+    -- 战时溢价
+    if state.flags and state.flags.at_war then
+        goldPrice = math.floor(goldPrice * (1 + BG.war_premium))
+    end
+    local copperPrice = math.floor(Balance.MINE.copper_price * inflation)
     local coalPrice = math.floor(Balance.MINE.coal_price * inflation)
 
     local cash = math.max(0, state.cash)
     local goldValue = (state.gold or 0) * goldPrice
-    local silverValue = (state.silver or 0) * silverPrice
+    local copperValue = (state.copper or 0) * copperPrice
     local coalValue = (state.coal or 0) * coalPrice
 
     -- 矿山估值：等级 × 基础价值
@@ -1055,11 +1202,11 @@ function GameState.CalcTotalAssets(state)
         end
     end
 
-    local total = cash + goldValue + silverValue + coalValue + mineValue + stockValue
+    local total = cash + goldValue + copperValue + coalValue + mineValue + stockValue
     return total, {
         cash = cash,
         gold_value = goldValue,
-        silver_value = silverValue,
+        copper_value = copperValue,
         coal_value = coalValue,
         mine_value = mineValue,
         stock_value = stockValue,
@@ -1078,7 +1225,7 @@ function GameState.CalcLoanCollateralValue(state)
     local stockRatio = cfg.stock_asset_ratio or 0.25
 
     local realAssetValue = (assets.cash or 0) + (assets.gold_value or 0)
-        + (assets.silver_value or 0) + (assets.coal_value or 0) + (assets.mine_value or 0)
+        + (assets.copper_value or 0) + (assets.coal_value or 0) + (assets.mine_value or 0)
     local stockValue = assets.stock_value or 0
     local realCollateral = math.floor(realAssetValue * realRatio)
     local stockCollateral = math.floor(stockValue * stockRatio)

@@ -12,6 +12,30 @@ local MapTilesData = require("data.map_tiles_data")
 local MapWidget = require("ui.ui_map_widget")
 local GrandPowers = require("systems.grand_powers")
 local PlayerActionsGP = require("systems.player_actions_gp")
+local ForeignOps = require("systems.foreign_ops")
+local EuropeData = require("data.europe_data")
+
+-- 构建国家ID→中文名映射表
+local _countryLabels = {}
+if EuropeData.COUNTRIES then
+    for _, c in ipairs(EuropeData.COUNTRIES) do
+        if c.id and c.label then _countryLabels[c.id] = c.label end
+    end
+end
+
+--- 将 AI 势力 ID 翻译为中文名称（优先从 state 取真实派系名）
+local function _ResolveAIName(aiId, state)
+    if state and state.ai_factions then
+        for _, f in ipairs(state.ai_factions) do
+            if f.id == aiId and f.name then return f.name end
+        end
+    end
+    if aiId == "local_clan" then return "本地望族" end
+    if aiId == "foreign_capital" then return "外国资本" end
+    if aiId == "armed_group" then return "武装集团" end
+    if _countryLabels[aiId] then return _countryLabels[aiId] end
+    return aiId  -- fallback: 原始 ID
+end
 
 local C = Config.COLORS
 local F = Config.FONT
@@ -130,13 +154,13 @@ function WorldPage._CreateSubTabBar()
             paddingHorizontal = 14,
             paddingVertical = 6,
             flexGrow = 1,
-            onClick = function()
+            onClick = Config.ClickGuard(function()
                 if activeSubTab_ ~= tab.id then
                     activeSubTab_ = tab.id
                     WorldPage._SwitchSubTab(stateRef_, tab.id)
                     WorldPage._RefreshTabBar()
                 end
-            end,
+            end),
         })
     end
 
@@ -227,6 +251,7 @@ function WorldPage._BuildMapTab(state)
     mapWidget_:SetSelected(selectedNodeId_)
     mapWidget_:UpdateUnlocks(state)
     mapWidget_:SetEuropeState(state.europe)
+    mapWidget_:SetForeignOps(state.foreign_ops)
     WorldPage._UpdateFrontLineData(state)
 
     -- 设置时代
@@ -299,26 +324,44 @@ end
 --- 创建节点信息抽屉 — 遵循 §8.5 节点信息抽屉规范
 function WorldPage._CreateNodeDrawer(state, region, tile)
     if not region and tile then
+        local isPlayer = tile.controller == "player"
+        local aiPresence = {}
+        if not isPlayer and tile.controller and tile.controller ~= "contested" and tile.controller ~= "neutral" then
+            aiPresence[tile.controller] = 100
+        end
         region = {
             id = tile.id,
             name = tile.label,
             icon = tile.type == "capital" and "◆" or "⬡",
             type = tile.type,
-            control = tile.controller == "player" and 100 or 0,
+            control = isPlayer and 100 or 0,
             security = 3,
             population = tile.population or 0,
             development = tile.development or 1,
             culture = tile.culture or 0,
             influence = tile.influence or 0,
             resources = {},
-            ai_presence = {},
+            ai_presence = aiPresence,
         }
-        if tile.controller == "local_clan" or tile.controller == "foreign_capital" then
-            region.ai_presence[tile.controller] = 100
-        end
     end
     local displayName = tile and tile.label or region.name
-    local controllerText = tile and (tile.controller or "contested") or nil
+    local CONTROLLER_LABELS = {
+        player          = "玩家",
+        local_clan      = "本地望族",      -- fallback（state 不可用时）
+        foreign_capital = "外国资本",      -- fallback（state 不可用时）
+        armed_group     = "武装集团",
+        neutral         = "中立",
+        contested       = "争议",
+    }
+    -- 从 state 取真实派系名称（米洛舍维奇家族、维也纳矿业公司等），覆盖 fallback
+    if state and state.ai_factions then
+        for _, f in ipairs(state.ai_factions) do
+            if f.id and f.name then
+                CONTROLLER_LABELS[f.id] = f.name
+            end
+        end
+    end
+    local controllerText = tile and (CONTROLLER_LABELS[tile.controller] or _countryLabels[tile.controller] or CONTROLLER_LABELS.contested) or nil
     local secColor = region.security <= 2 and C.accent_red
         or (region.security >= 4 and C.accent_green or C.accent_amber)
     local ctrlColor = region.control >= 60 and C.accent_green
@@ -355,9 +398,7 @@ function WorldPage._CreateNodeDrawer(state, region, tile)
             for aiId, presence in pairs(region.ai_presence) do
                 if presence > maxAI then
                     maxAI = presence
-                    maxAIName = aiId == "local_clan" and "本地望族"
-                        or (aiId == "foreign_capital" and "外国资本"
-                        or (aiId == "armed_group" and "武装集团" or aiId))
+                    maxAIName = _ResolveAIName(aiId, state)
                 end
             end
         end
@@ -376,9 +417,7 @@ function WorldPage._CreateNodeDrawer(state, region, tile)
     -- AI 势力
     if region.ai_presence then
         for aiId, presence in pairs(region.ai_presence) do
-            local aiName = aiId == "local_clan" and "本地望族"
-                or (aiId == "foreign_capital" and "外国资本"
-                or (aiId == "armed_group" and "武装集团" or aiId))
+            local aiName = _ResolveAIName(aiId, state)
             local aiColor = aiId == "local_clan" and { 139, 69, 19 }
                 or (aiId == "foreign_capital" and { 39, 174, 96 }
                 or { 44, 62, 80 })
@@ -402,7 +441,7 @@ function WorldPage._CreateNodeDrawer(state, region, tile)
     if region.resources then
         local resMap = {
             gold_reserve   = { name = "金矿储量", icon = "Au" },
-            silver_reserve = { name = "银矿储量", icon = "Ag" },
+            copper_reserve = { name = "铜矿储量", icon = "Cu" },
             coal_reserve   = { name = "煤炭储量", icon = "C" },
             steel_capacity = { name = "钢铁产能", icon = "Fe" },
         }
@@ -413,6 +452,42 @@ function WorldPage._CreateNodeDrawer(state, region, tile)
                     Config.FormatNumber(resVal),
                     C.accent_gold))
             end
+        end
+    end
+
+    -- 外国矿资源（已侦察或正在开采）
+    if tile and tile.country_id ~= "bosnia" then
+        local fmr = MapTilesData.FOREIGN_MINE_RESOURCES[tile.id]
+        local fo = state.foreign_ops or {}
+        local isScouted = fo.scouted and fo.scouted[tile.id]
+        local isActive = fo.active and fo.active[tile.id]
+        if fmr and (isScouted or isActive) then
+            local FOREIGN_RES_MAP = {
+                gold   = { name = "金矿储量", icon = "Au" },
+                copper = { name = "铜矿储量", icon = "Cu" },
+                coal   = { name = "煤炭储量", icon = "C" },
+            }
+            local resSource = isActive and (fo.active[tile.id].reserve or fmr) or fmr
+            for _, rk in ipairs({ "gold", "copper", "coal" }) do
+                local rv = resSource[rk] or 0
+                if rv > 0 and FOREIGN_RES_MAP[rk] then
+                    local resColor = isActive and { 46, 204, 113, 255 } or C.accent_amber
+                    table.insert(resourceRows, WorldPage._InfoRow(
+                        FOREIGN_RES_MAP[rk].icon .. " " .. FOREIGN_RES_MAP[rk].name,
+                        Config.FormatNumber(rv),
+                        resColor))
+                end
+            end
+            if isActive then
+                local dmgPct = math.floor((fo.active[tile.id].damage or 0) * 100)
+                local effPct = 100 - dmgPct
+                table.insert(resourceRows, WorldPage._InfoRow(
+                    "⚙ 产出效率", effPct .. "%",
+                    dmgPct > 20 and C.accent_red or C.accent_green))
+            end
+        elseif fmr and not isScouted and not isActive then
+            table.insert(resourceRows, WorldPage._InfoRow(
+                "? 未侦察", "需先侦察矿产", C.text_muted))
         end
     end
 
@@ -430,20 +505,21 @@ function WorldPage._CreateNodeDrawer(state, region, tile)
             paddingHorizontal = 10,
             paddingVertical = 6,
             flexGrow = 1,
-            onClick = function()
+            onClick = Config.ClickGuard(function()
                 if callbacksRef_ and callbacksRef_.onSwitchTab then
                     callbacksRef_.onSwitchTab("industry")
                 end
-            end,
+            end),
         })
     end
     if (not tile) or tile.region_id then
         local infCost = Balance.INFLUENCE.cost_infiltrate
         local totalInfluence = GameState.CalcTotalInfluence(state)
-        local canInfiltrate = (state.ap.current + (state.ap.temp or 0)) >= 2
+        local infiltrateAP = 2  -- TODO: 提取到 Balance 配置（当前硬编码）
+        local canInfiltrate = (state.ap.current + (state.ap.temp or 0)) >= infiltrateAP
             and totalInfluence >= infCost
         table.insert(actionChildren, UI.Button {
-            text = string.format("政治渗透（2AP+%d影响力）", infCost),
+            text = string.format("政治渗透（%dAP+%d影响力）", infiltrateAP, infCost),
             fontSize = F.label,
             fontColor = canInfiltrate and C.text_primary or C.text_muted,
             backgroundColor = canInfiltrate and C.paper_mid or C.bg_elevated,
@@ -452,53 +528,136 @@ function WorldPage._CreateNodeDrawer(state, region, tile)
             paddingVertical = 6,
             flexGrow = 1,
             disabled = not canInfiltrate,
-            onClick = function(self)
+            onClick = Config.ClickGuard(function(self)
                 self.props.disabled = true
                 WorldPage._DoPoliticalInfiltration(state, region)
-            end,
+            end),
         })
     end
 
-    if tile and tile.region_id and tile.controller ~= "player" then
-        table.insert(actionChildren, UI.Button {
-            text = "占据模块（2AP）",
-            fontSize = F.label,
-            fontColor = C.text_primary,
-            backgroundColor = C.paper_mid,
-            borderRadius = S.radius_btn,
-            paddingHorizontal = 10,
-            paddingVertical = 6,
-            flexGrow = 1,
-            onClick = function()
-                WorldPage._ResolveTileOccupation(state, tile, "occupy")
-            end,
-        })
-        table.insert(actionChildren, UI.Button {
-            text = "吸纳地方（1AP）",
-            fontSize = F.label,
-            fontColor = C.text_primary,
-            backgroundColor = C.bg_elevated,
-            borderRadius = S.radius_btn,
-            paddingHorizontal = 10,
-            paddingVertical = 6,
-            flexGrow = 1,
-            onClick = function()
-                WorldPage._ResolveTileOccupation(state, tile, "absorb")
-            end,
-        })
-        table.insert(actionChildren, UI.Button {
-            text = "清算据点（2AP）",
-            fontSize = F.label,
-            fontColor = C.accent_red,
-            backgroundColor = C.bg_elevated,
-            borderRadius = S.radius_btn,
-            paddingHorizontal = 10,
-            paddingVertical = 6,
-            flexGrow = 1,
-            onClick = function()
-                WorldPage._ResolveTileOccupation(state, tile, "clear")
-            end,
-        })
+    -- 外国矿操作按钮（侦察 / 开采 / 重建）
+    if tile and tile.country_id ~= "bosnia"
+       and MapTilesData.FOREIGN_MINE_RESOURCES[tile.id] then
+        local canScout, scoutReason = ForeignOps.CanScout(state, tile.id)
+        local canExploit, exploitReason = ForeignOps.CanExploit(state, tile.id)
+        local canRebuild, rebuildReason = ForeignOps.CanRebuild(state, tile.id)
+        local fo = state.foreign_ops or {}
+        local isScouted = fo.scouted and fo.scouted[tile.id]
+        local isActive = fo.active and fo.active[tile.id]
+        local isScouting = fo.scouting and fo.scouting.tile_id == tile.id
+        local BFO = Balance.FOREIGN_OPS
+
+        if isScouting then
+            local rem = fo.scouting.remaining or 0
+            table.insert(actionChildren, UI.Button {
+                text = "侦察中…（剩余" .. rem .. "回合）",
+                fontSize = F.label,
+                fontColor = C.text_muted,
+                backgroundColor = C.bg_elevated,
+                borderRadius = S.radius_btn,
+                paddingHorizontal = 10,
+                paddingVertical = 6,
+                flexGrow = 1,
+                disabled = true,
+            })
+        elseif not isScouted and not isActive then
+            table.insert(actionChildren, UI.Button {
+                text = string.format("侦察矿产（%dAP+%d₿）",
+                    BFO.scout_ap, BFO.scout_cash),
+                fontSize = F.label,
+                fontColor = canScout and C.accent_gold or C.text_muted,
+                backgroundColor = canScout and C.bg_elevated or C.paper_dark,
+                borderRadius = S.radius_btn,
+                borderWidth = canScout and 1 or 0,
+                borderColor = canScout and C.border_gold or nil,
+                paddingHorizontal = 10,
+                paddingVertical = 6,
+                flexGrow = 1,
+                disabled = not canScout,
+                onClick = Config.ClickGuard(function(self)
+                    self.props.disabled = true
+                    local ok, err = ForeignOps.StartScout(state, tile.id)
+                    if ok then
+                        UI.Toast.Show("开始侦察 " .. (tile.label or tile.id), { variant = "success", duration = 1.5 })
+                    else
+                        UI.Toast.Show(err or "无法侦察", { variant = "warning", duration = 1.5 })
+                    end
+                    if callbacksRef_ and callbacksRef_.onStateChanged then callbacksRef_.onStateChanged() end
+                    WorldPage._RefreshDrawer(state)
+                end),
+            })
+        end
+
+        if isScouted and not isActive then
+            table.insert(actionChildren, UI.Button {
+                text = string.format("开采矿产（%dAP+%d₿）",
+                    BFO.exploit_ap, BFO.exploit_cash),
+                fontSize = F.label,
+                fontColor = canExploit and C.accent_green or C.text_muted,
+                backgroundColor = canExploit and C.bg_elevated or C.paper_dark,
+                borderRadius = S.radius_btn,
+                borderWidth = canExploit and 1 or 0,
+                borderColor = canExploit and { 46, 204, 113, 120 } or nil,
+                paddingHorizontal = 10,
+                paddingVertical = 6,
+                flexGrow = 1,
+                disabled = not canExploit,
+                onClick = Config.ClickGuard(function(self)
+                    self.props.disabled = true
+                    local ok, err = ForeignOps.StartExploit(state, tile.id)
+                    if ok then
+                        UI.Toast.Show("开始开采 " .. (tile.label or tile.id), { variant = "success", duration = 1.5 })
+                    else
+                        UI.Toast.Show(err or "无法开采", { variant = "warning", duration = 1.5 })
+                    end
+                    if callbacksRef_ and callbacksRef_.onStateChanged then callbacksRef_.onStateChanged() end
+                    WorldPage._RefreshDrawer(state)
+                end),
+            })
+        end
+
+        if isActive then
+            local act = fo.active[tile.id]
+            local dmgPct = math.floor((act.damage or 0) * 100)
+            if canRebuild then
+                table.insert(actionChildren, UI.Button {
+                    text = string.format("重建（%dAP+%d₿）损毁%d%%",
+                        BFO.rebuild_ap, BFO.rebuild_cash, dmgPct),
+                    fontSize = F.label,
+                    fontColor = C.accent_amber,
+                    backgroundColor = C.bg_elevated,
+                    borderRadius = S.radius_btn,
+                    borderWidth = 1,
+                    borderColor = C.accent_amber,
+                    paddingHorizontal = 10,
+                    paddingVertical = 6,
+                    flexGrow = 1,
+                    onClick = Config.ClickGuard(function(self)
+                        self.props.disabled = true
+                        local ok, err = ForeignOps.DoRebuild(state, tile.id)
+                        if ok then
+                            UI.Toast.Show("重建完成，损毁降低", { variant = "success", duration = 1.5 })
+                        else
+                            UI.Toast.Show(err or "无法重建", { variant = "warning", duration = 1.5 })
+                        end
+                        if callbacksRef_ and callbacksRef_.onStateChanged then callbacksRef_.onStateChanged() end
+                        WorldPage._RefreshDrawer(state)
+                    end),
+                })
+            else
+                table.insert(actionChildren, UI.Button {
+                    text = dmgPct > 0 and ("开采中·损毁" .. dmgPct .. "%") or "开采中·运转正常",
+                    fontSize = F.label,
+                    fontColor = dmgPct > 20 and C.accent_amber or C.accent_green,
+                    backgroundColor = C.bg_elevated,
+                    borderRadius = S.radius_btn,
+                    paddingHorizontal = 10,
+                    paddingVertical = 6,
+                    flexGrow = 1,
+                    disabled = true,
+                })
+            end
+        end
     end
 
     -- 构建控制比例 children
@@ -660,37 +819,6 @@ function WorldPage._CreateNodeDrawer(state, region, tile)
             },
         },
     }
-end
-
-function WorldPage._ResolveTileOccupation(state, tile, mode)
-    local apCost = mode == "absorb" and 1 or 2
-    if not GameState.SpendAP(state, apCost) then
-        UI.Toast.Show("行动点不足", { variant = "warning", duration = 1.5 })
-        return
-    end
-
-    local oldController = tile.controller or "contested"
-    tile.controller = "player"
-    tile.manual_control = true
-    local region
-    for _, r in ipairs(state.regions or {}) do
-        if r.id == tile.region_id then region = r; break end
-    end
-    if region then
-        if mode == "absorb" then
-            region.security = math.min(5, (region.security or 3) + 1)
-            region.influence = (region.influence or 0) + 3
-        elseif mode == "clear" then
-            region.security = math.max(1, (region.security or 3) - 1)
-            state.regulation_pressure = math.min(100, (state.regulation_pressure or 0) + 3)
-        end
-    end
-    GameState.SyncRegionsFromMapTiles(state)
-    GameState.AddLog(state, string.format("地图模块[%s]由%s转入玩家控制（%s）",
-        tile.label or tile.id, oldController, mode))
-    UI.Toast.Show("地盘控制已更新", { variant = "success", duration = 1.5 })
-    if callbacksRef_ and callbacksRef_.onStateChanged then callbacksRef_.onStateChanged() end
-    WorldPage._RefreshDrawer(state)
 end
 
 -- ============================================================================
@@ -1208,7 +1336,7 @@ function WorldPage._CreateGrandPowerCard(state, power, precomputed)
         paddingVertical = 6,
         alignSelf = "center",
         textAlign = "center",
-        onClick = function(self)
+        onClick = Config.ClickGuard(function(self)
             if actionsExpanded then
                 -- ── 收起 ──
                 actionsExpanded = false
@@ -1244,7 +1372,7 @@ function WorldPage._CreateGrandPowerCard(state, power, precomputed)
                             paddingHorizontal = 8,
                             paddingVertical = 5,
                             flexShrink = 1,
-                            onClick = function(btn)
+                            onClick = Config.ClickGuard(function(btn)
                                 btn.props.disabled = true
                                 if not enabled then
                                     local reason = act.reason or "行动点不足"
@@ -1260,7 +1388,8 @@ function WorldPage._CreateGrandPowerCard(state, power, precomputed)
                                 if callbacksRef_ and callbacksRef_.onStateChanged then
                                     callbacksRef_.onStateChanged()
                                 end
-                            end,
+                                WorldPage._RefreshDrawer(state)
+                            end),
                         })
                     end
 
@@ -1297,7 +1426,7 @@ function WorldPage._CreateGrandPowerCard(state, power, precomputed)
                     padding = S.card_padding,
                 })
             end
-        end,
+        end),
     }
 
     return UI.Panel {
@@ -1799,11 +1928,11 @@ function WorldPage._CreateUnifiedFactionCard(state, faction, precomputed)
                         borderRadius = S.radius_btn,
                         paddingVertical = 6,
                         width = "100%",
-                        onClick = function()
+                        onClick = Config.ClickGuard(function()
                             if callbacksRef_ and callbacksRef_.onAction then
                                 callbacksRef_.onAction("diplomacy", { target = faction.id })
                             end
-                        end,
+                        end),
                     },
                 },
             },
@@ -1986,10 +2115,11 @@ end
 --- 执行政治渗透：花费 2AP + 20影响力，增加玩家对目标地区的控制度 +8，等比减少 AI 势力占比
 function WorldPage._DoPoliticalInfiltration(state, region)
     local infCost = Balance.INFLUENCE.cost_infiltrate
+    local infiltrateAP = 2  -- TODO: 提取到 Balance 配置（当前硬编码）
 
     -- 检查 AP
-    if (state.ap.current + (state.ap.temp or 0)) < 2 then
-        UI.Toast.Show("行动点不足（需要2AP）", { variant = "error", duration = 1.5 })
+    if (state.ap.current + (state.ap.temp or 0)) < infiltrateAP then
+        UI.Toast.Show(string.format("行动点不足（需要%dAP）", infiltrateAP), { variant = "error", duration = 1.5 })
         return
     end
 
@@ -2002,7 +2132,7 @@ function WorldPage._DoPoliticalInfiltration(state, region)
     end
 
     -- 扣除 AP
-    if not GameState.SpendAP(state, 2) then
+    if not GameState.SpendAP(state, infiltrateAP) then
         UI.Toast.Show("行动点不足", { variant = "error", duration = 1.5 })
         return
     end
@@ -2191,6 +2321,7 @@ function WorldPage.Refresh(root, state)
         mapWidget_:SetRegions(state.regions)
         mapWidget_:UpdateUnlocks(state)
         mapWidget_:SetEuropeState(state.europe)
+        mapWidget_:SetForeignOps(state.foreign_ops)
         WorldPage._UpdateFrontLineData(state)
         local era = Config.GetEraByYear(state.year)
         if era then mapWidget_:SetEra(era.id) end

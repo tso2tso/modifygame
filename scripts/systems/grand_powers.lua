@@ -7,6 +7,7 @@ local PowersData = require("data.powers_data")
 local EuropeData = require("data.europe_data")
 local Config     = require("config")
 local GameState  = require("game_state")
+local Balance    = require("data.balance")
 
 local GrandPowers = {}
 
@@ -172,7 +173,7 @@ function GrandPowers._UpdateFactions(state, eraId)
     for id, power in pairs(state.powers) do
         if power.active then
             local newFaction = PowersData.GetFaction(id, eraId)
-            if newFaction and newFaction ~= "neutral" then
+            if newFaction then
                 power.faction = newFaction
             end
         end
@@ -274,7 +275,24 @@ function GrandPowers._ProcessConquests(state, year, quarter, report)
                 table.insert(events, ev)
             end
         end
+        -- 记录被提前执行的季度，下季度跳过这些事件防止双重执行
+        state._war_accel_done = { year = nextY, quarter = nextQ }
         state._branch_war_accelerated = false  -- 加速只生效一次
+    end
+
+    -- 跳过已被加速提前执行过的事件
+    if state._war_accel_done
+        and state._war_accel_done.year == year
+        and state._war_accel_done.quarter == quarter then
+        -- 本季度事件已在上季度被提前执行，过滤掉一战区间事件
+        local filtered = {}
+        for _, ev in ipairs(events) do
+            if not (ev.year >= 1914 and ev.year <= 1918) then
+                table.insert(filtered, ev)
+            end
+        end
+        events = filtered
+        state._war_accel_done = nil  -- 清除标记
     end
 
     -- ── 分支标记：战争推迟 ──
@@ -415,24 +433,30 @@ function GrandPowers._ProcessConquests(state, year, quarter, report)
     end
 end
 
---- 抵抗增长：被占领国家每季度抵抗度 +2（本地加固时+4）
+--- 抵抗增长：被占领国家每季度抵抗度 +2（本地加固时+4，纳粹合作者时轴心占领区-1）
 function GrandPowers._GrowResistance(state)
     if not state.europe then return end
 
-    -- 分支标记影响抵抗增长
-    local RESISTANCE_GROWTH = 2
-    if state._branch_fortified then
-        RESISTANCE_GROWTH = 4  -- 加固后抵抗翻倍
-    end
-    if state._branch_nazi_collaborator and state.year >= 1941 and state.year <= 1945 then
-        RESISTANCE_GROWTH = math.max(1, RESISTANCE_GROWTH - 1)  -- 合作者，占领方压制较温和，但抵抗仍在
-    end
+    -- 轴心国 ID 列表（用于判断纳粹合作者分支的作用范围）
+    local AXIS_POWERS = { nazi_germany = true, italy = true, hungary = true, bulgaria = true }
+    -- 玩家本地区域（加固分支仅影响这些区域）
+    local LOCAL_REGIONS = { austria_hungary = true, serbia = true, bosnia = true, montenegro = true }
     local AUTO_LIBERATE_THRESHOLD = 95
 
     for id, country in pairs(state.europe) do
         if country.sovereign ~= country.original then
-            -- 被占领，抵抗增长
-            country.resistance = math.min(100, (country.resistance or 0) + RESISTANCE_GROWTH)
+            -- 被占领，计算本国的抵抗增长值
+            local growth = 2
+            -- 加固分支：仅影响玩家本地区域，抵抗翻倍
+            if state._branch_fortified and LOCAL_REGIONS[id] then
+                growth = 4
+            end
+            -- 纳粹合作者分支：仅影响轴心国占领的国家，占领方压制较温和
+            if state._branch_nazi_collaborator and state.year >= 1941 and state.year <= 1945
+                and AXIS_POWERS[country.sovereign] then
+                growth = math.max(1, growth - 1)
+            end
+            country.resistance = math.min(100, (country.resistance or 0) + growth)
 
             -- 抵抗达到阈值 → 自动解放
             if country.resistance >= AUTO_LIBERATE_THRESHOLD then
@@ -488,7 +512,29 @@ function GrandPowers._LinkLocalAI(state, eraId)
         if proxyPower then
             -- 幕后大国的经济实力影响本地 AI 的增长率修正
             local ecoFactor = (proxyPower.economy - 50) / 500  -- -0.10 ~ +0.10
-            -- 不直接覆盖 growth_mod（可能有情报行动修正），而是通过修正器间接影响
+            -- 经济联动：大国经济强→代理人获得现金注入；大国经济弱→代理人现金流出
+            if ecoFactor > 0 then
+                local cashBoost = math.floor(faction.cash * ecoFactor)
+                faction.cash = faction.cash + cashBoost
+                -- 强制 cashCap（与 turn_engine.lua AI 现金上限保持一致）
+                local aiConfig = Balance.AI or {}
+                local cashCap = aiConfig.cash_cap or 10000
+                local eraScaling = aiConfig.era_scaling
+                if eraScaling then
+                    for i = #eraScaling, 1, -1 do
+                        if state.year >= eraScaling[i].year then
+                            cashCap = math.floor(cashCap * (eraScaling[i].cash_cap_mul or 1.0))
+                            break
+                        end
+                    end
+                end
+                if faction.cash > cashCap then
+                    faction.cash = cashCap
+                end
+            elseif ecoFactor < 0 then
+                local cashDrain = math.floor(faction.cash * math.abs(ecoFactor))
+                faction.cash = math.max(0, faction.cash - cashDrain)
+            end
             -- 幕后大国厌战时，代理人力量削弱
             if proxyPower.war_fatigue > 60 then
                 -- 高厌战 → 代理人支持减弱

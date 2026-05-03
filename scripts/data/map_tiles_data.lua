@@ -114,6 +114,7 @@ MapTilesData.TEMPLATES = {
     { id = "ah_galicia",    label = "加利西亚",     country_id = "austria_hungary", type = "mine",       q = 9,  r = 8,  weight = 1, controller = "austria_hungary", terrain = "plains" },
     { id = "ah_transylv",   label = "特兰西瓦尼亚", country_id = "austria_hungary", type = "mine",       q = 9,  r = 7,  weight = 1, controller = "austria_hungary", terrain = "mountain" },
     { id = "ah_pannonia",   label = "潘诺尼亚",     country_id = "austria_hungary", type = "strategic",  q = 8,  r = 9,  weight = 1, controller = "austria_hungary", terrain = "plains" },
+    { id = "ah_dalmatia",   label = "达尔马提亚",   country_id = "austria_hungary", type = "port",       q = 6,  r = 10, weight = 1, controller = "austria_hungary", terrain = "coast" },
 
     -- ═══════════════════════════════════════════════════════════
     -- 德意志帝国 Germany (9 tiles)
@@ -123,7 +124,7 @@ MapTilesData.TEMPLATES = {
     { id = "de_hamburg",    label = "汉堡",         country_id = "germany", type = "port",       q = 5,  r = 5,  weight = 1, controller = "germany", terrain = "coast" },
     { id = "de_bavaria",    label = "巴伐利亚",     country_id = "germany", type = "cultural",   q = 6,  r = 6,  weight = 1, controller = "germany", terrain = "hills" },
     { id = "de_saxony",     label = "萨克森",       country_id = "germany", type = "industrial", q = 7,  r = 5,  weight = 1, controller = "germany", terrain = "plains" },
-    { id = "de_rhineland",  label = "莱茵兰",       country_id = "germany", type = "cultural",   q = 4,  r = 6,  weight = 1, controller = "germany", terrain = "plains" },
+    { id = "de_rhineland",  label = "莱茵兰",       country_id = "germany", type = "cultural",   q = 4,  r = 7,  weight = 1, controller = "germany", terrain = "plains" },
     { id = "de_silesia",    label = "西里西亚",     country_id = "germany", type = "mine",       q = 8,  r = 5,  weight = 1, controller = "germany", terrain = "hills" },
     { id = "de_pomerania",  label = "波美拉尼亚",   country_id = "germany", type = "strategic",  q = 7,  r = 4,  weight = 1, controller = "germany", terrain = "coast" },
     { id = "de_alsace",     label = "阿尔萨斯",     country_id = "germany", type = "border",     q = 5,  r = 7,  weight = 1, controller = "germany", terrain = "hills" },
@@ -146,13 +147,13 @@ MapTilesData.TEMPLATES = {
     -- ═══════════════════════════════════════════════════════════
     { id = "ru_moscow",     label = "莫斯科",       country_id = "russia", type = "capital",    q = 13, r = 4,  weight = 2, controller = "russia", terrain = "urban" },
     { id = "ru_stpetersbg", label = "圣彼得堡",     country_id = "russia", type = "port",       q = 10, r = 2,  weight = 2, controller = "russia", terrain = "urban" },
-    { id = "ru_warsaw",     label = "华沙",         country_id = "russia", type = "industrial", q = 9,  r = 5,  weight = 1, controller = "russia", terrain = "plains" },
-    { id = "ru_kiev",       label = "基辅",         country_id = "russia", type = "industrial", q = 12, r = 6,  weight = 1, controller = "russia", terrain = "plains" },
+    { id = "ru_warsaw",     label = "华沙",         country_id = "russia", type = "industrial", q = 9,  r = 4,  weight = 1, controller = "russia", terrain = "plains" },
+    { id = "ru_kiev",       label = "基辅",         country_id = "russia", type = "industrial", q = 12, r = 5,  weight = 1, controller = "russia", terrain = "plains" },
     { id = "ru_minsk",      label = "明斯克",       country_id = "russia", type = "strategic",  q = 10, r = 4,  weight = 1, controller = "russia", terrain = "forest" },
     { id = "ru_baltics",    label = "波罗的海",     country_id = "russia", type = "port",       q = 9,  r = 3,  weight = 1, controller = "russia", terrain = "coast" },
     { id = "ru_finland_bdr",label = "芬兰边区",     country_id = "russia", type = "border",     q = 9,  r = 2,  weight = 1, controller = "russia", terrain = "forest" },
-    { id = "ru_odessa",     label = "敖德萨",       country_id = "russia", type = "port",       q = 12, r = 7,  weight = 1, controller = "russia", terrain = "coast" },
-    { id = "ru_caucasus",   label = "高加索",       country_id = "russia", type = "mine",       q = 14, r = 6,  weight = 1, controller = "russia", terrain = "mountain" },
+    { id = "ru_odessa",     label = "敖德萨",       country_id = "russia", type = "port",       q = 12, r = 6,  weight = 1, controller = "russia", terrain = "coast" },
+    { id = "ru_caucasus",   label = "高加索",       country_id = "russia", type = "mine",       q = 13, r = 6,  weight = 1, controller = "russia", terrain = "mountain" },
     { id = "ru_volga",      label = "伏尔加",       country_id = "russia", type = "mine",       q = 14, r = 4,  weight = 1, controller = "russia", terrain = "steppe" },
     { id = "ru_smolensk",   label = "斯摩棱斯克",   country_id = "russia", type = "strategic",  q = 11, r = 4,  weight = 1, controller = "russia", terrain = "forest" },
     { id = "ru_urals",      label = "乌拉尔",       country_id = "russia", type = "mine",       q = 14, r = 3,  weight = 1, controller = "russia", terrain = "mountain" },
@@ -197,20 +198,20 @@ MapTilesData.TEMPLATES = {
     -- ═══════════════════════════════════════════════════════════
     { id = "bg_sofia",      label = "索菲亚",       country_id = "bulgaria", type = "capital",    q = 11, r = 11, weight = 2, controller = "bulgaria", terrain = "urban" },
     { id = "bg_plovdiv",    label = "普罗夫迪夫",   country_id = "bulgaria", type = "industrial", q = 11, r = 10, weight = 1, controller = "bulgaria", terrain = "hills" },
-    { id = "bg_varna",      label = "瓦尔纳",       country_id = "bulgaria", type = "port",       q = 12, r = 10, weight = 1, controller = "bulgaria", terrain = "coast" },
+    { id = "bg_varna",      label = "瓦尔纳",       country_id = "bulgaria", type = "port",       q = 11, r = 12, weight = 1, controller = "bulgaria", terrain = "coast" },
 
     -- ═══════════════════════════════════════════════════════════
     -- 希腊 Greece (3 tiles)
     -- ═══════════════════════════════════════════════════════════
     { id = "gr_athens",     label = "雅典",         country_id = "greece", type = "capital",    q = 9,  r = 13, weight = 2, controller = "greece", terrain = "urban" },
-    { id = "gr_thessaly",   label = "色萨利",       country_id = "greece", type = "strategic",  q = 9,  r = 12, weight = 1, controller = "greece", terrain = "mountain" },
+    { id = "gr_thessaly",   label = "色萨利",       country_id = "greece", type = "strategic",  q = 10, r = 13, weight = 1, controller = "greece", terrain = "mountain" },
     { id = "gr_crete",      label = "克里特",       country_id = "greece", type = "port",       q = 10, r = 14, weight = 1, controller = "greece", terrain = "coast" },
 
     -- ═══════════════════════════════════════════════════════════
     -- 黑山 Montenegro (2 tiles)
     -- ═══════════════════════════════════════════════════════════
-    { id = "mt_cetinje",    label = "采蒂涅",       country_id = "montenegro", type = "capital",  q = 8,  r = 13, weight = 1, controller = "montenegro", terrain = "mountain" },
-    { id = "mt_coast",      label = "黑山海岸",     country_id = "montenegro", type = "port",     q = 7,  r = 13, weight = 1, controller = "montenegro", terrain = "coast" },
+    { id = "mt_cetinje",    label = "采蒂涅",       country_id = "montenegro", type = "capital",  q = 9,  r = 12, weight = 1, controller = "montenegro", terrain = "mountain" },
+    { id = "mt_coast",      label = "黑山海岸",     country_id = "montenegro", type = "port",     q = 8,  r = 13, weight = 1, controller = "montenegro", terrain = "coast" },
 
     -- ═══════════════════════════════════════════════════════════
     -- 奥斯曼帝国 Ottoman (8 tiles)
@@ -218,10 +219,10 @@ MapTilesData.TEMPLATES = {
     { id = "ot_istanbul",   label = "君士坦丁堡",   country_id = "ottoman", type = "capital",    q = 12, r = 11, weight = 2, controller = "ottoman", terrain = "urban" },
     { id = "ot_thrace",     label = "色雷斯",       country_id = "ottoman", type = "strategic",  q = 12, r = 12, weight = 1, controller = "ottoman", terrain = "plains" },
     { id = "ot_anatolia_w", label = "安纳托利亚西", country_id = "ottoman", type = "industrial", q = 13, r = 11, weight = 1, controller = "ottoman", terrain = "hills" },
-    { id = "ot_anatolia_c", label = "安纳托利亚中", country_id = "ottoman", type = "strategic",  q = 14, r = 10, weight = 1, controller = "ottoman", terrain = "steppe" },
+    { id = "ot_anatolia_c", label = "安纳托利亚中", country_id = "ottoman", type = "strategic",  q = 14, r = 11, weight = 1, controller = "ottoman", terrain = "steppe" },
     { id = "ot_smyrna",     label = "士麦那",       country_id = "ottoman", type = "port",       q = 13, r = 12, weight = 1, controller = "ottoman", terrain = "coast" },
     { id = "ot_syria",      label = "叙利亚",       country_id = "ottoman", type = "strategic",  q = 14, r = 12, weight = 1, controller = "ottoman", terrain = "steppe" },
-    { id = "ot_adrianople", label = "阿德里安堡",   country_id = "ottoman", type = "border",     q = 11, r = 12, weight = 1, controller = "ottoman", terrain = "plains" },
+    { id = "ot_adrianople", label = "阿德里安堡",   country_id = "ottoman", type = "border",     q = 12, r = 10, weight = 1, controller = "ottoman", terrain = "plains" },
     { id = "ot_aegean",     label = "爱琴海岸",     country_id = "ottoman", type = "port",       q = 11, r = 13, weight = 1, controller = "ottoman", terrain = "coast" },
 
     -- ═══════════════════════════════════════════════════════════
@@ -234,7 +235,7 @@ MapTilesData.TEMPLATES = {
     -- 丹麦 Denmark (2 tiles)
     -- ═══════════════════════════════════════════════════════════
     { id = "dk_copenhagen", label = "哥本哈根",     country_id = "denmark", type = "capital",  q = 5,  r = 4,  weight = 1, controller = "denmark", terrain = "coast" },
-    { id = "dk_jutland",    label = "日德兰",       country_id = "denmark", type = "port",     q = 4,  r = 4,  weight = 1, controller = "denmark", terrain = "coast" },
+    { id = "dk_jutland",    label = "日德兰",       country_id = "denmark", type = "port",     q = 5,  r = 3,  weight = 1, controller = "denmark", terrain = "coast" },
 
     -- ═══════════════════════════════════════════════════════════
     -- 瑞典-挪威 Scandinavia (3 tiles)
@@ -242,6 +243,7 @@ MapTilesData.TEMPLATES = {
     { id = "sc_stockholm",  label = "斯德哥尔摩",   country_id = "scandinavia", type = "capital",  q = 6,  r = 2,  weight = 1, controller = "scandinavia", terrain = "coast" },
     { id = "sc_oslo",       label = "奥斯陆",       country_id = "scandinavia", type = "port",     q = 5,  r = 2,  weight = 1, controller = "scandinavia", terrain = "coast" },
     { id = "sc_norrland",   label = "北部山区",     country_id = "scandinavia", type = "mine",     q = 6,  r = 1,  weight = 1, controller = "scandinavia", terrain = "mountain" },
+    { id = "sc_aland",      label = "奥兰群岛",     country_id = "scandinavia", type = "port",     q = 7,  r = 2,  weight = 1, controller = "scandinavia", terrain = "coast" },
 
     -- ═══════════════════════════════════════════════════════════
     -- 芬兰 Finland (2 tiles)
@@ -425,8 +427,15 @@ function MapTilesData.SyncRegionsFromTiles(state)
         if a and a.weight > 0 then
             region.control = math.floor(a.player / a.weight * 100 + 0.5)
             region.ai_presence = region.ai_presence or {}
+            -- 先从 tile 累积的 a.ai 写入（新增+更新已有 key）
+            for aiId, aiW in pairs(a.ai) do
+                region.ai_presence[aiId] = math.floor(aiW / a.weight * 100 + 0.5)
+            end
+            -- 将 a.ai 中不存在但 region 里残留的旧 key 归零
             for aiId, _ in pairs(region.ai_presence) do
-                region.ai_presence[aiId] = math.floor(((a.ai[aiId] or 0) / a.weight) * 100 + 0.5)
+                if not a.ai[aiId] then
+                    region.ai_presence[aiId] = 0
+                end
             end
         end
     end
@@ -441,7 +450,7 @@ local function dominantFromRegion(region)
             maxId, maxVal = aiId, v
         end
     end
-    if maxId and maxVal >= 40 then return maxId end
+    if maxId and maxVal >= 30 then return maxId end
     return "contested"
 end
 
@@ -457,5 +466,33 @@ function MapTilesData.SyncTilesFromRegions(state)
         end
     end
 end
+
+-- ============================================================================
+-- 外国矿产资源储量（静态数据，侦察后揭示）
+-- 键 = tile.id，值 = 初始储量
+-- ============================================================================
+MapTilesData.FOREIGN_MINE_RESOURCES = {
+    -- 奥匈帝国
+    ah_galicia    = { gold = 300, copper = 800,  coal = 0    },
+    ah_transylv   = { gold = 200, copper = 600,  coal = 1500 },
+    -- 德国
+    de_silesia    = { gold = 0,   copper = 0,    coal = 3000 },
+    -- 英国
+    br_scotland   = { gold = 0,   copper = 200,  coal = 2000 },
+    br_wales      = { gold = 0,   copper = 0,    coal = 2500 },
+    -- 塞尔维亚
+    se_vojvodina  = { gold = 100, copper = 400,  coal = 800  },
+    -- 罗马尼亚
+    ro_wallachia  = { gold = 150, copper = 500,  coal = 1200 },
+    ro_transylv   = { gold = 400, copper = 300,  coal = 500  },
+    -- 斯堪的纳维亚
+    sc_norrland   = { gold = 0,   copper = 600,  coal = 0    },
+    -- 芬兰
+    fi_inland     = { gold = 100, copper = 300,  coal = 0    },
+    -- 俄国
+    ru_caucasus   = { gold = 500, copper = 200,  coal = 800  },
+    ru_volga      = { gold = 0,   copper = 0,    coal = 2000 },
+    ru_urals      = { gold = 600, copper = 400,  coal = 1500 },
+}
 
 return MapTilesData

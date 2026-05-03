@@ -457,21 +457,20 @@ PowersData.CONQUEST_TIMELINE = {
     { year = 1940, quarter = 1, attacker = "nazi_germany",     target = "denmark",     action = "conquer" },
     { year = 1940, quarter = 1, attacker = "nazi_germany",     target = "lowlands",    action = "conquer" },
     { year = 1940, quarter = 3, attacker = "nazi_germany",     target = "france",      action = "conquer" },
-    { year = 1941, quarter = 2, attacker = "nazi_germany",     target = "yugoslavia",  action = "conquer" },  -- 南斯拉夫陷落
+    { year = 1941, quarter = 2, attacker = "nazi_germany",     target = "serbia",      action = "conquer" },  -- 南斯拉夫陷落（yugoslavia 无 europe 条目，作用于 serbia）
     { year = 1941, quarter = 3, attacker = "nazi_germany",     target = "greece",      action = "conquer" },
-    { year = 1941, quarter = 3, attacker = "nazi_germany",     target = "serbia",      action = "conquer" },  -- 占领继承国领土
     { year = 1941, quarter = 3, attacker = "nazi_germany",     target = "montenegro",  action = "conquer" },
     { year = 1943, quarter = 3, attacker = "allies",           target = "italy",       action = "liberate" },  -- 意大利投降
     { year = 1944, quarter = 2, attacker = "allies",           target = "france",      action = "liberate" },  -- 诺曼底
     { year = 1944, quarter = 3, attacker = "soviet_union",     target = "romania",     action = "liberate" },
     { year = 1944, quarter = 3, attacker = "soviet_union",     target = "bulgaria",    action = "liberate" },
-    { year = 1944, quarter = 4, attacker = "tito_yugoslavia",  target = "yugoslavia",  action = "liberate" },  -- 游击队解放
-    { year = 1944, quarter = 4, attacker = "tito_yugoslavia",  target = "serbia",      action = "liberate" },
+    { year = 1944, quarter = 4, attacker = "tito_yugoslavia",  target = "serbia",      action = "liberate" },  -- 游击队解放
     { year = 1944, quarter = 4, attacker = "tito_yugoslavia",  target = "montenegro",  action = "liberate" },
     { year = 1945, quarter = 1, attacker = "allies",           target = "greece",      action = "liberate" },
     { year = 1945, quarter = 1, attacker = "allies",           target = "lowlands",    action = "liberate" },
     { year = 1945, quarter = 1, attacker = "allies",           target = "denmark",     action = "liberate" },
-    { year = 1945, quarter = 2, attacker = "allies",           target = "nazi_germany",action = "liberate" },  -- 德国投降
+    { year = 1945, quarter = 1, attacker = "allies",           target = "austria_hungary", action = "liberate" },  -- 奥地利解放（1938被吞并）
+    { year = 1945, quarter = 2, attacker = "allies",           target = "germany",     action = "liberate" },  -- 德国投降（europe 中 id 为 germany）
 }
 
 -- ============================================================================
@@ -486,6 +485,13 @@ PowersData.SUCCESSION_EVENTS = {
         old_id = "russia",
         new_id = "soviet_union",
         -- 保留俄罗斯领土（除芬兰外），主权标记更新为 soviet_union
+        rename_sovereign = true,
+    },
+    -- 德意志帝国 → 魏玛共和国 (1918 Q4 投降)
+    {
+        year = 1919, quarter = 1,
+        old_id = "germany",
+        new_id = "weimar_germany",
         rename_sovereign = true,
     },
     -- 奥匈帝国 → 南斯拉夫王国 (1918 Q4 崩溃)

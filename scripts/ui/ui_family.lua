@@ -1,6 +1,6 @@
 -- ============================================================================
--- 家族页 UI：成员卡片、属性展示、岗位分配
--- 设计规范：sarajevo_dynasty_ui_spec §6.2
+-- 家族页 UI：按岗位分块布局 + 候选人弹窗 + 待命成员区域
+-- 设计规范：sarajevo_dynasty_ui_spec §6.2 (v2 — 岗位优先布局)
 -- ============================================================================
 
 local UI = require("urhox-libs/UI")
@@ -19,8 +19,12 @@ local FamilyPage = {}
 local stateRef_ = nil
 ---@type function|nil 状态变化回调
 local onStateChanged_ = nil
+---@type table|nil UI 根节点引用（Modal 需要）
+local uiRoot_ = nil
+---@type table|nil 当前打开的弹窗
+local currentModal_ = nil
 
--- 属性条颜色映射（使用更克制的工业时代配色）
+-- 属性条颜色映射
 local ATTR_COLORS = {
     management = C.accent_blue,
     strategy   = C.accent_red,
@@ -38,15 +42,29 @@ local FIT_LABELS = {
     good      = "半配",
     poor      = "差配",
 }
+local FIT_CHIP_COLORS = {
+    excellent = "success",
+    good      = "warning",
+    poor      = "error",
+}
 
 local TRAIT_CHIP_COLORS = {
-    ["可靠"] = "success",
-    ["清廉"] = "success",
-    ["稳健"] = "default",
-    ["易动摇"] = "warning",
+    ["可靠"]     = "success",
+    ["清廉"]     = "success",
+    ["稳健"]     = "default",
+    ["易动摇"]   = "warning",
     ["灰色倾向"] = "warning",
-    ["激进"] = "error",
+    ["激进"]     = "error",
 }
+
+-- ============================================================================
+-- 公共接口
+-- ============================================================================
+
+--- 设置 UI 根节点（Modal 必须 AddChild 到 UI 树才能渲染）
+function FamilyPage.SetRoot(root)
+    uiRoot_ = root
+end
 
 --- 创建家族页完整内容
 ---@param state table
@@ -55,21 +73,29 @@ local TRAIT_CHIP_COLORS = {
 function FamilyPage.Create(state, callbacks)
     stateRef_ = state
     onStateChanged_ = callbacks and callbacks.onStateChanged
-
     return FamilyPage._BuildContent(state)
 end
 
---- 构建页面内容
+--- 刷新家族页
+function FamilyPage.Refresh(root, state)
+    stateRef_ = state
+end
+
+-- ============================================================================
+-- 页面构建
+-- ============================================================================
+
 function FamilyPage._BuildContent(state)
     local children = {}
 
-    -- 家族概况卡片
+    -- 1) 家族概况卡片
     table.insert(children, FamilyPage._CreateSummaryCard(state))
 
-    -- 成员卡片
-    for _, member in ipairs(state.family.members) do
-        table.insert(children, FamilyPage._CreateMemberCard(state, member))
-    end
+    -- 2) 岗位网格（2列布局）
+    table.insert(children, FamilyPage._CreatePositionGrid(state))
+
+    -- 3) 待命成员区域
+    table.insert(children, FamilyPage._CreateIdleSection(state))
 
     return UI.Panel {
         id = "familyContent",
@@ -80,7 +106,10 @@ function FamilyPage._BuildContent(state)
     }
 end
 
---- 家族概况卡片（§6.2 家主卡样式 — 金色边框）
+-- ============================================================================
+-- 家族概况卡片
+-- ============================================================================
+
 function FamilyPage._CreateSummaryCard(state)
     local activeCount = 0
     local assignedCount = 0
@@ -110,46 +139,72 @@ function FamilyPage._CreateSummaryCard(state)
             UI.Panel {
                 width = "100%",
                 flexDirection = "row",
-                gap = 16,
+                alignItems = "center",
+                gap = 12,
                 children = {
                     FamilyPage._StatItem("成员", string.format("%d/%d", activeCount, Balance.FAMILY.max_members)),
                     FamilyPage._StatItem("在岗", string.format("%d/%d", assignedCount, #Config.POSITIONS)),
                     FamilyPage._StatItem("空缺", tostring(#Config.POSITIONS - assignedCount)),
+                    UI.Panel { flexGrow = 1 },  -- 弹性间隔
+                    (function()
+                        local memberCount = #state.family.members
+                        local trainCost = Balance.FAMILY.train_cost
+                        for _, tier in ipairs(Balance.FAMILY.train_cost_tiers or {}) do
+                            if memberCount < tier.max_count then
+                                trainCost = tier.cost
+                                break
+                            end
+                            trainCost = tier.cost
+                        end
+                        local portraitAvailable = false
+                        for i = 1, #FamiliesData.PORTRAIT_POOL do
+                            if not FamiliesData.IsPoolPortraitUsed(i) then
+                                portraitAvailable = true
+                                break
+                            end
+                        end
+                        local atMax = memberCount >= Balance.FAMILY.max_members
+                        local btnText
+                        if state.family.training then
+                            btnText = string.format("培养中 %d/%d",
+                                state.family.training.progress or 0,
+                                state.family.training.total or 0)
+                        elseif atMax then
+                            btnText = "已达上限"
+                        elseif not portraitAvailable then
+                            btnText = "立绘已用尽"
+                        else
+                            btnText = string.format("培养新成员(💰%d)", trainCost)
+                        end
+                        return UI.Button {
+                            text = btnText,
+                            fontSize = F.body_minor,
+                            fontColor = C.text_primary,
+                            backgroundColor = state.family.training and C.bg_elevated or C.paper_mid,
+                            borderRadius = S.radius_btn,
+                            paddingHorizontal = 10,
+                            paddingVertical = 6,
+                            disabled = state.family.training ~= nil or atMax or not portraitAvailable,
+                            onClick = Config.ClickGuard(function()
+                                local ok, msg = GameState.StartFamilyTraining(state)
+                                UI.Toast.Show(msg, { variant = ok and "success" or "warning", duration = 1.8 })
+                                if ok and onStateChanged_ then onStateChanged_() end
+                            end),
+                        }
+                    end)(),
                 },
             },
-            -- 提示
             UI.Label {
-                text = "分配家族成员到岗位可获得对应方向的经营加成",
+                text = "分配家族成员到岗位可获得对应方向经营加成，上岗需适应2季度",
                 fontSize = F.body_minor,
                 fontColor = C.text_muted,
                 whiteSpace = "normal",
                 lineHeight = 1.4,
             },
-            UI.Button {
-                text = state.family.training
-                    and string.format("培养中 %d/%d",
-                        state.family.training.progress or 0,
-                        state.family.training.total or 0)
-                    or "培养新成员",
-                fontSize = F.body_minor,
-                fontColor = C.text_primary,
-                backgroundColor = state.family.training and C.bg_elevated or C.paper_mid,
-                borderRadius = S.radius_btn,
-                paddingHorizontal = 10,
-                paddingVertical = 6,
-                disabled = state.family.training ~= nil
-                    or #state.family.members >= Balance.FAMILY.max_members,
-                onClick = function()
-                    local ok, msg = GameState.StartFamilyTraining(state)
-                    UI.Toast.Show(msg, { variant = ok and "success" or "warning", duration = 1.8 })
-                    if ok and onStateChanged_ then onStateChanged_() end
-                end,
-            },
         },
     }
 end
 
---- 统计项小组件
 function FamilyPage._StatItem(label, value)
     return UI.Panel {
         flexDirection = "column",
@@ -171,75 +226,367 @@ function FamilyPage._StatItem(label, value)
     }
 end
 
---- 生成 ●○ 点状评分字符串（§6.2 评分用 1-10 数字 + 小点状图）
----@param val number 0-10
----@return string
-local function dotRating(val)
-    local filled = math.min(math.max(math.floor(val), 0), 10)
-    local empty = 10 - filled
-    return string.rep("●", filled) .. string.rep("○", empty)
+-- ============================================================================
+-- 岗位网格（2列 × 3行）
+-- ============================================================================
+
+function FamilyPage._CreatePositionGrid(state)
+    local cards = {}
+    for _, pos in ipairs(Config.POSITIONS) do
+        table.insert(cards, FamilyPage._CreatePositionCard(state, pos))
+    end
+
+    -- 两列布局：每行两个岗位卡
+    local rows = {}
+    for i = 1, #cards, 2 do
+        local rowChildren = { cards[i] }
+        if cards[i + 1] then
+            table.insert(rowChildren, cards[i + 1])
+        end
+        table.insert(rows, UI.Panel {
+            width = "100%",
+            flexDirection = "row",
+            gap = S.card_gap,
+            children = rowChildren,
+        })
+    end
+
+    return UI.Panel {
+        width = "100%",
+        flexDirection = "column",
+        gap = S.card_gap,
+        children = rows,
+    }
 end
 
---- 创建单个成员卡片（§6.2 成员列表样式）
-function FamilyPage._CreateMemberCard(state, member)
-    local isDisabled = (member.status == "disabled")
-    local isHead = (member.id == "patriarch")  -- 家主卡金色边框
-
-    -- 构建岗位下拉选项
-    local posOptions = { { value = "__none__", label = "未分配" } }
-    for _, pos in ipairs(Config.POSITIONS) do
-        local occupied = false
-        local occupant = ""
-        for _, m in ipairs(state.family.members) do
-            if m.position == pos.id and m.id ~= member.id and m.status == "active" then
-                occupied = true
-                occupant = m.name
-                break
-            end
+--- 创建单个岗位卡片
+function FamilyPage._CreatePositionCard(state, pos)
+    -- 查找当前任职者
+    local occupant = nil
+    for _, m in ipairs(state.family.members) do
+        if m.position == pos.id then
+            occupant = m
+            break
         end
-        local label = pos.name
-        if occupied then
-            label = pos.name .. " (" .. occupant .. ")"
-        end
-        table.insert(posOptions, {
-            value = pos.id,
-            label = label,
-            disabled = occupied,
-        })
     end
 
-    local currentPos = member.position or "__none__"
+    local attr1Name = Config.ATTR_NAMES[pos.attr1] or pos.attr1
+    local attr2Name = Config.ATTR_NAMES[pos.attr2] or pos.attr2
 
-    -- 岗位适配信息
-    local fitInfo = FamilyPage._GetCurrentFitInfo(member)
+    local cardChildren = {}
 
-    -- 状态标签
-    local statusChips = {}
-    if isDisabled then
+    -- 岗位名称 + 关键属性标签
+    table.insert(cardChildren, UI.Panel {
+        width = "100%",
+        flexDirection = "column",
+        gap = 2,
+        children = {
+            UI.Label {
+                text = pos.name,
+                fontSize = F.subtitle,
+                fontWeight = "bold",
+                fontColor = C.accent_gold,
+            },
+            UI.Label {
+                text = attr1Name .. " · " .. attr2Name,
+                fontSize = F.label,
+                fontColor = C.text_muted,
+            },
+        },
+    })
+
+    if occupant then
+        -- 有人在岗：展示任职者简要信息
+        local rating, bonus = FamiliesData.GetPositionFit(occupant, pos.attr1, pos.attr2)
+        local fitLabel = FIT_LABELS[rating] or ""
+        local fitColor = FIT_CHIP_COLORS[rating] or "default"
+
+        -- 适应期状态
+        local onboarding = (occupant.onboarding_remaining or 0) > 0
+        local statusChips = {}
         table.insert(statusChips, UI.Chip {
-            label = "失能 " .. member.disabled_turns .. "回合",
-            color = "error",
+            label = fitLabel,
+            color = fitColor,
             variant = "soft",
             size = "sm",
         })
-    elseif member.position then
-        table.insert(statusChips, UI.Chip {
-            label = fitInfo.label,
-            color = fitInfo.chipColor,
-            variant = "soft",
-            size = "sm",
+        if onboarding then
+            table.insert(statusChips, UI.Chip {
+                label = "适应中 " .. occupant.onboarding_remaining .. "季",
+                color = "warning",
+                variant = "outlined",
+                size = "sm",
+            })
+        end
+
+        -- 立绘 + 信息 横向布局
+        local portraitWidget
+        if occupant.portraitImage then
+            portraitWidget = UI.Panel {
+                width = 48,
+                height = 96,
+                borderRadius = S.radius_badge,
+                backgroundImage = occupant.portraitImage,
+                backgroundFit = "cover",
+                borderWidth = 1,
+                borderColor = C.border_card,
+                flexShrink = 0,
+            }
+        else
+            portraitWidget = UI.Avatar {
+                name = occupant.name,
+                initials = occupant.portrait,
+                size = 40,
+                shape = "rounded",
+                backgroundColor = C.paper_mid,
+                showBorder = true,
+                borderColor = C.border_card,
+            }
+        end
+
+        -- 关键属性紧凑显示（只显示岗位关键的两个属性）
+        local attr1Val = (occupant.attrs and occupant.attrs[pos.attr1]) or 0
+        local attr2Val = (occupant.attrs and occupant.attrs[pos.attr2]) or 0
+        local attrLine = string.format("%s %s  %s %s",
+            attr1Name, FamilyPage._DotRatingShort(attr1Val),
+            attr2Name, FamilyPage._DotRatingShort(attr2Val))
+
+        table.insert(cardChildren, UI.Panel {
+            width = "100%",
+            flexDirection = "row",
+            alignItems = "flex-start",
+            gap = 8,
+            children = {
+                portraitWidget,
+                UI.Panel {
+                    flexGrow = 1,
+                    flexShrink = 1,
+                    flexDirection = "column",
+                    gap = 3,
+                    children = {
+                        UI.Label {
+                            text = occupant.name,
+                            fontSize = F.body,
+                            fontWeight = "bold",
+                            fontColor = C.text_primary,
+                        },
+                        UI.Panel {
+                            flexDirection = "row",
+                            gap = 4,
+                            flexWrap = "wrap",
+                            children = statusChips,
+                        },
+                        UI.Label {
+                            text = attrLine,
+                            fontSize = F.label,
+                            fontColor = C.text_secondary,
+                        },
+                    },
+                },
+            },
+        })
+
+        -- 加成预览：按岗位实际系数显示
+        local effectBonus = bonus
+        local posEffectCoeff = ({
+            mine_director   = 0.5,   -- 产出 ×(1+bonus×0.5)
+            military_chief  = 0.4,   -- 战力 ×(1+bonus×0.4)
+            tech_advisor    = 0.3,   -- 周期 ×(1-bonus×0.3) → 显示为正值加速
+            civil_director  = 0.2,   -- 税率 ×(1-bonus×0.2) → 显示为正值减税
+            culture_advisor = 0.5,   -- 影响力 ×(1+bonus×0.5)
+            diplomat        = 0.5,   -- 好感 +delta×bonus×0.5
+        })[pos.id] or 1.0
+        local actualPct = math.floor(bonus * posEffectCoeff * 100)
+        local displayPct = actualPct
+        if onboarding then
+            displayPct = math.floor(bonus * (Balance.FAMILY.onboarding_bonus_ratio or 0.3) * posEffectCoeff * 100)
+        end
+        local posEffectLabel = ({
+            mine_director   = "产出",
+            military_chief  = "战力",
+            tech_advisor    = "研发加速",
+            civil_director  = "减税",
+            culture_advisor = "影响力",
+            diplomat        = "好感加成",
+        })[pos.id] or "加成"
+        local signChar = (pos.id == "civil_director" or pos.id == "tech_advisor") and "-" or "+"
+        local bonusText = string.format("%s %s%d%%", posEffectLabel, signChar, math.abs(displayPct))
+        if onboarding then
+            bonusText = bonusText .. string.format(" (适应后 %s%d%%)", signChar, math.abs(actualPct))
+        end
+        -- 满配独有标记
+        if rating == "excellent" then
+            local excellentLabel = ({
+                mine_director   = " | 矿脉洞察",
+                military_chief  = " | 精锐操练 +3士气/季",
+                tech_advisor    = " | 学术权威 费用-20%",
+                civil_director  = " | 内政洞察",
+                culture_advisor = " | 文化感召 免疫衰减",
+                diplomat        = " | 外交密件 +3好感/次",
+            })[pos.id] or ""
+            bonusText = bonusText .. excellentLabel
+        end
+        table.insert(cardChildren, UI.Label {
+            text = bonusText,
+            fontSize = F.label,
+            fontColor = onboarding and C.text_muted or (bonus > 0 and C.success or C.danger),
+        })
+
+        -- 操作按钮行
+        table.insert(cardChildren, UI.Panel {
+            width = "100%",
+            flexDirection = "row",
+            gap = 6,
+            children = {
+                UI.Button {
+                    text = "详情",
+                    fontSize = F.label,
+                    variant = "outlined",
+                    size = "sm",
+                    flexGrow = 1,
+                    onClick = Config.ClickGuard(function()
+                        FamilyPage._ShowMemberDetail(occupant)
+                    end),
+                },
+                UI.Button {
+                    text = "更换",
+                    fontSize = F.label,
+                    variant = "outlined",
+                    size = "sm",
+                    flexGrow = 1,
+                    onClick = Config.ClickGuard(function()
+                        FamilyPage._ShowCandidateModal(pos)
+                    end),
+                },
+                UI.Button {
+                    text = "撤下",
+                    fontSize = F.label,
+                    variant = "text",
+                    size = "sm",
+                    fontColor = C.danger,
+                    onClick = Config.ClickGuard(function()
+                        FamilyPage._DoUnassign(occupant.id, pos)
+                    end),
+                },
+            },
         })
     else
-        table.insert(statusChips, UI.Chip {
-            label = "待命",
-            color = "default",
-            variant = "outlined",
+        -- 空缺：展示虚位以待
+        table.insert(cardChildren, UI.Panel {
+            width = "100%",
+            height = 48,
+            justifyContent = "center",
+            alignItems = "center",
+            borderWidth = 1,
+            borderColor = C.divider,
+            borderRadius = S.radius_badge,
+            borderStyle = "dashed",
+            children = {
+                UI.Label {
+                    text = "空缺",
+                    fontSize = F.body,
+                    fontColor = C.text_muted,
+                },
+            },
+        })
+
+        table.insert(cardChildren, UI.Button {
+            text = "分配成员",
+            fontSize = F.body_minor,
+            variant = "primary",
             size = "sm",
+            width = "100%",
+            onClick = Config.ClickGuard(function()
+                FamilyPage._ShowCandidateModal(pos)
+            end),
         })
     end
 
+    return UI.Panel {
+        flexGrow = 1,
+        flexShrink = 1,
+        flexBasis = "45%",
+        backgroundColor = C.paper_dark,
+        borderRadius = S.radius_card,
+        borderWidth = 1,
+        borderColor = occupant and C.border_card or C.divider,
+        padding = S.card_padding,
+        flexDirection = "column",
+        gap = 6,
+        children = cardChildren,
+    }
+end
+
+-- ============================================================================
+-- 待命成员区域
+-- ============================================================================
+
+function FamilyPage._CreateIdleSection(state)
+    local idleMembers = {}
+    local cooldownMembers = {}
+    for _, m in ipairs(state.family.members) do
+        if not m.position and m.status == "active" then
+            if (m.cooldown_turns or 0) > 0 then
+                table.insert(cooldownMembers, m)
+            else
+                table.insert(idleMembers, m)
+            end
+        end
+    end
+
+    -- 包含失能成员
+    local disabledMembers = {}
+    for _, m in ipairs(state.family.members) do
+        if m.status == "disabled" then
+            table.insert(disabledMembers, m)
+        end
+    end
+
+    local children = {
+        UI.Label {
+            text = "待命成员",
+            fontSize = F.subtitle,
+            fontWeight = "bold",
+            fontColor = C.text_secondary,
+        },
+    }
+
+    if #idleMembers == 0 and #cooldownMembers == 0 and #disabledMembers == 0 then
+        table.insert(children, UI.Label {
+            text = "所有成员均已在岗",
+            fontSize = F.body_minor,
+            fontColor = C.text_muted,
+        })
+    else
+        for _, m in ipairs(idleMembers) do
+            table.insert(children, FamilyPage._CreateIdleMemberRow(m, false))
+        end
+        for _, m in ipairs(cooldownMembers) do
+            table.insert(children, FamilyPage._CreateIdleMemberRow(m, false, true))
+        end
+        for _, m in ipairs(disabledMembers) do
+            table.insert(children, FamilyPage._CreateIdleMemberRow(m, true))
+        end
+    end
+
+    return UI.Panel {
+        width = "100%",
+        backgroundColor = C.paper_dark,
+        borderRadius = S.radius_card,
+        borderWidth = 1,
+        borderColor = C.border_card,
+        padding = S.card_padding,
+        flexDirection = "column",
+        gap = 8,
+        children = children,
+    }
+end
+
+--- 创建待命成员行
+function FamilyPage._CreateIdleMemberRow(member, isDisabled, isCooldown)
+    local traitChips = {}
     for _, hint in ipairs(FamiliesData.GetHiddenTraitHints(member)) do
-        table.insert(statusChips, UI.Chip {
+        table.insert(traitChips, UI.Chip {
             label = hint,
             color = TRAIT_CHIP_COLORS[hint] or "default",
             variant = "soft",
@@ -247,241 +594,696 @@ function FamilyPage._CreateMemberCard(state, member)
         })
     end
 
-    -- 成员卡片边框色：家主金色，失能红色，普通用 border_card
-    local cardBorder = C.border_card
-    if isHead then
-        cardBorder = C.border_gold
-    elseif isDisabled then
-        cardBorder = C.danger
+    local statusLabel, statusColor
+    if isDisabled then
+        statusLabel = "失能 " .. (member.disabled_turns or 0) .. "回合"
+        statusColor = "error"
+    elseif isCooldown then
+        statusLabel = "冷却中 " .. (member.cooldown_turns or 0) .. "回合"
+        statusColor = "warning"
+    else
+        statusLabel = "待命"
+        statusColor = "default"
     end
 
-    -- 职务角色徽章（§6.2 职务标注 11px 徽章）
-    local positionBadge = nil
-    if member.position then
-        local posName = member.position
-        for _, p in ipairs(Config.POSITIONS) do
-            if p.id == member.position then posName = p.name; break end
-        end
-        positionBadge = UI.Panel {
-            paddingHorizontal = 6,
-            paddingVertical = 2,
-            backgroundColor = C.bg_elevated,
+    -- 立绘或 Avatar
+    local portraitWidget
+    if member.portraitImage then
+        portraitWidget = UI.Panel {
+            width = 36,
+            height = 72,
             borderRadius = S.radius_badge,
+            backgroundImage = member.portraitImage,
+            backgroundFit = "cover",
             borderWidth = 1,
             borderColor = C.border_card,
-            children = {
-                UI.Label {
-                    text = posName,
-                    fontSize = F.label,
-                    fontColor = C.accent_gold,
-                },
-            },
+            flexShrink = 0,
+            imageTint = isDisabled and { 120, 120, 120, 255 } or nil,
+        }
+    else
+        portraitWidget = UI.Avatar {
+            name = member.name,
+            initials = member.portrait,
+            size = 28,
+            shape = "rounded",
+            backgroundColor = isDisabled and C.bg_elevated or C.paper_mid,
+            showBorder = true,
+            borderColor = C.border_card,
         }
     end
 
+    -- 紧凑属性行：显示全部5个属性的数值
+    local attrParts = {}
+    for _, key in ipairs(ATTR_ORDER) do
+        local val = (member.attrs and member.attrs[key]) or 0
+        local shortName = Config.ATTR_NAMES[key] or key
+        table.insert(attrParts, shortName .. tostring(val))
+    end
+    local attrLine = table.concat(attrParts, " ")
+
     return UI.Panel {
-        id = "memberCard_" .. member.id,
         width = "100%",
-        backgroundColor = isDisabled and C.bg_elevated or C.paper_dark,
-        borderRadius = S.radius_card,
-        borderWidth = 1,
-        borderColor = cardBorder,
-        flexDirection = "column",
-        overflow = "hidden",
+        flexDirection = "row",
+        alignItems = "flex-start",
+        gap = 8,
+        paddingVertical = 4,
         children = {
-            -- 头部：头像 + 名字 + 头衔 + 状态
+            portraitWidget,
             UI.Panel {
-                width = "100%",
-                padding = S.card_padding,
-                flexDirection = "row",
-                alignItems = "center",
-                gap = 10,
+                flexGrow = 1,
+                flexShrink = 1,
+                flexDirection = "column",
+                gap = 2,
                 children = {
-                    -- 头像（§6.2 头像 32px）
-                    UI.Avatar {
-                        name = member.name,
-                        initials = member.portrait,
-                        size = 32,
-                        shape = "rounded",
-                        backgroundColor = isDisabled and C.bg_surface or C.paper_mid,
-                        showBorder = true,
-                        borderColor = isHead and C.accent_gold or C.border_card,
-                    },
-                    -- 名字 + 头衔 + 职务徽章
                     UI.Panel {
-                        flexGrow = 1,
-                        flexShrink = 1,
-                        flexDirection = "column",
-                        gap = 2,
+                        flexDirection = "row",
+                        alignItems = "center",
+                        gap = 6,
                         children = {
-                            UI.Panel {
-                                flexDirection = "row",
-                                alignItems = "center",
-                                gap = 6,
-                                children = {
-                                    UI.Label {
-                                        text = member.name,
-                                        fontSize = F.subtitle,
-                                        fontWeight = "bold",
-                                        fontColor = isDisabled and C.text_muted or C.text_primary,
-                                    },
-                                    positionBadge,
-                                },
-                            },
                             UI.Label {
-                                text = member.title,
-                                fontSize = F.body_minor,
-                                fontColor = C.text_secondary,
+                                text = member.name,
+                                fontSize = F.body,
+                                fontWeight = "bold",
+                                fontColor = isDisabled and C.text_muted or C.text_primary,
+                            },
+                            UI.Chip {
+                                label = statusLabel,
+                                color = statusColor,
+                                variant = isDisabled and "soft" or "outlined",
+                                size = "sm",
                             },
                         },
                     },
-                    -- 状态标签
-                    UI.Panel {
+                    UI.Label {
+                        text = attrLine,
+                        fontSize = F.label,
+                        fontColor = C.text_secondary,
+                    },
+                    #traitChips > 0 and UI.Panel {
                         flexDirection = "row",
                         gap = 4,
-                        children = statusChips,
-                    },
+                        children = traitChips,
+                    } or nil,
                 },
             },
-
-            -- 属性评分（§6.2 ●○ 点状图 + 数值）
             UI.Panel {
-                width = "100%",
-                paddingHorizontal = S.card_padding,
-                paddingBottom = 8,
-                flexDirection = "column",
-                gap = 4,
-                children = FamilyPage._CreateAttrDots(member),
-            },
-
-            UI.Divider { color = C.divider },
-
-            -- 岗位分配区域
-            UI.Panel {
-                width = "100%",
-                padding = S.card_padding,
                 flexDirection = "row",
+                gap = 6,
+                flexShrink = 0,
                 alignItems = "center",
-                gap = 8,
                 children = {
-                    UI.Label {
-                        text = "岗位",
-                        fontSize = F.body,
-                        fontColor = C.text_secondary,
-                        width = 32,
+                    UI.Button {
+                        text = "详情",
+                        fontSize = F.label,
+                        variant = "outlined",
+                        size = "sm",
+                        onClick = Config.ClickGuard(function()
+                            FamilyPage._ShowMemberDetail(member)
+                        end),
                     },
-                    UI.Dropdown {
-                        id = "posDropdown_" .. member.id,
-                        options = posOptions,
-                        value = currentPos,
-                        disabled = isDisabled,
-                        flexGrow = 1,
-                        maxVisibleItems = 5,
-                        itemHeight = 36,
-                        onChange = function(self, value, option)
-                            FamilyPage._OnPositionChanged(member.id, value)
-                        end,
-                    },
-                },
-            },
-
-            -- 简介
-            UI.Panel {
-                width = "100%",
-                paddingHorizontal = S.card_padding,
-                paddingBottom = S.card_padding,
-                children = {
-                    UI.Label {
-                        text = member.bio,
-                        fontSize = F.body_minor,
-                        fontColor = C.text_muted,
-                        whiteSpace = "normal",
-                        lineHeight = 1.4,
-                    },
+                    (member.reroll_available or 0) > 0 and UI.Button {
+                        text = "🎰 重随",
+                        fontSize = F.label,
+                        variant = "primary",
+                        size = "sm",
+                        onClick = Config.ClickGuard(function()
+                            FamilyPage._DoReroll(member)
+                        end),
+                    } or nil,
                 },
             },
         },
     }
 end
 
---- 创建 ●○ 点状属性评分列表（§6.2 三维度评分 ●○ 形式）
-function FamilyPage._CreateAttrDots(member)
+-- ============================================================================
+-- 候选人选择弹窗
+-- ============================================================================
+
+function FamilyPage._ShowCandidateModal(pos)
+    FamilyPage._CloseModal()
+    if not stateRef_ then return end
+
+    local attr1Name = Config.ATTR_NAMES[pos.attr1] or pos.attr1
+    local attr2Name = Config.ATTR_NAMES[pos.attr2] or pos.attr2
+
+    -- 筛选可用候选人：活跃且未在其他岗位上
+    local candidates = {}
+    for _, m in ipairs(stateRef_.family.members) do
+        if m.status == "active" and m.position ~= pos.id and (m.cooldown_turns or 0) <= 0 then
+            table.insert(candidates, m)
+        end
+    end
+
+    -- 按适配度排序：excellent > good > poor
+    local fitOrder = { excellent = 1, good = 2, poor = 3 }
+    table.sort(candidates, function(a, b)
+        local rA = FamiliesData.GetPositionFit(a, pos.attr1, pos.attr2)
+        local rB = FamiliesData.GetPositionFit(b, pos.attr1, pos.attr2)
+        return (fitOrder[rA] or 9) < (fitOrder[rB] or 9)
+    end)
+
     local rows = {}
+    if #candidates == 0 then
+        table.insert(rows, UI.Label {
+            text = "没有可用的候选人",
+            fontSize = F.body,
+            fontColor = C.text_muted,
+            paddingVertical = 16,
+            textAlign = "center",
+            width = "100%",
+        })
+    else
+        for _, m in ipairs(candidates) do
+            table.insert(rows, FamilyPage._CreateCandidateRow(m, pos))
+        end
+    end
+
+    local content = UI.Panel {
+        width = "100%",
+        flexDirection = "column",
+        gap = 8,
+        children = {
+            UI.Label {
+                text = "关键属性：" .. attr1Name .. " · " .. attr2Name,
+                fontSize = F.body,
+                fontColor = C.text_muted,
+                paddingBottom = 4,
+            },
+            table.unpack(rows),
+        },
+    }
+
+    currentModal_ = UI.Modal {
+        title = "选择 " .. pos.name,
+        size = "md",
+        closeOnOverlay = true,
+        closeOnEscape = true,
+        onClose = function()
+            currentModal_ = nil
+        end,
+    }
+    currentModal_:AddContent(content)
+    if uiRoot_ then
+        uiRoot_:AddChild(currentModal_)
+    end
+    currentModal_:Open()
+end
+
+--- 创建候选人行
+function FamilyPage._CreateCandidateRow(member, pos)
+    local rating, bonus = FamiliesData.GetPositionFit(member, pos.attr1, pos.attr2)
+    local fitLabel = FIT_LABELS[rating] or ""
+    local fitColor = FIT_CHIP_COLORS[rating] or "default"
+
+    local attr1Val = (member.attrs and member.attrs[pos.attr1]) or 0
+    local attr2Val = (member.attrs and member.attrs[pos.attr2]) or 0
+
+    -- 如果该成员当前在别的岗位上，标注需要先撤下
+    local fromOtherPos = member.position ~= nil
+    local otherPosName = nil
+    if fromOtherPos then
+        for _, p in ipairs(Config.POSITIONS) do
+            if p.id == member.position then otherPosName = p.name; break end
+        end
+    end
+
+    -- 立绘或 Avatar
+    local candidatePortrait
+    if member.portraitImage then
+        candidatePortrait = UI.Panel {
+            width = 48,
+            height = 80,
+            borderRadius = S.radius_badge,
+            backgroundImage = member.portraitImage,
+            backgroundFit = "cover",
+            borderWidth = 1,
+            borderColor = C.border_card,
+            flexShrink = 0,
+        }
+    else
+        candidatePortrait = UI.Avatar {
+            name = member.name,
+            initials = member.portrait,
+            size = 28,
+            shape = "rounded",
+            backgroundColor = C.paper_mid,
+        }
+    end
+
+    return UI.Panel {
+        width = "100%",
+        flexDirection = "row",
+        alignItems = "center",
+        gap = 8,
+        paddingVertical = 6,
+        paddingHorizontal = 4,
+        borderRadius = S.radius_badge,
+        backgroundColor = C.paper_dark,
+        children = {
+            candidatePortrait,
+            UI.Panel {
+                flexGrow = 1,
+                flexShrink = 1,
+                flexDirection = "column",
+                gap = 2,
+                children = {
+                    UI.Panel {
+                        flexDirection = "row",
+                        alignItems = "center",
+                        gap = 6,
+                        children = {
+                            UI.Label {
+                                text = member.name,
+                                fontSize = F.body,
+                                fontWeight = "bold",
+                                fontColor = C.text_primary,
+                            },
+                            UI.Chip {
+                                label = fitLabel,
+                                color = fitColor,
+                                variant = "soft",
+                                size = "sm",
+                            },
+                        },
+                    },
+                    UI.Label {
+                        text = string.format("%s %d · %s %d → %+d%%",
+                            Config.ATTR_NAMES[pos.attr1] or "", attr1Val,
+                            Config.ATTR_NAMES[pos.attr2] or "", attr2Val,
+                            math.floor(bonus * 100)),
+                        fontSize = F.label,
+                        fontColor = C.text_secondary,
+                    },
+                    fromOtherPos and UI.Label {
+                        text = "当前在岗：" .. (otherPosName or ""),
+                        fontSize = F.label,
+                        fontColor = C.accent_amber,
+                    } or nil,
+                },
+            },
+            UI.Button {
+                text = "任命",
+                fontSize = F.label,
+                variant = "primary",
+                size = "sm",
+                onClick = Config.ClickGuard(function()
+                    FamilyPage._DoAssign(member.id, pos)
+                end),
+            },
+        },
+    }
+end
+
+-- ============================================================================
+-- 成员详情弹窗
+-- ============================================================================
+
+function FamilyPage._ShowMemberDetail(member)
+    FamilyPage._CloseModal()
+
+    local isHead = (member.id == "patriarch")
+
+    -- 属性横向条形图（带颜色进度条）
+    local attrRows = {}
     for _, attrKey in ipairs(ATTR_ORDER) do
-        local val = member.attrs[attrKey] or 0
+        local val = (member.attrs and member.attrs[attrKey]) or 0
         local attrName = Config.ATTR_NAMES[attrKey] or attrKey
         local color = ATTR_COLORS[attrKey] or C.text_primary
+        local pct = math.min(val * 10, 100)  -- 10分制 → 百分比
 
-        table.insert(rows, UI.Panel {
+        table.insert(attrRows, UI.Panel {
             width = "100%",
             flexDirection = "row",
             alignItems = "center",
             gap = 6,
+            paddingVertical = 2,
             children = {
                 -- 属性名
                 UI.Label {
                     text = attrName,
-                    fontSize = F.label,
+                    fontSize = F.body_minor,
                     fontColor = C.text_secondary,
-                    width = 24,
+                    width = 30,
                     textAlign = "right",
                 },
-                -- ●○ 点状评分
-                UI.Label {
-                    text = dotRating(val),
-                    fontSize = 8,
-                    fontColor = color,
+                -- 进度条背景
+                UI.Panel {
                     flexGrow = 1,
-                    letterSpacing = 1,
+                    height = 10,
+                    backgroundColor = C.bg_elevated,
+                    borderRadius = 5,
+                    overflow = "hidden",
+                    children = {
+                        -- 进度条填充
+                        UI.Panel {
+                            width = tostring(pct) .. "%",
+                            height = "100%",
+                            backgroundColor = color,
+                            borderRadius = 5,
+                        },
+                    },
                 },
                 -- 数值
                 UI.Label {
                     text = tostring(val),
-                    fontSize = F.label,
+                    fontSize = F.body_minor,
                     fontWeight = "bold",
                     fontColor = color,
-                    width = 16,
+                    width = 18,
                     textAlign = "right",
                 },
             },
         })
     end
-    return rows
+
+    -- 隐藏特性
+    local traitChips = {}
+    for _, hint in ipairs(FamiliesData.GetHiddenTraitHints(member)) do
+        table.insert(traitChips, UI.Chip {
+            label = hint,
+            color = TRAIT_CHIP_COLORS[hint] or "default",
+            variant = "soft",
+            size = "sm",
+        })
+    end
+
+    -- 适应期状态
+    local onboardingInfo = nil
+    if member.position and (member.onboarding_remaining or 0) > 0 then
+        onboardingInfo = UI.Panel {
+            width = "100%",
+            paddingVertical = 6,
+            paddingHorizontal = 10,
+            backgroundColor = C.bg_elevated,
+            borderRadius = S.radius_badge,
+            children = {
+                UI.Label {
+                    text = string.format("适应中，剩余 %d 季度（当前仅 %d%% 加成）",
+                        member.onboarding_remaining,
+                        math.floor((Balance.FAMILY.onboarding_bonus_ratio or 0.3) * 100)),
+                    fontSize = F.body_minor,
+                    fontColor = C.accent_amber,
+                    whiteSpace = "normal",
+                },
+            },
+        }
+    end
+
+    -- ================================================================
+    -- 构建内容：立绘大图 + 底部渐变叠加名字信息
+    -- ================================================================
+    local contentChildren = {}
+
+    if member.portraitImage then
+        -- 立绘区域：cover 裁切，展示上半身（约 2/3），高度 360px
+        -- 名字/身份/特性叠加在立绘底部（渐变遮罩）
+        local overlayChildren = {
+            UI.Label {
+                text = member.name,
+                fontSize = F.super_title,
+                fontWeight = "bold",
+                fontColor = C.text_primary,
+            },
+            UI.Panel {
+                flexDirection = "row",
+                alignItems = "center",
+                gap = 6,
+                flexWrap = "wrap",
+                children = {
+                    UI.Label {
+                        text = member.title,
+                        fontSize = F.body,
+                        fontColor = C.text_secondary,
+                    },
+                    table.unpack(traitChips),
+                },
+            },
+        }
+
+        table.insert(contentChildren, UI.Panel {
+            width = "100%",
+            height = 560,
+            borderRadius = S.radius_card,
+            overflow = "hidden",
+            borderWidth = 1,
+            borderColor = isHead and C.accent_gold or C.border_card,
+            children = {
+                -- 立绘背景层：超高面板迫使 cover 按高度缩放，图片从顶部铺满
+                UI.Panel {
+                    width = "100%",
+                    height = 1000,
+                    backgroundImage = member.portraitImage,
+                    backgroundFit = "cover",
+                },
+                -- 底部渐变遮罩 + 名字信息
+                UI.Panel {
+                    position = "absolute",
+                    bottom = 0,
+                    left = 0,
+                    right = 0,
+                    paddingTop = 48,
+                    paddingBottom = 12,
+                    paddingHorizontal = 14,
+                    flexDirection = "column",
+                    gap = 4,
+                    backgroundGradient = {
+                        direction = "to-bottom",
+                        colors = {
+                            { color = { 26, 24, 20, 0 },   stop = 0 },
+                            { color = { 26, 24, 20, 200 }, stop = 50 },
+                            { color = { 26, 24, 20, 240 }, stop = 100 },
+                        },
+                    },
+                    children = overlayChildren,
+                },
+            },
+        })
+    else
+        -- 无立绘：Avatar + 名字横排
+        table.insert(contentChildren, UI.Panel {
+            width = "100%",
+            flexDirection = "row",
+            alignItems = "center",
+            gap = 12,
+            paddingVertical = 8,
+            children = {
+                UI.Avatar {
+                    name = member.name,
+                    initials = member.portrait,
+                    size = 56,
+                    shape = "rounded",
+                    backgroundColor = C.paper_mid,
+                    showBorder = true,
+                    borderColor = isHead and C.accent_gold or C.border_card,
+                },
+                UI.Panel {
+                    flexGrow = 1,
+                    flexDirection = "column",
+                    gap = 2,
+                    children = {
+                        UI.Label {
+                            text = member.name,
+                            fontSize = F.card_title,
+                            fontWeight = "bold",
+                            fontColor = C.text_primary,
+                        },
+                        UI.Panel {
+                            flexDirection = "row",
+                            alignItems = "center",
+                            gap = 6,
+                            children = {
+                                UI.Label {
+                                    text = member.title,
+                                    fontSize = F.body,
+                                    fontColor = C.text_secondary,
+                                },
+                                table.unpack(traitChips),
+                            },
+                        },
+                    },
+                },
+            },
+        })
+    end
+
+    -- 2) 适应期
+    if onboardingInfo then
+        table.insert(contentChildren, onboardingInfo)
+    end
+
+    -- 3) 能力值 — 紧凑条形图
+    table.insert(contentChildren, UI.Panel {
+        width = "100%",
+        flexDirection = "row",
+        alignItems = "center",
+        gap = 6,
+        paddingTop = 6,
+        children = {
+            UI.Label {
+                text = "能力值",
+                fontSize = F.subtitle,
+                fontWeight = "bold",
+                fontColor = C.text_secondary,
+            },
+        },
+    })
+    table.insert(contentChildren, UI.Panel {
+        width = "100%",
+        flexDirection = "column",
+        gap = 1,
+        children = attrRows,
+    })
+
+    -- 4) 内政洞察：满配内政总监时显示隐藏属性数值
+    if stateRef_ and GameState.CanRevealHiddenAttrs(stateRef_) then
+        local hiddenDefs = {
+            { key = "loyalty",    name = "忠诚", low = 4, high = 8,
+              colorLow = C.danger, colorHigh = C.accent_green },
+            { key = "corruption", name = "腐化", low = 3, high = 7,
+              colorLow = C.accent_green, colorHigh = C.danger },
+            { key = "radical",    name = "激进", low = 3, high = 7,
+              colorLow = C.accent_green, colorHigh = C.accent_amber },
+        }
+        local hiddenRows = {}
+        for _, def in ipairs(hiddenDefs) do
+            local val = FamiliesData.GetHiddenValue(member, def.key)
+            local barColor = val >= def.high and def.colorHigh
+                or val <= def.low and def.colorLow
+                or C.text_secondary
+            table.insert(hiddenRows, UI.Panel {
+                width = "100%",
+                flexDirection = "row",
+                alignItems = "center",
+                gap = 6,
+                children = {
+                    UI.Label {
+                        text = def.name,
+                        fontSize = F.body_minor,
+                        fontColor = C.text_muted,
+                        width = 32,
+                    },
+                    UI.ProgressBar {
+                        value = val * 10,
+                        height = 10,
+                        flexGrow = 1,
+                        backgroundColor = C.bg_elevated,
+                        color = barColor,
+                        borderRadius = 3,
+                    },
+                    UI.Label {
+                        text = tostring(val),
+                        fontSize = F.body_minor,
+                        fontWeight = "bold",
+                        fontColor = barColor,
+                        width = 18,
+                        textAlign = "right",
+                    },
+                },
+            })
+        end
+        table.insert(contentChildren, UI.Divider { color = C.divider })
+        table.insert(contentChildren, UI.Panel {
+            width = "100%",
+            flexDirection = "row",
+            alignItems = "center",
+            gap = 6,
+            children = {
+                UI.Label {
+                    text = "内政洞察",
+                    fontSize = F.subtitle,
+                    fontWeight = "bold",
+                    fontColor = C.accent_amber,
+                },
+                UI.Label {
+                    text = "(内政总监满配)",
+                    fontSize = F.label,
+                    fontColor = C.text_muted,
+                },
+            },
+        })
+        table.insert(contentChildren, UI.Panel {
+            width = "100%",
+            flexDirection = "column",
+            gap = 1,
+            children = hiddenRows,
+        })
+    end
+
+    -- 5) 简介
+    if member.bio and member.bio ~= "" then
+        table.insert(contentChildren, UI.Divider { color = C.divider })
+        table.insert(contentChildren, UI.Label {
+            text = member.bio,
+            fontSize = F.body_minor,
+            fontColor = C.text_muted,
+            whiteSpace = "normal",
+            lineHeight = 1.4,
+        })
+    end
+
+    -- 6) 重随属性按钮（看广告）
+    if (member.reroll_available or 0) > 0 then
+        table.insert(contentChildren, UI.Divider { color = C.divider })
+        table.insert(contentChildren, UI.Panel {
+            width = "100%",
+            alignItems = "center",
+            paddingVertical = 4,
+            children = {
+                UI.Button {
+                    text = "🎰 看广告重随属性（" .. member.reroll_available .. "次）",
+                    variant = "primary",
+                    size = "md",
+                    width = "100%",
+                    onClick = Config.ClickGuard(function()
+                        FamilyPage._DoReroll(member)
+                    end),
+                },
+            },
+        })
+    end
+
+    local content = UI.ScrollView {
+        width = "100%",
+        flexGrow = 1,
+        flexBasis = 0,
+        children = {
+            UI.Panel {
+                width = "100%",
+                flexDirection = "column",
+                gap = 8,
+                paddingBottom = 12,
+                children = contentChildren,
+            },
+        },
+    }
+
+    currentModal_ = UI.Modal {
+        title = member.name,
+        size = "fullscreen",
+        closeOnOverlay = true,
+        closeOnEscape = true,
+        contentPadding = { 0, 12, 12, 12 },
+        onClose = function()
+            currentModal_ = nil
+        end,
+    }
+    currentModal_:AddContent(content)
+    if uiRoot_ then
+        uiRoot_:AddChild(currentModal_)
+    end
+    currentModal_:Open()
 end
 
---- 获取当前岗位适配信息
-function FamilyPage._GetCurrentFitInfo(member)
-    if not member.position then
-        return { label = "待命", chipColor = "default" }
-    end
+-- ============================================================================
+-- 操作处理
+-- ============================================================================
 
-    local posConfig = nil
-    for _, p in ipairs(Config.POSITIONS) do
-        if p.id == member.position then posConfig = p; break end
-    end
-    if not posConfig then
-        return { label = "待命", chipColor = "default" }
-    end
-
-    local rating, _ = FamiliesData.GetPositionFit(member, posConfig.attr1, posConfig.attr2)
-    local chipColorMap = {
-        excellent = "success",
-        good      = "warning",
-        poor      = "error",
-    }
-    return {
-        label = posConfig.name .. " · " .. (FIT_LABELS[rating] or ""),
-        chipColor = chipColorMap[rating] or "default",
-    }
-end
-
---- 岗位变更回调
-function FamilyPage._OnPositionChanged(memberId, positionValue)
+--- 任命成员到岗位
+function FamilyPage._DoAssign(memberId, pos)
     if not stateRef_ then return end
 
-    local posId = (positionValue == "__none__") and nil or positionValue
-    local success = GameState.AssignPosition(stateRef_, memberId, posId)
-
+    local success = GameState.AssignPosition(stateRef_, memberId, pos.id)
     if success then
         stateRef_.ap.max = GameState.CalcMaxAP(stateRef_)
         stateRef_.ap.current = math.min(stateRef_.ap.current, stateRef_.ap.max)
@@ -490,30 +1292,93 @@ function FamilyPage._OnPositionChanged(memberId, positionValue)
         for _, m in ipairs(stateRef_.family.members) do
             if m.id == memberId then memberName = m.name; break end
         end
+        GameState.AddLog(stateRef_, memberName .. " 被任命为" .. pos.name .. "（适应期2季度）")
+        UI.Toast.Show(memberName .. " → " .. pos.name, { variant = "success", duration = 1.5 })
 
-        if posId then
-            local posName = posId
-            for _, p in ipairs(Config.POSITIONS) do
-                if p.id == posId then posName = p.name; break end
-            end
-            GameState.AddLog(stateRef_, memberName .. " 被任命为" .. posName)
-            UI.Toast.Show(memberName .. " → " .. posName, { variant = "success", duration = 1.5 })
-        else
-            GameState.AddLog(stateRef_, memberName .. " 被解除岗位")
-            UI.Toast.Show(memberName .. " 已解除岗位", { variant = "info", duration = 1.5 })
-        end
-
-        if onStateChanged_ then
-            onStateChanged_()
-        end
+        FamilyPage._CloseModal()
+        if onStateChanged_ then onStateChanged_() end
     end
 end
 
---- 刷新家族页
----@param root table UI 根控件
----@param state table
-function FamilyPage.Refresh(root, state)
-    stateRef_ = state
+--- 撤下成员
+function FamilyPage._DoUnassign(memberId, pos)
+    if not stateRef_ then return end
+
+    local success = GameState.AssignPosition(stateRef_, memberId, nil)
+    if success then
+        stateRef_.ap.max = GameState.CalcMaxAP(stateRef_)
+        stateRef_.ap.current = math.min(stateRef_.ap.current, stateRef_.ap.max)
+
+        local memberName = memberId
+        for _, m in ipairs(stateRef_.family.members) do
+            if m.id == memberId then memberName = m.name; break end
+        end
+        GameState.AddLog(stateRef_, memberName .. " 被解除" .. pos.name .. "职务")
+        UI.Toast.Show(memberName .. " 已撤下", { variant = "info", duration = 1.5 })
+
+        if onStateChanged_ then onStateChanged_() end
+    end
+end
+
+--- 看广告重随属性
+function FamilyPage._DoReroll(member)
+    if not stateRef_ then return end
+    if (member.reroll_available or 0) <= 0 then
+        UI.Toast.Show("该成员没有重随机会", { variant = "warning", duration = 1.5 })
+        return
+    end
+
+    ---@diagnostic disable-next-line: undefined-global
+    sdk:ShowRewardVideoAd(function(result)
+        if not result.success then
+            if result.msg == "embed manual close" then
+                UI.Toast.Show("需完整观看广告才能获得奖励",
+                    { variant = "warning", duration = 1.5 })
+            else
+                UI.Toast.Show("广告播放失败: " .. (result.msg or "未知错误"),
+                    { variant = "error", duration = 1.5 })
+            end
+            return
+        end
+
+        -- 广告成功：重随属性
+        FamiliesData.RerollMemberAttrs(member)
+        member.reroll_available = (member.reroll_available or 1) - 1
+
+        local attrSum = 0
+        for _, v in pairs(member.attrs) do attrSum = attrSum + v end
+        UI.Toast.Show(member.name .. " 属性已重随（总和 " .. attrSum .. "）",
+            { variant = "success", duration = 2.0 })
+
+        FamilyPage._CloseModal()
+        if onStateChanged_ then onStateChanged_() end
+    end)
+end
+
+--- 关闭当前弹窗
+function FamilyPage._CloseModal()
+    if currentModal_ then
+        currentModal_:Close()
+        currentModal_ = nil
+    end
+end
+
+-- ============================================================================
+-- 工具函数
+-- ============================================================================
+
+--- ●○ 点状评分（完整版，10个点）
+function FamilyPage._DotRating(val)
+    local filled = math.min(math.max(math.floor(val), 0), 10)
+    local empty = 10 - filled
+    return string.rep("●", filled) .. string.rep("○", empty)
+end
+
+--- ●○ 点状评分（紧凑版，5个点，每2点一个实心）
+function FamilyPage._DotRatingShort(val)
+    local filled = math.min(math.max(math.floor(val / 2), 0), 5)
+    local empty = 5 - filled
+    return string.rep("●", filled) .. string.rep("○", empty)
 end
 
 return FamilyPage

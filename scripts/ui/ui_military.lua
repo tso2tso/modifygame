@@ -36,7 +36,7 @@ function MilitaryPage.Create(state, callbacks)
 end
 
 function MilitaryPage._BuildContent(state)
-    local mil = state.military
+    local mil = state.military or { morale = 50, squads = {}, inventory = {}, production_queue = {}, outsource_slots = {}, supply = 20 }
     local moraleColor = mil.morale >= 60 and C.accent_green
         or (mil.morale >= 40 and C.accent_amber or C.accent_red)
     local moraleText = mil.morale >= 80 and "高昂" or (mil.morale >= 60 and "稳定"
@@ -51,10 +51,17 @@ function MilitaryPage._BuildContent(state)
     -- 战力计算
     local combatPower = math.floor(Combat.PlayerPower(state))
 
-    -- 每季军费
+    -- 每季军费（与 economy.lua 保持一致：使用 hedgedInflation + supply_reduction_bonus）
     local inflation = GameState.GetInflationFactor(state)
-    local quarterCost = math.floor(mil.guards * mil.wage * inflation
-        + mil.guards * BMI.supply_per_guard * BMI.supply_cost * inflation)
+    local BG = Balance.GOLD
+    local goldHeld = state.gold or 0
+    local goldHedgePct = math.min(BG.inflation_hedge_cap,
+        math.floor(goldHeld / 10) * BG.inflation_hedge_per_10)
+    local hedgedInflation = inflation * (1 - goldHedgePct)
+    local supplyPerGuard = math.max(1, BMI.supply_per_guard - (state.supply_reduction_bonus or 0))
+    local supplyDiscount = 1.0 - (state.finance_supply_discount or 0)
+    local quarterCost = math.floor(mil.guards * mil.wage * hedgedInflation
+        + mil.guards * supplyPerGuard * BMI.supply_cost * hedgedInflation * supplyDiscount)
     -- 装备维护费
     local equipMaint, factoryMaint = Equipment.CalcMaintenanceCost(state)
     local totalMaint = quarterCost + equipMaint + factoryMaint
@@ -183,7 +190,8 @@ function MilitaryPage._BuildContent(state)
                     MilitaryPage._InfoRow("补给储备", mil.supply .. " 单位", C.text_primary),
                     UI.Divider { color = C.divider },
                     UI.Label {
-                        text = (state.flags and state.flags.at_war) and "当前处于战争状态，士气衰减加速"
+                        text = (state.flags and state.flags.at_war)
+                            and "当前处于战争状态，士气每季自然衰减 " .. math.abs(BMI.morale_decay)
                             or "和平时期，士气每季自然衰减 " .. math.abs(BMI.morale_decay),
                         fontSize = F.label,
                         fontColor = (state.flags and state.flags.at_war) and C.accent_red or C.text_muted,
@@ -224,10 +232,10 @@ function MilitaryPage._BuildContent(state)
                                     and "primary" or "outlined",
                                 disabled = state.cash < recruitCost * 3 or (state.ap.current + (state.ap.temp or 0)) < 1,
                                 borderRadius = S.radius_btn,
-                                onClick = function(self)
+                                onClick = Config.ClickGuard(function(self)
                                     self.props.disabled = true
                                     MilitaryPage._OnRecruit(3)
-                                end,
+                                end),
                             },
                             UI.Button {
                                 text = "裁军 -3",
@@ -238,27 +246,27 @@ function MilitaryPage._BuildContent(state)
                                 variant = "outlined",
                                 disabled = unassigned < 3,
                                 borderRadius = S.radius_btn,
-                                onClick = function(self)
+                                onClick = Config.ClickGuard(function(self)
                                     self.props.disabled = true
                                     MilitaryPage._OnDisband(3)
-                                end,
+                                end),
                             },
                         },
                     },
-                    -- 补给按钮
+                    -- 补给按钮（费用含通胀，与 _OnResupply 保持一致）
                     UI.Button {
-                        text = string.format("补充补给 +20 (💰%d ⚡1)", 20 * BMI.supply_cost),
+                        text = string.format("补充补给 +20 (💰%d ⚡1)", math.floor(20 * BMI.supply_cost * inflation)),
                         fontSize = F.body_minor,
                         height = S.btn_small_height,
                         width = "100%",
-                        variant = (state.cash >= 20 * BMI.supply_cost and (state.ap.current + (state.ap.temp or 0)) >= 1)
+                        variant = (state.cash >= math.floor(20 * BMI.supply_cost * inflation) and (state.ap.current + (state.ap.temp or 0)) >= 1)
                             and "primary" or "outlined",
-                        disabled = state.cash < 20 * BMI.supply_cost or (state.ap.current + (state.ap.temp or 0)) < 1,
+                        disabled = state.cash < math.floor(20 * BMI.supply_cost * inflation) or (state.ap.current + (state.ap.temp or 0)) < 1,
                         borderRadius = S.radius_btn,
-                        onClick = function(self)
+                        onClick = Config.ClickGuard(function(self)
                             self.props.disabled = true
                             MilitaryPage._OnResupply(20)
-                        end,
+                        end),
                     },
                 },
             },

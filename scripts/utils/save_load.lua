@@ -190,7 +190,7 @@ function SaveLoad._SerializeState(state)
     data.quarter = state.quarter
     data.cash = state.cash
     data.gold = state.gold
-    data.silver = state.silver or 0
+    data.copper = state.copper or 0
     data.coal = state.coal or 0
     data.inflation_factor = state.inflation_factor or 1.0
     data.ap = {
@@ -220,6 +220,14 @@ function SaveLoad._SerializeState(state)
     -- 黄金自动出售
     data.gold_auto_sell = state.gold_auto_sell or false
 
+    -- 铜手动出售
+    data.copper_auto_sell = state.copper_auto_sell or false
+
+    -- 煤炭动力化
+    data.coal_auto_sell = state.coal_auto_sell or false
+    data.coal_to_mines = state.coal_to_mines or 0
+    data.factory_coal_shortage = state.factory_coal_shortage or false
+
     -- 监管压力
     data.regulation_pressure = state.regulation_pressure or 0
     data.special_content = state.special_content or {}
@@ -229,6 +237,25 @@ function SaveLoad._SerializeState(state)
     data.collaboration_score = state.collaboration_score or 0
     data.powers = state.powers or {}
     data.fronts = state.fronts or {}
+    data._gp_initialized = state._gp_initialized or false
+
+    -- 历史分支标志（跨越数十年的分支选择，必须持久化）
+    data._branch_war_delayed = state._branch_war_delayed
+    data._branch_war_accelerated = state._branch_war_accelerated
+    data._branch_war_prevented = state._branch_war_prevented
+    data._branch_ah_federalized = state._branch_ah_federalized
+    data._branch_yugo_accelerated = state._branch_yugo_accelerated
+    data._branch_yugo_neutral = state._branch_yugo_neutral
+    data._branch_fortified = state._branch_fortified
+    data._branch_nazi_collaborator = state._branch_nazi_collaborator
+    data._branch_self_liberation = state._branch_self_liberation
+    data._branch_western_zone = state._branch_western_zone
+    data._branch_tito_stays_soviet = state._branch_tito_stays_soviet
+    data._branch_yugo_western = state._branch_yugo_western
+    data._war_accel_done = state._war_accel_done
+
+    -- 事件干旱计数器
+    data.event_drought_counter = state.event_drought_counter or 0
 
     -- 家族成员
     data.family = { members = {}, training = state.family.training }
@@ -238,6 +265,7 @@ function SaveLoad._SerializeState(state)
             name = m.name,
             title = m.title,
             portrait = m.portrait,
+            portraitImage = m.portraitImage,
             attrs = {
                 management = m.attrs.management,
                 strategy   = m.attrs.strategy,
@@ -247,9 +275,12 @@ function SaveLoad._SerializeState(state)
             },
             hidden = m.hidden,
             position = m.position,
+            onboarding_remaining = m.onboarding_remaining or 0,
             status = m.status,
             disabled_turns = m.disabled_turns,
             bio = m.bio,
+            cooldown_turns = m.cooldown_turns or 0,
+            reroll_available = m.reroll_available or 0,
         })
     end
 
@@ -297,6 +328,12 @@ function SaveLoad._SerializeState(state)
     data.prospect_success_count = state.prospect_success_count or 0
     data.prospect_success_bonus = state.prospect_success_bonus or 0
 
+    -- 铜/煤探矿
+    data.copper_prospecting = state.copper_prospecting
+    data.copper_prospect_count = state.copper_prospect_count or 0
+    data.coal_prospecting = state.coal_prospecting
+    data.coal_prospect_count = state.coal_prospect_count or 0
+
     -- 股市（含历史与 event_mu_mods）
     data.stocks = {}
     for _, s in ipairs(state.stocks or {}) do
@@ -312,6 +349,11 @@ function SaveLoad._SerializeState(state)
             rating = s.rating,
             history = s.history,
             event_mu_mods = s.event_mu_mods,
+            -- 公允价值锚定模型新增字段
+            base_value = s.base_value,
+            inflation_alpha = s.inflation_alpha,
+            theta = s.theta,
+            fair_value = s.fair_value,
         })
     end
     data.portfolio = state.portfolio or { holdings = {} }
@@ -375,12 +417,15 @@ function SaveLoad._SerializeState(state)
     -- AI 势力
     data.ai_factions = state.ai_factions
 
+    -- 外国矿产操作
+    data.foreign_ops = state.foreign_ops
+
     -- 修正器
     data.modifiers = state.modifiers
 
-    -- 历史日志（只保留最近 50 条）
+    -- 历史日志（保留最近 200 条，与运行时 GameState.AddLog 上限一致）
     data.history_log = {}
-    local logStart = math.max(1, #state.history_log - 49)
+    local logStart = math.max(1, #state.history_log - 199)
     for i = logStart, #state.history_log do
         table.insert(data.history_log, state.history_log[i])
     end
@@ -416,12 +461,39 @@ function SaveLoad._DeserializeState(data)
     data.victory = data.victory or { economic = 0, military = 0 }
     data.family = data.family or { members = {} }
     -- family.training 可以为 nil（表示没有正在培养的成员）
+    -- 旧存档迁移：确保每个家族成员有 onboarding_remaining 字段 + 立绘路径
+    local FamiliesData = require("data.families_data")
+    for _, m in ipairs(data.family.members or {}) do
+        if m.onboarding_remaining == nil then
+            m.onboarding_remaining = 0  -- 旧存档中已在岗的人视为已适应
+        end
+        -- 冷却CD迁移：旧存档无此字段
+        m.cooldown_turns = m.cooldown_turns or 0
+        -- 重随机会迁移：旧存档无此字段
+        m.reroll_available = m.reroll_available or 0
+        -- 岗位迁移：finance_director → civil_director
+        if m.position == "finance_director" then
+            m.position = "civil_director"
+        end
+        -- 立绘迁移：旧存档没有 portraitImage
+        if not m.portraitImage then
+            if FamiliesData.PORTRAITS[m.id] then
+                m.portraitImage = FamiliesData.PORTRAITS[m.id]
+            else
+                m.portraitImage = FamiliesData.AllocatePoolPortrait()
+            end
+        else
+            -- 标记已用的池立绘（防止重复分配）
+            FamiliesData.MarkPoolPortraitUsed(m.portraitImage)
+        end
+    end
     data.regions = data.regions or {}
     data.mines = data.mines or {}
     data.workers = data.workers or { hired = 10, wage = 8, morale = 70 }
-    data.military = data.military or { guards = 5, morale = 70, wage = 12, equipment = 1 }
+    data.military = data.military or { guards = 5, morale = 70, wage = 12, equipment = 1, supply = 20 }
     data.ai_factions = data.ai_factions or {}
     data.modifiers = data.modifiers or {}
+    data.foreign_ops = data.foreign_ops or { scouted = {}, scouting = nil, active = {} }
     data.history_log = data.history_log or {}
     data.events_fired = data.events_fired or {}
     data.flags = data.flags or { at_war = false, war_start_turn = 0 }
@@ -433,7 +505,12 @@ function SaveLoad._DeserializeState(data)
     data.turn_count = data.turn_count or 0
 
     -- 新字段兼容旧存档：若不存在则从 Balance 重建
-    data.silver = data.silver or 0
+    data.copper = data.copper or 0
+    -- 旧存档迁移：silver → copper
+    if data.silver then
+        data.copper = (data.copper or 0) + data.silver
+        data.silver = nil
+    end
     data.coal = data.coal or 0
     data.inflation_factor = data.inflation_factor or 1.0
     data.loans = data.loans or {}
@@ -460,6 +537,15 @@ function SaveLoad._DeserializeState(data)
     -- 黄金自动出售（v0.4.0 新增保存）
     if data.gold_auto_sell == nil then data.gold_auto_sell = false end
 
+    -- 铜手动出售（v0.6.0 新增）
+    if data.copper_auto_sell == nil then data.copper_auto_sell = false end
+
+    -- 煤炭动力化（v0.6.0 新增）
+    if data.coal_auto_sell == nil then data.coal_auto_sell = false end
+    data.coal_to_mines = data.coal_to_mines or 0
+    if data.factory_coal_shortage == nil then data.factory_coal_shortage = false end
+    data.mine_coal_power_bonus = 0  -- 运行时计算，不持久化
+
     -- 监管压力（v0.4.0 新增保存）
     data.regulation_pressure = data.regulation_pressure or 0
     data.special_content = data.special_content or {
@@ -483,6 +569,19 @@ function SaveLoad._DeserializeState(data)
     data.powers = data.powers or {}
     data.fronts = data.fronts or {}
 
+    -- 大国博弈初始化标志（防止 GrandPowers.Init 破坏已加载的 powers/fronts）
+    -- 旧存档无此字段时，若 powers 非空则视为已初始化
+    if data._gp_initialized == nil then
+        data._gp_initialized = (next(data.powers) ~= nil)
+    end
+
+    -- 历史分支标志（旧存档迁移：nil 即未触发，保持 nil 语义）
+    -- data._branch_war_delayed, _branch_war_accelerated, ... 直接保留
+
+    -- 事件干旱计数器
+    data.event_drought_counter = data.event_drought_counter or 0
+    -- _war_accel_done 可以为 nil（表示未在加速中）
+
     -- 宏观 hex 地图模块（v0.6.0 新增，旧存档自动生成）
     do
         local MapTilesData = require("data.map_tiles_data")
@@ -504,8 +603,19 @@ function SaveLoad._DeserializeState(data)
         faction.victory.economic = faction.victory.economic or 0
         faction.victory.military = faction.victory.military or 0
         faction.battle_wins_unclaimed = faction.battle_wins_unclaimed or 0
+        faction.recruit_blocked = faction.recruit_blocked or 0
+        -- 存档迁移：attitude 安全钳位，防止老存档陷入无法脱出的仇恨深渊
+        if faction.attitude and faction.attitude < -60 then
+            local old = faction.attitude
+            faction.attitude = -40
+            print(string.format("[SaveLoad] %s attitude %d → -40（迁移钳位）",
+                faction.id or "?", old))
+        end
+        -- 存档迁移：确保新字段存在
+        faction.attack_cooldown = faction.attack_cooldown or 0
     end
 
+    local hadDerivedEffects = data.derived_effects ~= nil
     local derived = data.derived_effects or {}
     data.mine_output_base_bonus = derived.mine_output_base_bonus or data.mine_output_base_bonus or 0
     data.mine_output_mult_bonus = derived.mine_output_mult_bonus or data.mine_output_mult_bonus or 0
@@ -535,6 +645,12 @@ function SaveLoad._DeserializeState(data)
     -- data.prospecting 可以为 nil（表示未在探矿）
     data.prospect_success_count = data.prospect_success_count or 0
     data.prospect_success_bonus = data.prospect_success_bonus or 0
+
+    -- 铜/煤探矿兼容（旧存档无这些字段）
+    -- data.copper_prospecting 可以为 nil
+    data.copper_prospect_count = data.copper_prospect_count or 0
+    -- data.coal_prospecting 可以为 nil
+    data.coal_prospect_count = data.coal_prospect_count or 0
     -- 矿山独立储量兼容（旧存档无 reserve 字段）
     for _, mine in ipairs(data.mines) do
         if mine.reserve == nil then mine.reserve = 500 end
@@ -547,7 +663,7 @@ function SaveLoad._DeserializeState(data)
     end
 
     -- 兼容旧存档：老版本只保存 researched，没有保存科技派生字段。
-    if not data.derived_effects and data.tech and data.tech.researched then
+    if not hadDerivedEffects and data.tech and data.tech.researched then
         local TechData = require("data.tech_data")
         for _, tech in ipairs(TechData.GetAll()) do
             if data.tech.researched[tech.id] then
@@ -611,10 +727,52 @@ function SaveLoad._DeserializeState(data)
             table.insert(data.stocks, inst)
         end
     else
+        -- 构建 Balance 基准 mu/sigma 查找表，用于旧存档缺失字段回退
+        local Balance = require("data.balance")
+        local stockDefaults = {}
+        for _, bs in ipairs(Balance.STOCKS) do
+            stockDefaults[bs.id] = {
+                mu = bs.mu, sigma = bs.sigma,
+                base_value = bs.base_value,
+                inflation_alpha = bs.inflation_alpha,
+                theta = bs.theta,
+            }
+        end
         for _, s in ipairs(data.stocks) do
             s.history = s.history or { s.price }
             s.event_mu_mods = s.event_mu_mods or {}
             s.change_pct = s.change_pct or 0
+            local def = stockDefaults[s.id]
+            -- 旧存档可能缺少 mu/sigma，从 Balance 基准恢复
+            if s.mu == nil or s.sigma == nil then
+                if def then
+                    s.mu = s.mu or def.mu
+                    s.sigma = s.sigma or def.sigma
+                else
+                    s.mu = s.mu or 0.01
+                    s.sigma = s.sigma or 0.10
+                end
+            end
+            -- 公允价值锚定模型迁移（v0.6.0+）：旧存档缺少新字段，从 Balance 恢复
+            if s.base_value == nil or s.inflation_alpha == nil or s.theta == nil then
+                if def then
+                    s.base_value = s.base_value or def.base_value or s.price or 10
+                    s.inflation_alpha = s.inflation_alpha or def.inflation_alpha or 1.0
+                    s.theta = s.theta or def.theta or 0.12
+                    -- 旧存档 mu/sigma 可能是老 GBM 的高值，更新为新模型的低值
+                    s.mu = def.mu
+                    s.sigma = def.sigma
+                else
+                    s.base_value = s.base_value or s.price or 10
+                    s.inflation_alpha = s.inflation_alpha or 1.0
+                    s.theta = s.theta or 0.12
+                end
+                -- 旧存档无 fair_value，用当前价格初始化
+                s.fair_value = s.fair_value or s.price or 10
+                print(string.format("[SaveLoad] 股票迁移：%s → base_value=%.1f, theta=%.2f",
+                    s.id or "?", s.base_value, s.theta))
+            end
+            s.fair_value = s.fair_value or s.price or 10
         end
     end
 

@@ -471,9 +471,9 @@ function Tutorial._BuildButtons(indicator, isLast)
                 backgroundColor = { 0, 0, 0, 0 },
                 paddingHorizontal = 8,
                 paddingVertical = 6,
-                onClick = function()
+                onClick = Config.ClickGuard(function()
                     Tutorial._Finish()
-                end,
+                end),
             },
             -- 步骤指示器
             UI.Label {
@@ -491,9 +491,9 @@ function Tutorial._BuildButtons(indicator, isLast)
                 borderRadius = 6,
                 paddingHorizontal = 20,
                 paddingVertical = 8,
-                onClick = function()
+                onClick = Config.ClickGuard(function()
                     Tutorial._ShowNext()
-                end,
+                end),
             },
         },
     }

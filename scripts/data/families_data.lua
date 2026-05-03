@@ -5,6 +5,29 @@
 
 local FamiliesData = {}
 
+-- 立绘图片路径（assets/ 是资源根目录，路径从下一级开始）
+FamiliesData.PORTRAITS = {
+    -- 固定角色立绘
+    patriarch   = "image/portraits/nikola.png",
+    eldest_son  = "image/portraits/marko.png",
+    niece       = "image/portraits/lina.png",
+}
+
+-- 学员/新成员立绘池
+FamiliesData.PORTRAIT_POOL = {
+    "image/portraits/pool_01.png",
+    "image/portraits/pool_02.png",
+    "image/portraits/pool_03.png",
+    "image/portraits/pool_04.png",
+    "image/portraits/pool_05.png",
+    "image/portraits/pool_06.png",
+    "image/portraits/pool_07.png",
+    "image/portraits/pool_08.png",
+}
+
+-- 已分配的池立绘索引（避免重复分配）
+local usedPoolIndices_ = {}
+
 --- 创建初始家族成员列表
 ---@return table[] members
 function FamiliesData.CreateInitialMembers()
@@ -15,6 +38,7 @@ function FamiliesData.CreateInitialMembers()
             name = "尼古拉·科瓦奇",
             title = "家主",
             portrait = "👤",
+            portraitImage = FamiliesData.PORTRAITS.patriarch,
             attrs = {
                 management = 7,
                 strategy   = 5,
@@ -40,12 +64,13 @@ function FamiliesData.CreateInitialMembers()
             name = "马尔科·科瓦奇",
             title = "长子",
             portrait = "🧑",
+            portraitImage = FamiliesData.PORTRAITS.eldest_son,
             attrs = {
                 management = 4,
-                strategy   = 8,
+                strategy   = 7,
                 charisma   = 4,
                 knowledge  = 3,
-                ambition   = 8,
+                ambition   = 7,
             },
             hidden = {
                 corruption = 4,
@@ -64,6 +89,7 @@ function FamiliesData.CreateInitialMembers()
             name = "莉娜·科瓦奇",
             title = "侄女",
             portrait = "👩",
+            portraitImage = FamiliesData.PORTRAITS.niece,
             attrs = {
                 management = 5,
                 strategy   = 3,
@@ -85,7 +111,7 @@ function FamiliesData.CreateInitialMembers()
 end
 
 --- 获取属性匹配评级
---- 双属性 >= 7 满配；双属性 >= 5 半配；任一属性 <= 4 差配。
+--- 双属性 >= 8 满配；双属性 >= 5 半配；任一属性 <= 4 差配。
 ---@param member table
 ---@param attr1 string 关键属性 1
 ---@param attr2 string 关键属性 2
@@ -95,7 +121,7 @@ function FamiliesData.GetPositionFit(member, attr1, attr2)
     local v1 = member.attrs[attr1] or 1
     local v2 = member.attrs[attr2] or 1
 
-    if v1 >= 7 and v2 >= 7 then
+    if v1 >= 8 and v2 >= 8 then
         return "excellent", 1.0
     elseif v1 >= 5 and v2 >= 5 then
         return "good", 0.5
@@ -142,19 +168,97 @@ function FamiliesData.GetHiddenValue(member, kind)
     return ((member.hidden or {})[kind]) or 0
 end
 
+--- 从立绘池中获取下一张可用立绘
+---@return string|nil imagePath
+function FamiliesData.AllocatePoolPortrait()
+    for i = 1, #FamiliesData.PORTRAIT_POOL do
+        if not usedPoolIndices_[i] then
+            usedPoolIndices_[i] = true
+            return FamiliesData.PORTRAIT_POOL[i]
+        end
+    end
+    return nil  -- 池已耗尽
+end
+
+--- 标记某张池立绘为已使用（存档恢复时调用）
+---@param imagePath string
+function FamiliesData.MarkPoolPortraitUsed(imagePath)
+    for i, path in ipairs(FamiliesData.PORTRAIT_POOL) do
+        if path == imagePath then
+            usedPoolIndices_[i] = true
+            return
+        end
+    end
+end
+
+--- 查询某个池索引是否已被使用（peek，不修改状态）
+---@param index number 池索引（1-based）
+---@return boolean
+function FamiliesData.IsPoolPortraitUsed(index)
+    return usedPoolIndices_[index] == true
+end
+
+--- 释放某张池立绘，使其可被重新分配（成员永久离队时调用）
+---@param imagePath string
+function FamiliesData.ReleasePoolPortrait(imagePath)
+    for i, path in ipairs(FamiliesData.PORTRAIT_POOL) do
+        if path == imagePath then
+            usedPoolIndices_[i] = nil
+            return
+        end
+    end
+end
+
+-- 巴尔干风格随机名（男女混用）
+local RANDOM_FIRST_NAMES = {
+    "伊万", "斯特凡", "达沃尔", "米洛什", "佐兰",
+    "德拉甘", "弗拉多", "安德烈", "鲍里斯", "彼得",
+    "亚历山大", "托米斯拉夫", "布兰科", "杜尚", "米兰",
+    "安娜", "伊万娜", "米莱娜", "达妮卡", "卡塔琳娜",
+    "玛丽娅", "耶莱娜", "德拉加娜", "索菲娅", "柳比察",
+}
+
 --- 创建一个可培养的新成员模板。
 ---@param index number|nil
+---@param existingNames table|nil 已有成员名列表，用于去重
 ---@return table
-function FamiliesData.CreateTraineeTemplate(index)
+function FamiliesData.CreateTraineeTemplate(index, existingNames)
     index = index or math.random(1000, 9999)
     local function attr()
-        return math.random(3, 7)
+        return math.random(3, 8)
     end
+    -- 名字去重：从池中排除已使用的名字
+    local firstName
+    if existingNames and #existingNames > 0 then
+        local usedSet = {}
+        for _, n in ipairs(existingNames) do
+            -- 提取"·"前的名字部分
+            local fn = n:match("^(.-)·") or n
+            usedSet[fn] = true
+        end
+        local available = {}
+        for _, fn in ipairs(RANDOM_FIRST_NAMES) do
+            if not usedSet[fn] then
+                table.insert(available, fn)
+            end
+        end
+        if #available > 0 then
+            firstName = available[math.random(#available)]
+        else
+            -- 池耗尽，加数字后缀避免重名
+            firstName = RANDOM_FIRST_NAMES[math.random(#RANDOM_FIRST_NAMES)]
+                .. tostring(math.random(10, 99))
+        end
+    else
+        firstName = RANDOM_FIRST_NAMES[math.random(#RANDOM_FIRST_NAMES)]
+    end
+    local poolImage = FamiliesData.AllocatePoolPortrait()
     return {
         id = "trainee_" .. tostring(index),
-        name = "新成员 " .. tostring(index),
+        name = firstName .. "·科瓦奇",
         title = "家族新秀",
         portrait = "👥",
+        portraitImage = poolImage,
         attrs = {
             management = attr(),
             strategy = attr(),
@@ -170,7 +274,30 @@ function FamiliesData.CreateTraineeTemplate(index)
         position = nil,
         status = "active",
         disabled_turns = 0,
+        onboarding_remaining = 0,
+        cooldown_turns = 0,
+        reroll_available = 0,
         bio = "通过家族培养进入核心圈层的新成员，能力与倾向会在长期经营中逐步显现。",
+    }
+end
+
+--- 重随成员全部属性（看广告后调用）
+---@param member table
+function FamiliesData.RerollMemberAttrs(member)
+    local function attr()
+        return math.random(3, 8)
+    end
+    member.attrs = {
+        management = attr(),
+        strategy   = attr(),
+        charisma   = attr(),
+        knowledge  = attr(),
+        ambition   = attr(),
+    }
+    member.hidden = {
+        corruption = math.random(1, 7),
+        loyalty    = math.random(4, 9),
+        radical    = math.random(1, 8),
     }
 end
 
