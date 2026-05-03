@@ -412,7 +412,7 @@ function IndustryPage._CreateMineCard(state, mine)
                     IndustryPage._InfoRow("煤储量", coalReserve .. " 单位",
                         coalReserve < 200 and C.accent_red or C.text_secondary),
                     UI.ProgressBar {
-                        value = math.min(1, coalReserve / 2500),
+                        value = math.min(1, coalReserve / 4000),
                         width = "100%",
                         height = 6,
                         borderRadius = 3,

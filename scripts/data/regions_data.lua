@@ -42,7 +42,7 @@ function RegionsData.CreateInitialRegions()
             type = "industrial",
             desc = "波黑重要的工业重镇，有冶炼设施和铁路连接。适合发展加工业和军需生产，但竞争激烈。",
             resources = {
-                coal_reserve   = 2500,  -- 1000→2500
+                coal_reserve   = 4000,  -- 1000→2500→4000
                 steel_capacity = 0,    -- 初始无钢铁产能，需投资建设
                 base_output    = 0,
             },

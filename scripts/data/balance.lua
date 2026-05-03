@@ -44,7 +44,7 @@ Balance.START = {
 Balance.MINE = {
     base_gold_output    = 2,     -- 基础每季产金量
     base_copper_output  = 5,     -- 基础每季产铜量
-    base_coal_output    = 8,     -- 基础每季采煤量（工业区）
+    base_coal_output    = 15,    -- 基础每季采煤量（工业区）
     copper_price        = 8,     -- 铜售价/单位（工业原料定位）
     gold_price          = 50,    -- 黄金售价/单位
     coal_price          = 5,     -- 煤炭售价/单位（低单价高产量）
@@ -91,8 +91,8 @@ Balance.MINE = {
         base_success = 0.65,    -- 首次成功率 65%
         success_decay = 0.03,   -- 每次成功后递减 3%
         min_success = 0.30,     -- 最低成功率 30%
-        reserve_min = 600,      -- 煤储量下限
-        reserve_max = 1200,     -- 煤储量上限
+        reserve_min = 1000,     -- 煤储量下限
+        reserve_max = 2000,     -- 煤储量上限
     },
 }
 

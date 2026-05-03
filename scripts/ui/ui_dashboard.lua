@@ -1100,7 +1100,7 @@ function Dashboard._SeasonOverview(state)
                             Dashboard._ReserveRow("○", "铜矿", mineResources.copper_reserve or 0,
                                 math.max(1200, mineResources.copper_reserve or 0), { 184, 115, 51, 255 }),
                             Dashboard._ReserveRow("◆", "煤矿", industrialResources.coal_reserve or 0,
-                                math.max(2500, industrialResources.coal_reserve or 0), C.text_primary),
+                                math.max(4000, industrialResources.coal_reserve or 0), C.text_primary),
                         },
                     },
                     Dashboard._OverviewDivider(),
