@@ -575,6 +575,7 @@ Balance.FOREIGN_OPS = {
 -- ============================================================================
 Balance.COAL = {
     factory_consumption  = { 3, 5, 8 },  -- 兵工厂 Lv1/2/3 每季煤耗
+    industrial_consumption = { 0, 2, 4, 7, 10 },  -- 工业运营煤耗：矿山最高等级 Lv1~5 对应每季消耗
     mine_power_per_5     = 0.15,          -- 每5煤投入矿山 → 金矿产出 +15%
     mine_power_cap       = 0.30,          -- 矿山电力加成上限 30%
     war_price_premium    = 0.50,          -- 战时煤价 +50%

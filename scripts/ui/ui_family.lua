@@ -763,6 +763,9 @@ function FamilyPage._ShowCandidateModal(pos)
         width = "100%",
         flexDirection = "column",
         gap = 8,
+        flexGrow = 1,
+        flexShrink = 1,
+        flexBasis = 0,
         children = {
             UI.Label {
                 text = "关键属性：" .. attr1Name .. " · " .. attr2Name,
@@ -770,7 +773,20 @@ function FamilyPage._ShowCandidateModal(pos)
                 fontColor = C.text_muted,
                 paddingBottom = 4,
             },
-            table.unpack(rows),
+            UI.ScrollView {
+                width = "100%",
+                flexGrow = 1,
+                flexShrink = 1,
+                flexBasis = 0,
+                children = {
+                    UI.Panel {
+                        width = "100%",
+                        flexDirection = "column",
+                        gap = 8,
+                        children = rows,
+                    },
+                },
+            },
         },
     }
 

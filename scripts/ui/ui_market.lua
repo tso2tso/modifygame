@@ -24,6 +24,8 @@ local onStateChanged_ = nil
 local onLightRefresh_ = nil
 ---@type table|nil 当前打开的交易弹窗
 local tradeModal_ = nil
+---@type number 弹窗关闭时的时间戳（防止手机端触摸穿透导致立即重新打开）
+local modalCloseTime_ = 0
 ---@type string 当前激活的标签页
 local activeTab_ = "stocks"
 ---@type table|nil UI 根节点引用
@@ -1333,7 +1335,17 @@ end
 -- ============================================================================
 function MarketPage._OpenTradeModal(state, stock, accent)
     if tradeModal_ then
-        tradeModal_:Close() -- onClose 回调负责 Destroy 和置 nil
+        -- 已有弹窗时，只关闭不打开新的（防止手机端触摸穿透遮罩层）
+        tradeModal_:Close()
+        return
+    end
+
+    -- 防止手机端触摸穿透：遮罩层 onClose 先将 tradeModal_ 置 nil，
+    -- 同一帧触摸事件穿透到下方股票行导致立即重新打开弹窗。
+    -- 如果距上次关闭不足 0.3 秒则忽略本次打开请求。
+    local now = time:GetElapsedTime()
+    if now - modalCloseTime_ < 0.3 then
+        return
     end
 
     -- 安全网：强制隐藏系统键盘 & 清除残留焦点，防止上一个弹窗的
@@ -1393,6 +1405,7 @@ function MarketPage._OpenTradeModal(state, stock, accent)
         onClose = function(self)
             UI.ClearFocus()                        -- 清焦点 → TextField:OnBlur
             input:SetScreenKeyboardVisible(false)  -- 保底：确保键盘一定关闭
+            modalCloseTime_ = time:GetElapsedTime() -- 记录关闭时刻，防穿透
             tradeModal_ = nil
             self:Destroy()
         end,

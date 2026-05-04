@@ -122,10 +122,14 @@ function IndustryPage._CreateEstimateCard(state)
                 flexWrap = "wrap",
                 gap = 4,
                 children = {
-                    IndustryPage._EstimateItem("🟠 铜库存",
-                        tostring(state.copper or 0) .. " 单位", C.paper_light),
-                    IndustryPage._EstimateItem("⚫ 煤炭库存",
-                        tostring(state.coal or 0) .. " 单位", { 140, 130, 120, 255 }),
+                    IndustryPage._EstimateItem(
+                        state.copper_auto_sell and "🟠 铜(出售中)" or "🟠 铜(囤积中)",
+                        string.format("%d(+%d)", state.copper or 0, estimateDetails.est_copper_output or 0),
+                        state.copper_auto_sell and C.accent_green or C.paper_light),
+                    IndustryPage._EstimateItem(
+                        state.coal_auto_sell and "⚫ 煤(出售中)" or "⚫ 煤(囤积中)",
+                        string.format("%d(+%d)", state.coal or 0, estimateDetails.est_coal_output or 0),
+                        state.coal_auto_sell and C.accent_green or { 140, 130, 120, 255 }),
                     IndustryPage._EstimateItem("潜在售金",
                         "+" .. (estimateDetails.gold_potential_income or 0), C.accent_gold),
                     IndustryPage._EstimateItem("📊 通胀倍率",
@@ -975,8 +979,19 @@ function IndustryPage._CreateCoalPowerCard(state)
         factoryConsumption = consumptionTable[factory.level] or 0
     end
 
-    -- 可分配给矿山的上限（总库存 - 工厂需求, 最低0）
-    local maxToMines = math.max(0, coalStock - factoryConsumption)
+    -- 工业运营煤耗（随矿山最高等级增长）
+    local indConsTable = BCOAL.industrial_consumption or { 0, 2, 4, 7, 10 }
+    local maxMineLevel = 1
+    for _, mine in ipairs(state.mines or {}) do
+        if mine.active and (mine.level or 1) > maxMineLevel then
+            maxMineLevel = mine.level
+        end
+    end
+    local industrialConsumption = indConsTable[maxMineLevel] or 0
+    local totalConsumption = factoryConsumption + industrialConsumption
+
+    -- 可分配给矿山的上限（总库存 - 工厂需求 - 工业运营, 最低0）
+    local maxToMines = math.max(0, coalStock - totalConsumption)
     -- 每次 +5/-5 调节
     local step = 5
 
@@ -1007,7 +1022,7 @@ function IndustryPage._CreateCoalPowerCard(state)
                     UI.Panel { flexGrow = 1 },
                     UI.Chip {
                         label = coalStock .. " 煤",
-                        color = coalStock >= factoryConsumption and "success" or "error",
+                        color = coalStock >= totalConsumption and "success" or "error",
                         variant = "soft",
                         size = "sm",
                     },
@@ -1019,9 +1034,15 @@ function IndustryPage._CreateCoalPowerCard(state)
                 factoryConsumption .. " 煤",
                 coalStock >= factoryConsumption and C.text_primary or C.accent_red
             ) or IndustryPage._InfoRow("🏭 兵工厂", "未运行", C.text_muted),
+            -- 工业运营煤耗
+            industrialConsumption > 0 and IndustryPage._InfoRow(
+                "⚙ 工业运营每季消耗",
+                industrialConsumption .. " 煤（矿山Lv" .. maxMineLevel .. "）",
+                C.text_primary
+            ) or nil,
             -- 煤炭不足警告
-            coalStock < factoryConsumption and UI.Label {
-                text = "⚠ 煤炭不足以供应兵工厂，本季生产将暂停！",
+            coalStock < totalConsumption and UI.Label {
+                text = "⚠ 煤炭不足以供应工业需求，兵工厂生产可能暂停！",
                 fontSize = F.body_minor,
                 fontColor = C.accent_red,
                 whiteSpace = "normal",

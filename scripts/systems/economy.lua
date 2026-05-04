@@ -121,14 +121,22 @@ function Economy.Settle(state)
     end
 
     -- ============================
-    -- 1.5 煤炭采集（工业区）
+    -- 1.5 煤炭采集（工业区）— 受矿山最高等级加成
     -- ============================
     report.coal_mined = 0
+    -- 取最高矿山等级，代表整体采矿技术水平
+    local maxMineLevel = 1
+    for _, mine in ipairs(state.mines) do
+        if mine.active and (mine.level or 1) > maxMineLevel then
+            maxMineLevel = mine.level
+        end
+    end
+    local coalLevelMul = 1.0 + (maxMineLevel - 1) * BM.level_output_bonus
     for _, r in ipairs(state.regions) do
         if r.type == "industrial" and r.resources and (r.resources.coal_reserve or 0) > 0 then
             -- 按控制度折算产量（控制度越低，可开采比例越少；设下限保证基础产量）
             local controlFactor = math.max(BC.min_control_factor or 0.30, (r.control or 0) / 100)
-            local coalOut = math.floor(BM.base_coal_output * (1 + (r.development - 1) * 0.15) * controlFactor)
+            local coalOut = math.floor(BM.base_coal_output * coalLevelMul * (1 + (r.development - 1) * 0.15) * controlFactor)
             coalOut = math.min(coalOut, r.resources.coal_reserve)
             r.resources.coal_reserve = r.resources.coal_reserve - coalOut
             state.coal = (state.coal or 0) + coalOut
@@ -212,6 +220,25 @@ function Economy.Settle(state)
             state.coal = 0
             report.factory_coal_shortage = true
             state.factory_coal_shortage = true  -- 存入 state 供 TickProduction 读取
+        end
+    end
+
+    -- 2.6a2 工业运营煤耗：随矿山最高等级增长，代表蒸汽动力、冶炼等工业消耗
+    report.coal_industrial_consumed = 0
+    do
+        local indConsTable = BC.industrial_consumption or { 0, 2, 4, 7, 10 }
+        local indMaxLevel = 1
+        for _, mine in ipairs(state.mines) do
+            if mine.active and (mine.level or 1) > indMaxLevel then
+                indMaxLevel = mine.level
+            end
+        end
+        local indCoalNeed = indConsTable[indMaxLevel] or 0
+        if indCoalNeed > 0 then
+            local coalAvail = state.coal or 0
+            local consumed = math.min(coalAvail, indCoalNeed)
+            state.coal = coalAvail - consumed
+            report.coal_industrial_consumed = consumed
         end
     end
 
@@ -586,6 +613,7 @@ function Economy._GetEstimateImpl(state)
             else
                 copperOut = 0
             end
+            details.est_copper_output = (details.est_copper_output or 0) + copperOut
             local copperPriceMod = GameState.GetModifierValue(state, "copper_price_mod")
             -- 铜收入仅在手动出售模式开启时计算
             if state.copper_auto_sell then
@@ -610,14 +638,23 @@ function Economy._GetEstimateImpl(state)
     end
     estCoalPrice = math.max(1, math.floor(estCoalPrice))
     local estCoalMined = 0
+    -- 预估也需要矿山等级加成
+    local estMaxMineLevel = 1
+    for _, mine in ipairs(state.mines) do
+        if mine.active and (mine.level or 1) > estMaxMineLevel then
+            estMaxMineLevel = mine.level
+        end
+    end
+    local estCoalLevelMul = 1.0 + (estMaxMineLevel - 1) * BM.level_output_bonus
     for _, r in ipairs(state.regions) do
         if r.type == "industrial" and r.resources and (r.resources.coal_reserve or 0) > 0 then
             local controlFactor = math.max(BC.min_control_factor or 0.30, (r.control or 0) / 100)
-            local coalOut = math.floor(BM.base_coal_output * (1 + (r.development - 1) * 0.15) * controlFactor)
+            local coalOut = math.floor(BM.base_coal_output * estCoalLevelMul * (1 + (r.development - 1) * 0.15) * controlFactor)
             coalOut = math.min(coalOut, r.resources.coal_reserve)
             estCoalMined = estCoalMined + coalOut
         end
     end
+    details.est_coal_output = estCoalMined
 
     -- 外国矿预估收入
     details.foreign_gold_income = 0
@@ -652,6 +689,16 @@ function Economy._GetEstimateImpl(state)
         local factoryNeed = BC.factory_consumption[estFactory.level] or 0
         details.est_coal_factory = math.min(estCoalStock, factoryNeed)
         estCoalStock = math.max(0, estCoalStock - factoryNeed)
+    end
+    -- 扣除工业运营煤耗
+    details.est_coal_industrial = 0
+    do
+        local indConsTable = BC.industrial_consumption or { 0, 2, 4, 7, 10 }
+        local indCoalNeed = indConsTable[estMaxMineLevel] or 0
+        if indCoalNeed > 0 then
+            details.est_coal_industrial = math.min(estCoalStock, indCoalNeed)
+            estCoalStock = math.max(0, estCoalStock - indCoalNeed)
+        end
     end
     -- 扣除矿山分配
     details.est_coal_mine = 0

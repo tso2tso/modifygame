@@ -543,9 +543,9 @@ function Equipment.OnBattleEnd(state, participatingSquadIds)
         end
 
         if participated then
-            -- 耐久衰减 10-20（T1 步枪不衰减）
+            -- 耐久衰减 5-12（T1 步枪不衰减）
             if sq.equip_id ~= "rifle" then
-                local wear = 10 + math.random(0, 10)
+                local wear = 5 + math.random(0, 7)
                 sq.condition = math.max(0, sq.condition - wear)
                 -- 损毁 → 退回 T1
                 if sq.condition <= 0 then
