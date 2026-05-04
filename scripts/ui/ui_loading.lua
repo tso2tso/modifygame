@@ -55,6 +55,8 @@ local showing_ = false
 local workDone_ = false
 ---@type number
 local elapsed_ = 0
+---@type number MarkDone 后的收尾展示计时
+local doneElapsed_ = 0
 ---@type number 当前轮播索引（1-based）
 local currentIndex_ = 1
 ---@type number
@@ -106,7 +108,7 @@ local function _CreatePanel()
     -- 进度条百分比
     local progress = 0
     if workDone_ then
-        progress = math.min(1, elapsed_ / minShowDuration_)
+        progress = 0.85 + 0.15 * math.min(1, doneElapsed_ / minShowDuration_)
     else
         progress = math.min(0.85, elapsed_ / (minShowDuration_ * 1.2))
     end
@@ -293,6 +295,7 @@ function Loading.Show(parentRoot, onClosed, opts)
     showing_ = true
     workDone_ = false
     elapsed_ = 0
+    doneElapsed_ = 0
     minShowDuration_ = opts.minDuration or DEFAULT_MIN_SHOW_DURATION
     showPortraits_ = opts.showPortraits ~= false
     currentIndex_ = 1
@@ -342,6 +345,7 @@ end
 ---@param onClosed function|nil Loading 关闭后的回调（可选，会覆盖 Show 传入的 onClosed）
 function Loading.MarkDone(onClosed)
     workDone_ = true
+    doneElapsed_ = 0
     if onClosed then
         onClosed_ = onClosed
     end
@@ -380,9 +384,9 @@ function Loading.Update(dt)
     -- ── 进度条 ──
     local progress
     if workDone_ then
-        -- 工作完成后快速填满
-        local fillTime = math.max(0, elapsed_ - (minShowDuration_ - 0.4))
-        progress = 0.85 + 0.15 * math.min(1, fillTime / 0.4)
+        -- 工作完成后，从 MarkDone 时刻开始进入收尾展示阶段。
+        doneElapsed_ = doneElapsed_ + dt
+        progress = 0.85 + 0.15 * math.min(1, doneElapsed_ / minShowDuration_)
     else
         progress = math.min(0.85, elapsed_ / (minShowDuration_ * 1.2))
     end
@@ -435,7 +439,7 @@ function Loading.Update(dt)
     end
 
     -- ── 自动关闭检测 ──
-    if workDone_ and elapsed_ >= minShowDuration_ then
+    if workDone_ and doneElapsed_ >= minShowDuration_ then
         Loading.Close()
     end
 end
