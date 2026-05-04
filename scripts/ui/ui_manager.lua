@@ -32,6 +32,8 @@ local uiRoot_ = nil
 local activeView_ = "dashboard"
 ---@type table 各页面容器引用
 local pages_ = {}
+---@type table 内容区容器引用
+local contentArea_ = nil
 ---@type table 仪表盘容器引用
 local dashboardPage_ = nil
 ---@type table 游戏状态引用
@@ -88,6 +90,7 @@ function UIManager.Create(state, callbacks)
 
     -- 重置
     pages_ = {}
+    contentArea_ = nil
     dashboardPage_ = nil
     settingsDrawer_ = nil
     activeView_ = "dashboard"
@@ -144,8 +147,8 @@ end
 -- 内容区
 -- ============================================================================
 
-function UIManager._CreateContentArea(state)
-    dashboardPage_ = UI.ScrollView {
+function UIManager._CreateDashboardPage(state)
+    local page = UI.ScrollView {
         id = "page_dashboard",
         width = "100%",
         height = "100%",
@@ -175,7 +178,12 @@ function UIManager._CreateContentArea(state)
         },
     }
 
-    dashboardPage_._loaded = true
+    page._loaded = true
+    return page
+end
+
+function UIManager._CreateContentArea(state)
+    dashboardPage_ = UIManager._CreateDashboardPage(state)
 
     local pageChildren = { dashboardPage_ }
     for _, tab in ipairs(Config.TABS) do
@@ -184,7 +192,7 @@ function UIManager._CreateContentArea(state)
         table.insert(pageChildren, page)
     end
 
-    return UI.Panel {
+    contentArea_ = UI.Panel {
         id = "contentArea",
         flexGrow = 1,
         flexBasis = 0,
@@ -192,6 +200,7 @@ function UIManager._CreateContentArea(state)
         overflow = "hidden",
         children = pageChildren,
     }
+    return contentArea_
 end
 
 function UIManager._CreatePage(tabId, state, lazy)
@@ -585,31 +594,19 @@ function UIManager.ResetForStateSwitch(state)
     UIManager.CloseSettingsDrawer()
     TopBar.Refresh(uiRoot_, stateRef_)
 
-    if dashboardPage_ then
-        dashboardPage_:ClearChildren()
-        dashboardPage_:AddChild(Dashboard.Create(stateRef_, {
-            onEndTurn = onEndTurn_,
-            onProcessEvent = function(index)
-                if onProcessEvent_ then onProcessEvent_(index) end
-            end,
-            onQuickAction = function(actionId)
-                UIManager._OnQuickAction(actionId)
-            end,
-            onStateChanged = function()
-                UIManager.RefreshAll(stateRef_)
-            end,
-            onLightRefresh = function()
-                UIManager.RefreshLight(stateRef_)
-            end,
-        }))
-        dashboardPage_._dirty = false
-        dashboardPage_._loaded = true
-    end
+    -- 不复用旧 ScrollView。旧局待办事件较多时，首页可能保留滚动偏移、
+    -- 惯性或触摸捕获状态，导致新局首屏从中段开始或内容区暂时不可点。
+    dashboardPage_ = UIManager._CreateDashboardPage(stateRef_)
+    pages_ = {}
 
-    for _, page in pairs(pages_) do
-        page:ClearChildren()
-        page._dirty = false
-        page._loaded = false
+    if contentArea_ then
+        contentArea_:ClearChildren()
+        contentArea_:AddChild(dashboardPage_)
+        for _, tab in ipairs(Config.TABS) do
+            local page = UIManager._CreatePage(tab.id, stateRef_, true)
+            pages_[tab.id] = page
+            contentArea_:AddChild(page)
+        end
     end
 
     UIManager._ShowView("dashboard")
