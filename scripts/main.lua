@@ -25,6 +25,36 @@ local state_ = nil
 ---@type TurnReport|nil 当前回合报告（等待事件处理完毕）
 local pendingReport_ = nil
 
+local function RunStartEvents()
+    local startEvents = Events.CheckEvents(state_)
+    if #startEvents > 0 then
+        Events.Enqueue(state_, startEvents)
+        UIManager.RefreshAll(state_)
+    end
+end
+
+local function RunInitialStateFlow()
+    if not state_ then return end
+
+    if GameState.IsGameOver(state_) then
+        UIManager.ShowEnding(state_)
+        return
+    elseif state_.victory and state_.victory.prompt_pending then
+        UIManager.ShowVictoryPrompt(state_)
+        return
+    end
+
+    if state_.turn_count == 0 and not state_.tutorial_done then
+        Tutorial.Start(function()
+            state_.tutorial_done = true
+            RunStartEvents()
+            SaveLoad.Save(state_, SaveLoad.SLOT_AUTO)
+        end)
+    elseif state_.turn_count == 0 then
+        RunStartEvents()
+    end
+end
+
 -- ============================================================================
 -- 生命周期
 -- ============================================================================
@@ -158,24 +188,7 @@ function Start()
 
     -- 6. 新游戏：先展示新手引导，引导结束后再检查开局事件
     if not loaded then
-        if not state_.tutorial_done then
-            Tutorial.Start(function()
-                state_.tutorial_done = true
-                -- 引导结束后检查开局事件
-                local startEvents = Events.CheckEvents(state_)
-                if #startEvents > 0 then
-                    Events.Enqueue(state_, startEvents)
-                    UIManager.RefreshAll(state_)
-                end
-                SaveLoad.Save(state_, SaveLoad.SLOT_AUTO)
-            end)
-        else
-            local startEvents = Events.CheckEvents(state_)
-            if #startEvents > 0 then
-                Events.Enqueue(state_, startEvents)
-                UIManager.RefreshAll(state_)
-            end
-        end
+        RunInitialStateFlow()
     end
 
     print("=== 初始化完成 ===")
@@ -207,6 +220,8 @@ local function QueueLoadingSteps(steps, initialFrames)
 end
 
 local function QueueStateLoadSteps(initialFrames, createStateFn)
+    local afterLoading = nil
+
     QueueLoadingSteps({
         -- 1) 预加载立绘纹理（loading 已显示占位画面）
         function()
@@ -234,44 +249,22 @@ local function QueueStateLoadSteps(initialFrames, createStateFn)
                 Tutorial.PreloadImages()
             end
         end,
-        -- 6) 在 loading 仍覆盖屏幕时，创建引导/处理开局事件
+        -- 6) 准备 Loading 关闭后的初始流程，避免全屏引导抢在 Loading 前显示
         function()
-            if GameState.IsGameOver(state_) then
-                Loading.Close()
-                UIManager.ShowEnding(state_)
-                return
-            elseif state_.victory and state_.victory.prompt_pending then
-                Loading.Close()
-                UIManager.ShowVictoryPrompt(state_)
-                return
-            end
-
-            if state_.turn_count == 0 and not state_.tutorial_done then
-                Tutorial.Start(function()
-                    state_.tutorial_done = true
-                    local startEvents = Events.CheckEvents(state_)
-                    if #startEvents > 0 then
-                        Events.Enqueue(state_, startEvents)
-                        UIManager.RefreshAll(state_)
-                    end
-                    SaveLoad.Save(state_, SaveLoad.SLOT_AUTO)
-                end)
-            elseif state_.turn_count == 0 then
-                local startEvents = Events.CheckEvents(state_)
-                if #startEvents > 0 then
-                    Events.Enqueue(state_, startEvents)
-                    UIManager.RefreshAll(state_)
-                end
+            afterLoading = function()
+                RunInitialStateFlow()
             end
         end,
         -- 7) 等一帧让引擎完成新面板布局/首帧渲染
         function() end,
         -- 8) 再等一帧确保画面稳定
         function() end,
-        -- 9) 标记完成，Loading 自动关闭（引导/主界面已渲染好）
+        -- 9) 标记完成，Loading 真正关闭后再启动引导/结局/开局事件
         function()
             if Loading.IsShowing() then
-                Loading.MarkDone()
+                Loading.MarkDone(afterLoading)
+            elseif afterLoading then
+                afterLoading()
             end
         end,
     }, initialFrames)
@@ -314,26 +307,8 @@ function HandleDifficultyChanged()
 end
 
 --- Loading 关闭后的回调：启动 Tutorial 或检查开局事件
---- 现在仅用于冷启动路径（Start() 中无存档时），新游戏/读档走 QueueStateLoadSteps。
 function _OnLoadingClosed()
-    if not state_ then return end
-    if state_.turn_count == 0 and not state_.tutorial_done then
-        Tutorial.Start(function()
-            state_.tutorial_done = true
-            local startEvents = Events.CheckEvents(state_)
-            if #startEvents > 0 then
-                Events.Enqueue(state_, startEvents)
-                UIManager.RefreshAll(state_)
-            end
-            SaveLoad.Save(state_, SaveLoad.SLOT_AUTO)
-        end)
-    elseif state_.turn_count == 0 then
-        local startEvents = Events.CheckEvents(state_)
-        if #startEvents > 0 then
-            Events.Enqueue(state_, startEvents)
-            UIManager.RefreshAll(state_)
-        end
-    end
+    RunInitialStateFlow()
 end
 
 -- ============================================================================
