@@ -220,8 +220,6 @@ local function QueueLoadingSteps(steps, initialFrames)
 end
 
 local function QueueStateLoadSteps(initialFrames, createStateFn)
-    local afterLoading = nil
-
     QueueLoadingSteps({
         -- 1) 预加载立绘纹理（loading 已显示占位画面）
         function()
@@ -249,22 +247,21 @@ local function QueueStateLoadSteps(initialFrames, createStateFn)
                 Tutorial.PreloadImages()
             end
         end,
-        -- 6) 准备 Loading 关闭后的初始流程，避免全屏引导抢在 Loading 前显示
+        -- 6) 在 Loading 覆盖下创建引导/结局/开局事件，再把 Loading 提回最上层
         function()
-            afterLoading = function()
-                RunInitialStateFlow()
+            RunInitialStateFlow()
+            if Loading.IsShowing() then
+                Loading.TransferTo(UIManager.GetRoot())
             end
         end,
         -- 7) 等一帧让引擎完成新面板布局/首帧渲染
         function() end,
         -- 8) 再等一帧确保画面稳定
         function() end,
-        -- 9) 标记完成，Loading 真正关闭后再启动引导/结局/开局事件
+        -- 9) 标记完成，Loading 自动关闭后露出已经构建好的引导/主界面
         function()
             if Loading.IsShowing() then
-                Loading.MarkDone(afterLoading)
-            elseif afterLoading then
-                afterLoading()
+                Loading.MarkDone()
             end
         end,
     }, initialFrames)
@@ -279,7 +276,8 @@ function HandleNewGame(newState)
         GameState.GetTurnText(state_), state_.cash, state_.gold))
 
     -- 展示加载界面（挂载到当前 UI 根节点上层）
-    Loading.Show(UIManager.GetRoot(), nil, { minDuration = 0.8 })
+    local minDuration = (state_.turn_count == 0 and not state_.tutorial_done) and 2.4 or 0.8
+    Loading.Show(UIManager.GetRoot(), nil, { minDuration = minDuration })
 
     -- 分帧执行状态切换和 UI 重建，让 Loading 轮播持续覆盖加载期。
     QueueStateLoadSteps(3)
@@ -288,7 +286,7 @@ end
 --- 请求开始新游戏：先显示 Loading，再在后续帧创建新状态，避免点击后长时间无反馈
 function HandleNewGameRequested()
     pendingReport_ = nil
-    Loading.Show(UIManager.GetRoot(), nil, { minDuration = 0.8 })
+    Loading.Show(UIManager.GetRoot(), nil, { minDuration = 2.4 })
     QueueStateLoadSteps(3, function()
         local newState = GameState.CreateNew()
         newState.ap.max = GameState.CalcMaxAP(newState)

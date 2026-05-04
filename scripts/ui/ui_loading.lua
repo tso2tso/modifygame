@@ -320,6 +320,7 @@ end
 ---@param newRoot table 新的 UI 根节点
 function Loading.TransferTo(newRoot)
     if not showing_ then return end
+    parentRoot_ = newRoot
 
     -- 销毁旧面板（可能已脱离渲染树）
     if panel_ then
