@@ -210,7 +210,7 @@ function HandleNewGame(newState)
     AudioManager.UpdateBGM(state_)
 
     -- 展示加载界面（挂载到当前 UI 根节点上层）
-    Loading.Show(UIManager.GetRoot(), nil, { minDuration = 0.8 })
+    Loading.Show(UIManager.GetRoot(), nil, { minDuration = 2.5 })
 
     -- 延迟 3 帧执行 UI 刷新，让加载界面先渲染几帧动画
     pendingAction_ = { frames = 3, fn = _PerformUIRebuild }
@@ -219,7 +219,7 @@ end
 --- 请求开始新游戏：先显示 Loading，再在后续帧创建新状态，避免点击后长时间无反馈
 function HandleNewGameRequested()
     pendingReport_ = nil
-    Loading.Show(UIManager.GetRoot(), nil, { minDuration = 0.8 })
+    Loading.Show(UIManager.GetRoot(), nil, { minDuration = 2.5 })
     pendingAction_ = { frames = 3, fn = function()
         local newState = GameState.CreateNew()
         newState.ap.max = GameState.CalcMaxAP(newState)
