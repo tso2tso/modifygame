@@ -452,11 +452,8 @@ end
 function UIManager._OpenSettings()
     AudioManager.PlayUI("ui_modal_open")
     -- 每次重建，确保音量设置等内容反映最新状态
-    -- 直接 Destroy 旧 Modal（跳过 Close 动画），避免新旧 Modal 同时存在
     if settingsDrawer_ then
-        local old = settingsDrawer_
-        settingsDrawer_ = nil
-        old:Destroy()
+        settingsDrawer_:Close()
     end
 
     local menuCallbacks = {
@@ -464,7 +461,12 @@ function UIManager._OpenSettings()
             UIManager.RefreshAll(stateRef_)
         end,
         onNewGame = onNewGame_,
-        onNewGameRequested = onNewGameRequested_,
+        onNewGameRequested = function(skipTutorial)
+            UIManager.CloseSettingsDrawer()
+            if onNewGameRequested_ then
+                onNewGameRequested_(skipTutorial)
+            end
+        end,
         onDifficultyChanged = onDifficultyChanged_,
     }
 
@@ -541,9 +543,7 @@ end
 
 function UIManager.CloseSettingsDrawer()
     if settingsDrawer_ then
-        local old = settingsDrawer_
-        settingsDrawer_ = nil
-        old:Destroy()
+        settingsDrawer_:Close()
     end
 end
 
