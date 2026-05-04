@@ -29,6 +29,8 @@ local onNewGameRequested_ = nil
 local onDifficultyChanged_ = nil
 ---@type table|nil 存档操作卡片引用（用于局部刷新）
 local saveCardRef_ = nil
+---@type table|nil 难度卡片引用（用于局部刷新按钮颜色）
+local diffCardRef_ = nil
 ---@type number 最近一次难度切换帧，用于阻止同一次点击链误触新游戏
 local lastDifficultyChangeFrame_ = -1000
 
@@ -43,6 +45,7 @@ function MenuPage.Create(state, callbacks)
     onNewGameRequested_ = callbacks and callbacks.onNewGameRequested
     onDifficultyChanged_ = callbacks and callbacks.onDifficultyChanged
     saveCardRef_ = nil
+    diffCardRef_ = nil
     return MenuPage._BuildContent(state)
 end
 
@@ -194,8 +197,8 @@ function MenuPage._CreateAudioCard()
     }
 end
 
---- 难度设置卡片
-function MenuPage._CreateDifficultyCard(state)
+--- 难度设置卡片内部子元素列表（用于局部刷新）
+function MenuPage._CreateDifficultyCardInner(state)
     local currentDiff = state.difficulty or Config.DEFAULT_DIFFICULTY
 
     local function makeDiffBtn(diffId)
@@ -216,6 +219,8 @@ function MenuPage._CreateDifficultyCard(state)
                 stateRef_.difficulty = diffId
                 lastDifficultyChangeFrame_ = time.frameNumber or 0
                 AudioManager.PlayUI("ui_click")
+                -- 立即刷新按钮颜色
+                MenuPage._RefreshDifficultyCard()
                 -- 优先使用带 Loading 的难度切换回调
                 if onDifficultyChanged_ then
                     onDifficultyChanged_()
@@ -228,7 +233,37 @@ function MenuPage._CreateDifficultyCard(state)
 
     local diffInfo = Config.GetDifficulty(currentDiff)
 
-    return UI.Panel {
+    return {
+        UI.Label {
+            text = "⚔️ 难度设置",
+            fontSize = F.subtitle,
+            fontWeight = "bold",
+            fontColor = C.text_primary,
+        },
+        UI.Divider { color = C.divider },
+        UI.Panel {
+            width = "100%",
+            flexDirection = "row",
+            gap = 8,
+            children = (function()
+                local btns = {}
+                for _, diffId in ipairs(Config.DIFFICULTY_ORDER) do
+                    table.insert(btns, makeDiffBtn(diffId))
+                end
+                return btns
+            end)(),
+        },
+        UI.Label {
+            text = diffInfo.desc,
+            fontSize = F.label,
+            fontColor = C.text_muted,
+        },
+    }
+end
+
+--- 难度设置卡片（容器 + 内容）
+function MenuPage._CreateDifficultyCard(state)
+    diffCardRef_ = UI.Panel {
         width = "100%",
         padding = S.card_padding,
         backgroundColor = C.paper_dark,
@@ -237,33 +272,9 @@ function MenuPage._CreateDifficultyCard(state)
         borderColor = C.border_card,
         flexDirection = "column",
         gap = 8,
-        children = {
-            UI.Label {
-                text = "⚔️ 难度设置",
-                fontSize = F.subtitle,
-                fontWeight = "bold",
-                fontColor = C.text_primary,
-            },
-            UI.Divider { color = C.divider },
-            UI.Panel {
-                width = "100%",
-                flexDirection = "row",
-                gap = 8,
-                children = (function()
-                    local btns = {}
-                    for _, diffId in ipairs(Config.DIFFICULTY_ORDER) do
-                        table.insert(btns, makeDiffBtn(diffId))
-                    end
-                    return btns
-                end)(),
-            },
-            UI.Label {
-                text = diffInfo.desc,
-                fontSize = F.label,
-                fontColor = C.text_muted,
-            },
-        },
+        children = MenuPage._CreateDifficultyCardInner(state),
     }
+    return diffCardRef_
 end
 
 --- 格式化存档时间戳为可读文本
@@ -598,6 +609,15 @@ function MenuPage._OnNewGame()
         GameState.AddLog(newState, "科瓦奇家族在巴科维奇矿区开始了创业之路。")
         UI.Toast.Show("新的百年传奇开始了！", { variant = "info", duration = 2 })
         onNewGame_(newState)
+    end
+end
+
+--- 局部刷新难度卡片按钮颜色（不重建整个 Modal）
+function MenuPage._RefreshDifficultyCard()
+    if not diffCardRef_ or not stateRef_ then return end
+    diffCardRef_:ClearChildren()
+    for _, child in ipairs(MenuPage._CreateDifficultyCardInner(stateRef_)) do
+        diffCardRef_:AddChild(child)
     end
 end
 
