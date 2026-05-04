@@ -496,6 +496,7 @@ function TopBar._CreateAPRow(state, era)
                         gap = 3,
                         children = {
                             UI.Label {
+                                id = "securityBadgeText",
                                 text = "🛡️ " .. secText,
                                 fontSize = F.label,
                                 fontColor = secFontColor,
@@ -565,6 +566,22 @@ function TopBar.Refresh(root, state)
         nwVal:SetText(Config.FormatCompact(netWorth))
         if nwVal.SetFontColor then
             nwVal:SetFontColor(netWorth < 0 and C.accent_red or C.accent_green)
+        end
+    end
+
+    local security = GameState.CalcGlobalSecurity(state)
+    local secText = RegionsData.GetSecurityText(security)
+    local secBg = security <= 2 and C.accent_red
+        or (security >= 4 and C.accent_green or C.accent_amber)
+    local securityBadge = root:FindById("securityBadge")
+    if securityBadge then
+        securityBadge:SetStyle({ backgroundColor = secBg })
+    end
+    local securityBadgeText = root:FindById("securityBadgeText")
+    if securityBadgeText then
+        securityBadgeText:SetText("🛡️ " .. secText)
+        if securityBadgeText.SetFontColor then
+            securityBadgeText:SetFontColor({ 255, 255, 255, 255 })
         end
     end
 
