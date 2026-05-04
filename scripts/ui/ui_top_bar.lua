@@ -312,14 +312,8 @@ function TopBar._CreateAPRow(state, era)
         })
     end
 
-    -- 实时重算治安等级（确保 UI 始终反映当前军事/AI 态势）
-    GameState.RecalcSecurity(state)
-    -- 安全等级：取所有区域中最低值（反映整体最薄弱环节）
-    local security = 5
-    for _, r in ipairs(state.regions) do
-        local s = r.security or 3
-        if s < security then security = s end
-    end
+    -- 顶栏只展示动态汇总，不在渲染过程中改写地区治安。
+    local security = GameState.CalcGlobalSecurity(state)
     local secText = RegionsData.GetSecurityText(security)
     local secBg, secFontColor
     if security <= 2 then

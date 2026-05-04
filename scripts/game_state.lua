@@ -747,43 +747,86 @@ end
 -- 行动点
 -- ============================================================================
 
---- 根据玩家军事力量 vs AI 区域威胁，直接计算各区域治安等级
---- 可在回合结算和 UI 显示时调用，确保始终反映当前局势
+local SECURITY_AI_THREAT_SCALE = 0.15
+
+local function CalcRegionSecurityWithPower(state, region, playerPower)
+    -- AI 势力值是宏观影响力，不能和护卫战力 1:1 相比；折算后才用于治安压力。
+    local aiThreat = 0
+    for _, faction in ipairs(state.ai_factions or {}) do
+        if not faction.defeated then
+            local presence = (region.ai_presence and region.ai_presence[faction.id]) or 0
+            aiThreat = aiThreat + (faction.power or 0) * presence / 100 * SECURITY_AI_THREAT_SCALE
+        end
+    end
+
+    local control = region.control or 0
+    local target
+    if aiThreat < 0.5 then
+        -- 几乎无 AI 威胁：主要按玩家控制度决定。
+        if control >= 60 then target = 5
+        elseif control >= 30 then target = 4
+        else target = 3 end
+    else
+        local ratio = playerPower / aiThreat
+        if ratio >= 2.5 then target = 5
+        elseif ratio >= 1.5 then target = 4
+        elseif ratio >= 0.85 then target = 3
+        elseif ratio >= 0.4 then target = 2
+        else target = 1 end
+
+        if control >= 80 then
+            target = target + 1
+        elseif control < 20 and target > 2 then
+            target = target - 1
+        end
+    end
+
+    return math.max(1, math.min(5, target))
+end
+
+--- 根据玩家军事力量 vs AI 区域威胁，纯计算单个区域治安等级（不改写状态）
+---@param state table
+---@param region table
+---@return number security
+function GameState.CalcRegionSecurity(state, region)
+    local Combat = require("systems.combat")
+    return CalcRegionSecurityWithPower(state, region, Combat.PlayerPower(state))
+end
+
+--- 计算顶栏安全等级：用全区域动态治安的均值表达整体态势，最差区域只限制上限。
+--- 这样局部风险会被提示，但不会让单个低控制区把全局直接压成“极度危险”。
+---@param state table
+---@return number security
+---@return number weakest
+function GameState.CalcGlobalSecurity(state)
+    local Combat = require("systems.combat")
+    local playerPower = Combat.PlayerPower(state)
+    local total, count, weakest = 0, 0, 5
+    for _, r in ipairs(state.regions or {}) do
+        local s = CalcRegionSecurityWithPower(state, r, playerPower)
+        total = total + s
+        count = count + 1
+        if s < weakest then weakest = s end
+    end
+    if count == 0 then return 3, 3 end
+
+    local aggregate = math.floor(total / count + 0.5)
+    if weakest <= 1 then
+        aggregate = math.min(aggregate, 2)
+    elseif weakest <= 2 then
+        aggregate = math.min(aggregate, 3)
+    end
+    return math.max(1, math.min(5, aggregate)), weakest
+end
+
+--- 根据玩家军事力量 vs AI 区域威胁，直接计算并写入各区域治安等级
+--- 用于回合结算；UI 显示应使用 CalcGlobalSecurity，避免渲染过程改写状态。
 ---@param state table
 function GameState.RecalcSecurity(state)
     local Combat = require("systems.combat")
     local playerPower = Combat.PlayerPower(state)
     for _, r in ipairs(state.regions or {}) do
-        -- AI 有效威胁 = 各势力 (power × presence/100) 之和
-        local aiThreat = 0
-        for _, faction in ipairs(state.ai_factions or {}) do
-            if not faction.defeated then
-                local presence = (r.ai_presence and r.ai_presence[faction.id]) or 0
-                aiThreat = aiThreat + (faction.power or 0) * presence / 100
-            end
-        end
-        local control = r.control or 0
-
-        -- 直接根据力量对比算出目标治安等级
-        local target
-        if aiThreat < 1 then
-            -- 无 AI 威胁：按控制度决定
-            if control >= 60 then target = 5
-            elseif control >= 30 then target = 4
-            else target = 3 end
-        else
-            local ratio = playerPower / aiThreat
-            if ratio >= 3.0 then target = 5
-            elseif ratio >= 1.8 then target = 4
-            elseif ratio >= 1.0 then target = 3
-            elseif ratio >= 0.5 then target = 2
-            else target = 1 end
-            -- 高控制度额外 +1，低控制度额外 -1
-            if control >= 80 then target = target + 1
-            elseif control < 20 then target = target - 1 end
-        end
-
-        r.security = math.max(1, math.min(5, target))
+        r.security = CalcRegionSecurityWithPower(state, r, playerPower)
     end
 end
 

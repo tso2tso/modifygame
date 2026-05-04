@@ -372,8 +372,9 @@ function WorldPage._CreateNodeDrawer(state, region, tile)
         end
     end
     local controllerText = tile and (CONTROLLER_LABELS[tile.controller] or _countryLabels[tile.controller] or CONTROLLER_LABELS.contested) or nil
-    local secColor = region.security <= 2 and C.accent_red
-        or (region.security >= 4 and C.accent_green or C.accent_amber)
+    local security = GameState.CalcRegionSecurity(state, region)
+    local secColor = security <= 2 and C.accent_red
+        or (security >= 4 and C.accent_green or C.accent_amber)
     local ctrlColor = region.control >= 60 and C.accent_green
         or (region.control >= 30 and C.accent_amber or C.accent_red)
 
@@ -771,7 +772,7 @@ function WorldPage._CreateNodeDrawer(state, region, tile)
                 gap = 5,
                 children = {
                     WorldPage._InfoRow("治安",
-                        RegionsData.GetSecurityText(region.security), secColor),
+                        RegionsData.GetSecurityText(security), secColor),
                     WorldPage._InfoRow("劳动力",
                         Config.FormatNumber(region.population) .. " 人", C.text_primary),
                     WorldPage._InfoRow("基建等级",
