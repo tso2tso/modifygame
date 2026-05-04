@@ -210,7 +210,7 @@ function HandleNewGame(newState)
     AudioManager.UpdateBGM(state_)
 
     -- 展示加载界面（挂载到当前 UI 根节点上层）
-    Loading.Show(UIManager.GetRoot(), nil, { minDuration = 1.6 })
+    Loading.Show(UIManager.GetRoot(), nil, { minDuration = 0.8 })
 
     -- 延迟 3 帧执行 UI 刷新，让加载界面先渲染几帧动画
     pendingAction_ = { frames = 3, fn = _PerformUIRebuild }
@@ -219,7 +219,7 @@ end
 --- 请求开始新游戏：先显示 Loading，再在后续帧创建新状态，避免点击后长时间无反馈
 function HandleNewGameRequested()
     pendingReport_ = nil
-    Loading.Show(UIManager.GetRoot(), nil, { minDuration = 1.6 })
+    Loading.Show(UIManager.GetRoot(), nil, { minDuration = 0.8 })
     pendingAction_ = { frames = 3, fn = function()
         local newState = GameState.CreateNew()
         newState.ap.max = GameState.CalcMaxAP(newState)
@@ -237,17 +237,11 @@ end
 
 --- 难度切换回调（从菜单页设置 Drawer 触发）
 function HandleDifficultyChanged()
-    Loading.Show(UIManager.GetRoot(), nil, {
-        minDuration = 0.5,
-        preloadPortraits = false,
-        showPortraits = false,
-    })
-    pendingAction_ = { frames = 3, fn = function()
-        -- 难度只改了 state_.difficulty，增量刷新即可
-        UIManager.RefreshAll(state_)
-        UIManager.BackToDashboard()
-        UIManager.FlushPendingRefresh()
-        Loading.MarkDone()
+    pendingAction_ = { frames = 1, fn = function()
+        -- 难度只影响后续事件概率，不需要重建主界面。
+        UIManager.RefreshLight(state_)
+        UIManager.CloseSettingsDrawer()
+        UI.Toast.Show("难度已切换", { variant = "success", duration = 1.0 })
     end }
 end
 
@@ -260,12 +254,6 @@ function _PerformUIRebuild()
     UIManager.BackToDashboard()
     UIManager.FlushPendingRefresh()
 
-    -- Loading 面板仍在原 root 上，无需 TransferTo
-    -- 标记工作完成，Loading 关闭后启动 Tutorial 或检查事件
-    Loading.MarkDone(function()
-        _OnLoadingClosed()
-    end)
-
     -- 结局/胜利检查不依赖 Loading 关闭
     if GameState.IsGameOver(state_) then
         Loading.Close()
@@ -273,6 +261,19 @@ function _PerformUIRebuild()
     elseif state_.victory and state_.victory.prompt_pending then
         Loading.Close()
         UIManager.ShowVictoryPrompt(state_)
+    else
+        if state_.turn_count == 0 and not state_.tutorial_done then
+            -- 图片预加载提前到 Loading 覆盖期间；关闭后只创建引导面板。
+            Tutorial.PreloadImages()
+            Loading.MarkDone(function()
+                _OnLoadingClosed()
+            end)
+        else
+            -- 开局事件提前在 Loading 覆盖期间处理，避免关闭后主界面短暂不可点。
+            _OnLoadingClosed()
+            UIManager.FlushPendingRefresh()
+            Loading.MarkDone()
+        end
     end
 end
 

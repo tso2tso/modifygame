@@ -539,6 +539,14 @@ function UIManager._OpenSettings()
     settingsDrawer_:Open()
 end
 
+function UIManager.CloseSettingsDrawer()
+    if settingsDrawer_ then
+        local old = settingsDrawer_
+        settingsDrawer_ = nil
+        old:Destroy()
+    end
+end
+
 -- ============================================================================
 -- 刷新
 -- ============================================================================
@@ -556,13 +564,7 @@ function UIManager.RefreshAll(state)
     refreshPending_ = true
 
     -- 销毁设置 Drawer（避免孤立 widget 泄露）
-    if settingsDrawer_ then
-        local old = settingsDrawer_
-        settingsDrawer_ = nil
-        old:Destroy()
-    else
-        settingsDrawer_ = nil
-    end
+    UIManager.CloseSettingsDrawer()
 end
 
 --- 轻量刷新：仅更新 TopBar + 仪表盘关键控件属性，不触发页面重建

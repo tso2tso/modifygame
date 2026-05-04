@@ -130,6 +130,8 @@ local fade_ = nil
 local currentStep_ = 0
 ---@type function|nil
 local onComplete_ = nil
+---@type boolean
+local imagesPreloaded_ = false
 
 -- ============================================================================
 -- 入口
@@ -149,14 +151,20 @@ function Tutorial.Start(onComplete)
     fade_ = nil
     fadingPanel_ = nil
 
-    -- 预加载故事图片，避免切换时闪烁
+    Tutorial.PreloadImages()
+
+    Tutorial._ShowNext()
+end
+
+--- 预加载故事图片，避免引导启动时阻塞主界面
+function Tutorial.PreloadImages()
+    if imagesPreloaded_ then return end
+    imagesPreloaded_ = true
     for _, step in ipairs(STEPS) do
         if step.image then
             cache:GetResource("Texture2D", step.image)
         end
     end
-
-    Tutorial._ShowNext()
 end
 
 --- 每帧更新，用于故事页之间的淡入淡出
