@@ -140,7 +140,7 @@ function TopBar._CreateInfoRow(state, era)
                         flexShrink = 1,
                         children = {
                             TopBar._ResourceCell("cashCell", "💰",
-                                Config.FormatNumber(state.cash), era.accent, "现金"),
+                                Config.FormatCompact(state.cash), era.accent, "现金"),
                             UI.Panel {
                                 id = "luckyAdBtn",
                                 width = 24, height = 24,
@@ -177,7 +177,7 @@ function TopBar._CreateInfoRow(state, era)
                         local netWorth = totalAssets - totalDebt
                         local nwColor = netWorth < 0 and C.accent_red or C.accent_green
                         return TopBar._ResourceCell("netWorthCell", "🏦",
-                            Config.FormatNumber(netWorth), nwColor, "净资产", true)
+                            Config.FormatCompact(netWorth), nwColor, "净资产", true)
                     end)(),
                 },
             },
@@ -544,7 +544,7 @@ function TopBar.Refresh(root, state)
 
     local cashVal = root:FindById("cashCell_val")
     if cashVal then
-        cashVal:SetText(Config.FormatNumber(state.cash))
+        cashVal:SetText(Config.FormatCompact(state.cash))
         if cashVal.SetFontColor then cashVal:SetFontColor(era.accent) end
     end
 
@@ -568,7 +568,7 @@ function TopBar.Refresh(root, state)
     local netWorth = totalAssets - totalDebt
     local nwVal = root:FindById("netWorthCell_val")
     if nwVal then
-        nwVal:SetText(Config.FormatNumber(netWorth))
+        nwVal:SetText(Config.FormatCompact(netWorth))
         if nwVal.SetFontColor then
             nwVal:SetFontColor(netWorth < 0 and C.accent_red or C.accent_green)
         end

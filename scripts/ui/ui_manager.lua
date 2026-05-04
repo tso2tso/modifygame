@@ -44,6 +44,8 @@ local onNewGame_ = nil
 local onProcessEvent_ = nil
 ---@type table|nil 设置 Drawer 实例
 local settingsDrawer_ = nil
+---@type function|nil 难度切换回调
+local onDifficultyChanged_ = nil
 ---@type boolean 是否有延迟刷新等待执行
 local refreshPending_ = false
 
@@ -79,6 +81,7 @@ function UIManager.Create(state, callbacks)
     onEndTurn_ = callbacks and callbacks.onEndTurn
     onNewGame_ = callbacks and callbacks.onNewGame
     onProcessEvent_ = callbacks and callbacks.onProcessEvent
+    onDifficultyChanged_ = callbacks and callbacks.onDifficultyChanged
 
     -- 重置
     pages_ = {}
@@ -449,29 +452,71 @@ function UIManager._OpenSettings()
             UIManager.RefreshAll(stateRef_)
         end,
         onNewGame = onNewGame_,
+        onDifficultyChanged = onDifficultyChanged_,
     }
 
     local menuContent = MenuPage.Create(stateRef_, menuCallbacks)
 
     settingsDrawer_ = UI.Modal {
-        title = "⚙️ 设置与存档",
+        -- 不使用内置标题/关闭按钮，改用自定义标题行（X左 标题右）
         size = "fullscreen",
         closeOnOverlay = true,
         closeOnEscape = true,
-        showCloseButton = true,
+        showCloseButton = false,
         onClose = function(self)
             settingsDrawer_ = nil
             self:Destroy()
         end,
     }
 
-    settingsDrawer_:AddContent(UI.ScrollView {
+    -- 自定义标题行：关闭按钮在左，标题在右
+    local customHeader = UI.Panel {
+        width = "100%",
+        height = 56,
+        flexDirection = "row",
+        alignItems = "center",
+        paddingLeft = 12,
+        paddingRight = 20,
+        children = {
+            -- 左侧关闭按钮
+            UI.Button {
+                text = "✕",
+                variant = "text",
+                width = 36,
+                height = 36,
+                fontSize = 18,
+                onClick = function()
+                    if settingsDrawer_ then
+                        settingsDrawer_:Close()
+                    end
+                end,
+            },
+            -- 右侧标题（flexGrow 占满剩余空间，右对齐）
+            UI.Label {
+                text = "⚙️ 设置与存档",
+                fontSize = 17,
+                fontWeight = "bold",
+                flexGrow = 1,
+                textAlign = "right",
+            },
+        },
+    }
+
+    settingsDrawer_:AddContent(UI.Panel {
         width = "100%",
         flexGrow = 1,
         flexShrink = 1,
-        bounces = false,
         children = {
-            menuContent,
+            customHeader,
+            UI.ScrollView {
+                width = "100%",
+                flexGrow = 1,
+                flexShrink = 1,
+                bounces = false,
+                children = {
+                    menuContent,
+                },
+            },
         },
     })
 

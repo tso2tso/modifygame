@@ -14,6 +14,7 @@ local EventModal = require("ui.ui_event_modal")
 local Balance = require("data.balance")
 local AudioManager = require("systems.audio_manager")
 local Tutorial = require("ui.ui_tutorial")
+local Loading = require("ui.ui_loading")
 
 -- ============================================================================
 -- 全局变量
@@ -121,6 +122,7 @@ function Start()
         onEndTurn = HandleEndTurn,
         onNewGame = HandleNewGame,
         onProcessEvent = HandleProcessEvent,
+        onDifficultyChanged = HandleDifficultyChanged,
     })
     -- EventModal / Tutorial 也需要 UI 根节点来显示弹窗
     EventModal.SetRoot(UIManager.GetRoot())
@@ -191,6 +193,10 @@ end
 -- 新游戏/读档处理
 -- ============================================================================
 
+--- 延迟动作：Loading 显示后等待几帧再执行实际工作
+---@type table|nil { frames: number, fn: function }
+local pendingAction_ = nil
+
 --- 新游戏或读档回调（从菜单页触发）
 ---@param newState table 新的游戏状态
 function HandleNewGame(newState)
@@ -202,22 +208,54 @@ function HandleNewGame(newState)
     -- 重置 BGM
     AudioManager.UpdateBGM(state_)
 
-    -- 重建 UI
-    UIManager.Create(state_, {
-        onEndTurn = HandleEndTurn,
-        onNewGame = HandleNewGame,
-        onProcessEvent = HandleProcessEvent,
-    })
-    EventModal.SetRoot(UIManager.GetRoot())
-    Tutorial.SetRoot(UIManager.GetRoot())
+    -- 展示加载界面（挂载到当前 UI 根节点上层）
+    Loading.Show(UIManager.GetRoot())
+
+    -- 延迟 3 帧执行 UI 刷新，让加载界面先渲染几帧动画
+    pendingAction_ = { frames = 3, fn = _PerformUIRebuild }
+end
+
+--- 难度切换回调（从菜单页设置 Drawer 触发）
+function HandleDifficultyChanged()
+    Loading.Show(UIManager.GetRoot())
+    pendingAction_ = { frames = 3, fn = function()
+        -- 难度只改了 state_.difficulty，增量刷新即可
+        UIManager.RefreshAll(state_)
+        UIManager.BackToDashboard()
+        UIManager.FlushPendingRefresh()
+        Loading.MarkDone()
+    end }
+end
+
+--- 实际执行 UI 刷新（在加载界面展示后调用）
+--- 使用增量 RefreshAll 而非全量 Create，避免重建整棵 UI 树导致长时间阻塞
+function _PerformUIRebuild()
+    -- 增量刷新：更新 stateRef、刷新 TopBar、标记所有页面脏
+    -- 不调用 UIManager.Create()，uiRoot_ 不变，Loading 面板仍在原位
+    UIManager.RefreshAll(state_)
     UIManager.BackToDashboard()
+    UIManager.FlushPendingRefresh()
+
+    -- Loading 面板仍在原 root 上，无需 TransferTo
+    -- 标记工作完成，Loading 关闭后启动 Tutorial 或检查事件
+    Loading.MarkDone(function()
+        _OnLoadingClosed()
+    end)
+
+    -- 结局/胜利检查不依赖 Loading 关闭
     if GameState.IsGameOver(state_) then
+        Loading.Close()
         UIManager.ShowEnding(state_)
     elseif state_.victory and state_.victory.prompt_pending then
+        Loading.Close()
         UIManager.ShowVictoryPrompt(state_)
     end
+end
 
-    -- 新游戏：先展示引导，引导结束后再检查开局事件
+--- Loading 关闭后的回调：启动 Tutorial 或检查开局事件
+function _OnLoadingClosed()
+    if not state_ then return end
+    -- 新游戏：展示新手引导
     if state_.turn_count == 0 and not state_.tutorial_done then
         Tutorial.Start(function()
             state_.tutorial_done = true
@@ -672,6 +710,17 @@ function HandleUpdate(eventType, eventData)
     local dt = 0
     if eventData and eventData["TimeStep"] then
         dt = eventData["TimeStep"]:GetFloat()
+    end
+    -- 加载界面动画更新（立绘轮播 + 进度条）
+    Loading.Update(dt)
+    -- 延迟动作：等待加载界面渲染几帧后再执行实际工作
+    if pendingAction_ then
+        pendingAction_.frames = pendingAction_.frames - 1
+        if pendingAction_.frames <= 0 then
+            local fn = pendingAction_.fn
+            pendingAction_ = nil
+            fn()
+        end
     end
     -- 延迟页面刷新：在 onClick 回调栈外执行 ClearChildren+rebuild，防止按钮闪烁
     UIManager.FlushPendingRefresh()

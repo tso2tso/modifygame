@@ -267,6 +267,51 @@ function Config.FormatNumber(n)
     return result
 end
 
+--- 紧凑数字格式化（顶栏等空间有限的位置使用）
+--- 1000 以下原样显示，1000~99999 → "1.2万"，10万+ → "12万"，1亿+ → "1.3亿"
+---@param n number
+---@return string
+function Config.FormatCompact(n)
+    if n == nil then return "0" end
+    local abs = math.abs(n)
+    local sign = n < 0 and "-" or ""
+    if abs < 10000 then
+        return sign .. Config.FormatNumber(abs)
+    elseif abs < 100000000 then
+        -- 万
+        local wan = abs / 10000
+        if wan >= 1000 then
+            return sign .. string.format("%d万", math.floor(wan))
+        elseif wan >= 100 then
+            return sign .. string.format("%d万", math.floor(wan))
+        elseif wan >= 10 then
+            local rounded = math.floor(wan * 10) / 10
+            if rounded == math.floor(rounded) then
+                return sign .. string.format("%d万", math.floor(rounded))
+            end
+            return sign .. string.format("%.1f万", rounded)
+        else
+            local rounded = math.floor(wan * 10) / 10
+            if rounded == math.floor(rounded) then
+                return sign .. string.format("%d万", math.floor(rounded))
+            end
+            return sign .. string.format("%.1f万", rounded)
+        end
+    else
+        -- 亿
+        local yi = abs / 100000000
+        if yi >= 10 then
+            return sign .. string.format("%d亿", math.floor(yi))
+        else
+            local rounded = math.floor(yi * 10) / 10
+            if rounded == math.floor(rounded) then
+                return sign .. string.format("%d亿", math.floor(rounded))
+            end
+            return sign .. string.format("%.1f亿", rounded)
+        end
+    end
+end
+
 --- 季度对应月日文本（设计图顶栏显示 XmonthYday 格式）
 Config.QUARTER_DATES = {
     "4月15日",   -- Q1 春
@@ -274,6 +319,35 @@ Config.QUARTER_DATES = {
     "10月15日",  -- Q3 秋
     "1月15日",   -- Q4 冬
 }
+
+-- ============================================================================
+-- 难度设置
+-- ============================================================================
+Config.DIFFICULTY = {
+    easy = {
+        label = "简单",
+        desc  = "事件触发频率降低，适合休闲体验",
+        event_chance_mult    = 0.5,  -- 随机事件概率 ×0.5
+        drought_threshold_2  = 4,    -- 连续4季无事件才 ×1.5
+        drought_threshold_3  = 5,    -- 连续5季无事件才 ×2.0
+    },
+    hard = {
+        label = "困难",
+        desc  = "当前默认难度，事件频繁考验决策",
+        event_chance_mult    = 1.0,  -- 概率不变
+        drought_threshold_2  = 2,    -- 连续2季 ×1.5
+        drought_threshold_3  = 3,    -- 连续3季 ×2.0
+    },
+}
+Config.DIFFICULTY_ORDER = { "easy", "hard" }
+Config.DEFAULT_DIFFICULTY = "easy"
+
+--- 获取难度配置
+---@param diffId string|nil
+---@return table
+function Config.GetDifficulty(diffId)
+    return Config.DIFFICULTY[diffId or Config.DEFAULT_DIFFICULTY] or Config.DIFFICULTY[Config.DEFAULT_DIFFICULTY]
+end
 
 -- ============================================================================
 -- 游戏平衡数值

@@ -48,13 +48,16 @@ function Events.CheckEvents(state)
 
     -- 2. 检查随机事件（不再要求"没有固定事件"才检查）
     local templates = EventsData.GetRandomEventTemplates()
-    -- 保底机制：连续无事件时概率提升
+    -- 难度系数
+    local diff = Config.GetDifficulty(state.difficulty)
+
+    -- 保底机制：连续无事件时概率提升（阈值受难度影响）
     local drought = state.event_drought_counter or 0
     local chanceMultiplier = 1.0
-    if drought >= 3 then
-        chanceMultiplier = 2.0   -- 连续3季无事件，概率翻倍
-    elseif drought >= 2 then
-        chanceMultiplier = 1.5   -- 连续2季无事件，概率×1.5
+    if drought >= diff.drought_threshold_3 then
+        chanceMultiplier = 2.0
+    elseif drought >= diff.drought_threshold_2 then
+        chanceMultiplier = 1.5
     end
 
     -- 打乱模板顺序以增加随机性
@@ -73,8 +76,8 @@ function Events.CheckEvents(state)
             -- 冷却检查
             local cd = state.random_cooldowns[event.id] or 0
             if cd <= 0 then
-                -- 概率检查（带保底乘数）
-                local effectiveChance = (event.chance or 0.1) * chanceMultiplier
+                -- 概率检查（带保底乘数 + 难度系数）
+                local effectiveChance = (event.chance or 0.1) * chanceMultiplier * diff.event_chance_mult
                 -- 事件自带的概率修正（基于游戏状态中的 modifier）
                 if event.chance_modifier then
                     local modVal = GameState.GetModifierValue(state, event.chance_modifier)

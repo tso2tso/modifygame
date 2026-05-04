@@ -23,6 +23,8 @@ local stateRef_ = nil
 local onStateChanged_ = nil
 ---@type function|nil
 local onNewGame_ = nil
+---@type function|nil
+local onDifficultyChanged_ = nil
 ---@type table|nil 存档操作卡片引用（用于局部刷新）
 local saveCardRef_ = nil
 
@@ -34,6 +36,7 @@ function MenuPage.Create(state, callbacks)
     stateRef_ = state
     onStateChanged_ = callbacks and callbacks.onStateChanged
     onNewGame_ = callbacks and callbacks.onNewGame
+    onDifficultyChanged_ = callbacks and callbacks.onDifficultyChanged
     saveCardRef_ = nil
     return MenuPage._BuildContent(state)
 end
@@ -54,6 +57,9 @@ function MenuPage._BuildContent(state)
 
             -- 音量设置卡片
             MenuPage._CreateAudioCard(),
+
+            -- 难度设置卡片
+            MenuPage._CreateDifficultyCard(state),
 
             -- 存档操作卡片（含双槽位读档）
             saveCardRef_,
@@ -179,6 +185,77 @@ function MenuPage._CreateAudioCard()
             volumeRow("音乐", "music"),
             volumeRow("音效", "effect"),
             volumeRow("界面", "ui"),
+        },
+    }
+end
+
+--- 难度设置卡片
+function MenuPage._CreateDifficultyCard(state)
+    local currentDiff = state.difficulty or Config.DEFAULT_DIFFICULTY
+
+    local function makeDiffBtn(diffId)
+        local d = Config.DIFFICULTY[diffId]
+        local isActive = (diffId == currentDiff)
+        return UI.Button {
+            text = d.label,
+            fontSize = F.body,
+            height = 34,
+            flexGrow = 1,
+            variant = isActive and "primary" or "outlined",
+            backgroundColor = isActive and C.accent_gold or nil,
+            fontColor = isActive and C.bg_base or C.text_secondary,
+            borderColor = isActive and C.accent_gold or C.border_card,
+            borderRadius = S.radius_btn,
+            onClick = Config.ClickGuard(function(self)
+                if diffId == currentDiff then return end
+                stateRef_.difficulty = diffId
+                AudioManager.PlayUI("ui_click")
+                -- 优先使用带 Loading 的难度切换回调
+                if onDifficultyChanged_ then
+                    onDifficultyChanged_()
+                elseif onStateChanged_ then
+                    onStateChanged_()
+                end
+            end),
+        }
+    end
+
+    local diffInfo = Config.GetDifficulty(currentDiff)
+
+    return UI.Panel {
+        width = "100%",
+        padding = S.card_padding,
+        backgroundColor = C.paper_dark,
+        borderRadius = S.radius_card,
+        borderWidth = 1,
+        borderColor = C.border_card,
+        flexDirection = "column",
+        gap = 8,
+        children = {
+            UI.Label {
+                text = "⚔️ 难度设置",
+                fontSize = F.subtitle,
+                fontWeight = "bold",
+                fontColor = C.text_primary,
+            },
+            UI.Divider { color = C.divider },
+            UI.Panel {
+                width = "100%",
+                flexDirection = "row",
+                gap = 8,
+                children = (function()
+                    local btns = {}
+                    for _, diffId in ipairs(Config.DIFFICULTY_ORDER) do
+                        table.insert(btns, makeDiffBtn(diffId))
+                    end
+                    return btns
+                end)(),
+            },
+            UI.Label {
+                text = diffInfo.desc,
+                fontSize = F.label,
+                fontColor = C.text_muted,
+            },
         },
     }
 end

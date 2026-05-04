@@ -451,6 +451,7 @@ end
 function SaveLoad._DeserializeState(data)
     -- 纯数据表，直接返回（加上默认值保护）
     -- 基础字段
+    data.difficulty = data.difficulty or "hard"  -- 旧存档默认困难（保持原有体验）
     data.year = data.year or 1904
     data.quarter = data.quarter or 1
     data.cash = data.cash or 1000

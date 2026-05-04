@@ -31,6 +31,11 @@ local GameState = {}
 function GameState.CreateNew()
     local state = {
         -- ============================
+        -- 难度
+        -- ============================
+        difficulty = Config.DEFAULT_DIFFICULTY,
+
+        -- ============================
         -- 时间
         -- ============================
         year    = BT.start_year,
