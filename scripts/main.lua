@@ -237,12 +237,9 @@ end
 
 --- 难度切换回调（从菜单页设置 Drawer 触发）
 function HandleDifficultyChanged()
-    pendingAction_ = { frames = 1, fn = function()
-        -- 难度只影响后续事件概率，不需要重建主界面。
-        UIManager.RefreshLight(state_)
-        UIManager.CloseSettingsDrawer()
-        UI.Toast.Show("难度已切换", { variant = "success", duration = 1.0 })
-    end }
+    -- 难度只影响后续事件概率，不需要 Loading、关闭 Drawer 或重建主界面。
+    UIManager.RefreshLight(state_)
+    UI.Toast.Show("难度已切换", { variant = "success", duration = 1.0 })
 end
 
 --- 实际执行 UI 刷新（在加载界面展示后调用）

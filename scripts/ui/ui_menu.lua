@@ -29,6 +29,8 @@ local onNewGameRequested_ = nil
 local onDifficultyChanged_ = nil
 ---@type table|nil 存档操作卡片引用（用于局部刷新）
 local saveCardRef_ = nil
+---@type number 最近一次难度切换帧，用于阻止同一次点击链误触新游戏
+local lastDifficultyChangeFrame_ = -1000
 
 --- 创建菜单页完整内容
 ---@param state table
@@ -212,6 +214,7 @@ function MenuPage._CreateDifficultyCard(state)
             onClick = Config.ClickGuard(function(self)
                 if diffId == currentDiff then return end
                 stateRef_.difficulty = diffId
+                lastDifficultyChangeFrame_ = time.frameNumber or 0
                 AudioManager.PlayUI("ui_click")
                 -- 优先使用带 Loading 的难度切换回调
                 if onDifficultyChanged_ then
@@ -581,6 +584,11 @@ end
 
 --- 新游戏
 function MenuPage._OnNewGame()
+    local frame = time.frameNumber or 0
+    if frame - lastDifficultyChangeFrame_ < 12 then
+        return
+    end
+
     if onNewGameRequested_ then
         onNewGameRequested_()
     elseif onNewGame_ then
