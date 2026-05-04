@@ -73,6 +73,8 @@ local minShowDuration_ = DEFAULT_MIN_SHOW_DURATION
 local portraitsPreloaded_ = false
 ---@type boolean 当前 loading 是否展示立绘轮播
 local showPortraits_ = true
+---@type table|nil 当前 loading 挂载节点
+local parentRoot_ = nil
 
 -- UI Widget 引用（随面板重建而更新）
 ---@type table|nil
@@ -111,13 +113,30 @@ local function _CreatePanel()
     local pctStr = math.floor(progress * 100) .. "%"
 
     -- 立绘展示：用超高内面板 + cover 使图片从顶部铺满，展示上半身
-    if showPortraits_ then
+    if showPortraits_ and portraitsPreloaded_ then
         portraitWidget_ = UI.Panel {
             width = "100%",
             height = 1200,
             backgroundImage = p.path,
             backgroundFit = "cover",
             opacity = portraitOpacity,
+        }
+    elseif showPortraits_ then
+        portraitWidget_ = UI.Panel {
+            width = "100%",
+            height = "100%",
+            justifyContent = "center",
+            alignItems = "center",
+            backgroundColor = { 26, 23, 17, 255 },
+            children = {
+                UI.Label {
+                    text = "正在整理家族档案",
+                    fontSize = 18,
+                    fontWeight = "bold",
+                    fontColor = GOLD,
+                    textAlign = "center",
+                },
+            },
         }
     else
         portraitWidget_ = UI.Panel {
@@ -139,7 +158,7 @@ local function _CreatePanel()
     end
 
     nameLabel_ = UI.Label {
-        text = showPortraits_ and (p.name .. "  ·  " .. p.title) or "稍候片刻",
+        text = (showPortraits_ and portraitsPreloaded_) and (p.name .. "  ·  " .. p.title) or "稍候片刻",
         fontSize = 14,
         fontColor = TEXT_DIM,
         textAlign = "center",
@@ -250,9 +269,13 @@ end
 ---预加载立绘纹理。该操作可能同步阻塞，因此只做一次。
 function Loading.PreloadPortraits()
     if portraitsPreloaded_ then return end
-    portraitsPreloaded_ = true
     for _, p in ipairs(PORTRAITS) do
         cache:GetResource("Texture2D", p.path)
+    end
+    portraitsPreloaded_ = true
+
+    if showing_ and showPortraits_ and parentRoot_ then
+        Loading.TransferTo(parentRoot_)
     end
 end
 
@@ -279,7 +302,9 @@ function Loading.Show(parentRoot, onClosed, opts)
     onClosed_ = onClosed
     hintText_ = HINTS[math.random(1, #HINTS)]
 
-    if showPortraits_ and opts.preloadPortraits ~= false then
+    parentRoot_ = parentRoot
+
+    if showPortraits_ and opts.preloadPortraits == true then
         Loading.PreloadPortraits()
     end
 
@@ -336,6 +361,7 @@ function Loading.Close()
     portraitWidget_ = nil
     nameLabel_ = nil
     progressFill_ = nil
+    parentRoot_ = nil
 end
 
 --- 是否正在展示
@@ -365,7 +391,7 @@ function Loading.Update(dt)
     end
 
     -- ── 立绘轮播 ──
-    if showPortraits_ then
+    if showPortraits_ and portraitsPreloaded_ then
         slideElapsed_ = slideElapsed_ + dt
 
         if fadeState_ == "display" then

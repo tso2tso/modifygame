@@ -209,6 +209,9 @@ end
 local function QueueStateLoadSteps(initialFrames, createStateFn)
     QueueLoadingSteps({
         function()
+            Loading.PreloadPortraits()
+        end,
+        function()
             if createStateFn then
                 state_ = createStateFn()
                 print(string.format("[新游戏] %s，现金 %d，黄金 %d",
@@ -220,6 +223,11 @@ local function QueueStateLoadSteps(initialFrames, createStateFn)
         end,
         function()
             UIManager.ResetForStateSwitch(state_)
+        end,
+        function()
+            if state_.turn_count == 0 and not state_.tutorial_done then
+                Tutorial.PreloadImages()
+            end
         end,
         function()
             _FinishStateLoad()
@@ -274,8 +282,7 @@ function _FinishStateLoad()
         UIManager.ShowVictoryPrompt(state_)
     else
         if state_.turn_count == 0 and not state_.tutorial_done then
-            -- 图片预加载提前到 Loading 覆盖期间；关闭时先创建引导面板再移除 Loading。
-            Tutorial.PreloadImages()
+            -- 图片已在 Loading 覆盖期间预加载；关闭时先创建引导面板再移除 Loading。
             Loading.MarkDone(function()
                 _OnLoadingClosed()
             end)
