@@ -261,7 +261,11 @@ local function QueueStateLoadSteps(initialFrames, createStateFn)
         -- 9) 标记完成，Loading 自动关闭后露出已经构建好的引导/主界面
         function()
             if Loading.IsShowing() then
-                Loading.MarkDone()
+                Loading.MarkDone(function()
+                    -- Loading 关闭后强制刷新 dashboard 可见性，
+                    -- 修复 ScrollView 在被 Loading 覆盖期间重建后触摸区域未生效的问题
+                    UIManager.BackToDashboard()
+                end)
             end
         end,
     }, initialFrames)
