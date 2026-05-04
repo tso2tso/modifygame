@@ -121,6 +121,7 @@ function Start()
     UIManager.Create(state_, {
         onEndTurn = HandleEndTurn,
         onNewGame = HandleNewGame,
+        onNewGameRequested = HandleNewGameRequested,
         onProcessEvent = HandleProcessEvent,
         onDifficultyChanged = HandleDifficultyChanged,
     })
@@ -209,15 +210,38 @@ function HandleNewGame(newState)
     AudioManager.UpdateBGM(state_)
 
     -- 展示加载界面（挂载到当前 UI 根节点上层）
-    Loading.Show(UIManager.GetRoot())
+    Loading.Show(UIManager.GetRoot(), nil, { minDuration = 0.8 })
 
     -- 延迟 3 帧执行 UI 刷新，让加载界面先渲染几帧动画
     pendingAction_ = { frames = 3, fn = _PerformUIRebuild }
 end
 
+--- 请求开始新游戏：先显示 Loading，再在后续帧创建新状态，避免点击后长时间无反馈
+function HandleNewGameRequested()
+    pendingReport_ = nil
+    Loading.Show(UIManager.GetRoot(), nil, { minDuration = 0.8 })
+    pendingAction_ = { frames = 3, fn = function()
+        local newState = GameState.CreateNew()
+        newState.ap.max = GameState.CalcMaxAP(newState)
+        newState.ap.current = newState.ap.max
+        GameState.AddLog(newState, "科瓦奇家族在巴科维奇矿区开始了创业之路。")
+        UI.Toast.Show("新的百年传奇开始了！", { variant = "info", duration = 2 })
+
+        state_ = newState
+        print(string.format("[新游戏] %s，现金 %d，黄金 %d",
+            GameState.GetTurnText(state_), state_.cash, state_.gold))
+        AudioManager.UpdateBGM(state_)
+        _PerformUIRebuild()
+    end }
+end
+
 --- 难度切换回调（从菜单页设置 Drawer 触发）
 function HandleDifficultyChanged()
-    Loading.Show(UIManager.GetRoot())
+    Loading.Show(UIManager.GetRoot(), nil, {
+        minDuration = 0.25,
+        preloadPortraits = false,
+        showPortraits = false,
+    })
     pendingAction_ = { frames = 3, fn = function()
         -- 难度只改了 state_.difficulty，增量刷新即可
         UIManager.RefreshAll(state_)

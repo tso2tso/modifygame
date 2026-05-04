@@ -34,7 +34,7 @@ local PORTRAITS = {
 
 local CROSSFADE_DURATION = 0.6
 local DISPLAY_DURATION   = 1.8
-local MIN_SHOW_DURATION  = 2.0   -- 最短展示时间（秒）
+local DEFAULT_MIN_SHOW_DURATION = 0.8   -- 默认最短展示时间（秒）
 
 -- 提示语池
 local HINTS = {
@@ -67,6 +67,12 @@ local fadeElapsed_ = 0
 local hintText_ = ""
 ---@type function|nil 关闭后的回调
 local onClosed_ = nil
+---@type number 当前加载页最短展示时间
+local minShowDuration_ = DEFAULT_MIN_SHOW_DURATION
+---@type boolean 立绘资源是否已经预加载过
+local portraitsPreloaded_ = false
+---@type boolean 当前 loading 是否展示立绘轮播
+local showPortraits_ = true
 
 -- UI Widget 引用（随面板重建而更新）
 ---@type table|nil
@@ -98,23 +104,42 @@ local function _CreatePanel()
     -- 进度条百分比
     local progress = 0
     if workDone_ then
-        progress = math.min(1, elapsed_ / MIN_SHOW_DURATION)
+        progress = math.min(1, elapsed_ / minShowDuration_)
     else
-        progress = math.min(0.85, elapsed_ / (MIN_SHOW_DURATION * 1.2))
+        progress = math.min(0.85, elapsed_ / (minShowDuration_ * 1.2))
     end
     local pctStr = math.floor(progress * 100) .. "%"
 
     -- 立绘展示：用超高内面板 + cover 使图片从顶部铺满，展示上半身
-    portraitWidget_ = UI.Panel {
-        width = "100%",
-        height = 1200,
-        backgroundImage = p.path,
-        backgroundFit = "cover",
-        opacity = portraitOpacity,
-    }
+    if showPortraits_ then
+        portraitWidget_ = UI.Panel {
+            width = "100%",
+            height = 1200,
+            backgroundImage = p.path,
+            backgroundFit = "cover",
+            opacity = portraitOpacity,
+        }
+    else
+        portraitWidget_ = UI.Panel {
+            width = "100%",
+            height = "100%",
+            justifyContent = "center",
+            alignItems = "center",
+            backgroundColor = { 26, 23, 17, 255 },
+            children = {
+                UI.Label {
+                    text = "正在应用设置",
+                    fontSize = 18,
+                    fontWeight = "bold",
+                    fontColor = GOLD,
+                    textAlign = "center",
+                },
+            },
+        }
+    end
 
     nameLabel_ = UI.Label {
-        text = p.name .. "  ·  " .. p.title,
+        text = showPortraits_ and (p.name .. "  ·  " .. p.title) or "稍候片刻",
         fontSize = 14,
         fontColor = TEXT_DIM,
         textAlign = "center",
@@ -222,14 +247,31 @@ end
 -- 公开接口
 -- ============================================================================
 
+---预加载立绘纹理。该操作可能同步阻塞，因此只做一次。
+function Loading.PreloadPortraits()
+    if portraitsPreloaded_ then return end
+    portraitsPreloaded_ = true
+    for _, p in ipairs(PORTRAITS) do
+        cache:GetResource("Texture2D", p.path)
+    end
+end
+
 --- 展示加载界面并挂载到指定的 UI 根节点
 ---@param parentRoot table 当前 UI 根节点
 ---@param onClosed function|nil 加载界面关闭后的回调（可选）
-function Loading.Show(parentRoot, onClosed)
+---@param opts table|nil { minDuration: number, preloadPortraits: boolean, showPortraits: boolean }
+function Loading.Show(parentRoot, onClosed, opts)
     if showing_ then return end
+    if type(onClosed) == "table" then
+        opts = onClosed
+        onClosed = nil
+    end
+    opts = opts or {}
     showing_ = true
     workDone_ = false
     elapsed_ = 0
+    minShowDuration_ = opts.minDuration or DEFAULT_MIN_SHOW_DURATION
+    showPortraits_ = opts.showPortraits ~= false
     currentIndex_ = 1
     slideElapsed_ = 0
     fadeState_ = "display"
@@ -237,9 +279,8 @@ function Loading.Show(parentRoot, onClosed)
     onClosed_ = onClosed
     hintText_ = HINTS[math.random(1, #HINTS)]
 
-    -- 预加载立绘纹理
-    for _, p in ipairs(PORTRAITS) do
-        cache:GetResource("Texture2D", p.path)
+    if showPortraits_ and opts.preloadPortraits ~= false then
+        Loading.PreloadPortraits()
     end
 
     -- 创建面板并挂载
@@ -313,59 +354,61 @@ function Loading.Update(dt)
     local progress
     if workDone_ then
         -- 工作完成后快速填满
-        local fillTime = math.max(0, elapsed_ - (MIN_SHOW_DURATION - 0.4))
+        local fillTime = math.max(0, elapsed_ - (minShowDuration_ - 0.4))
         progress = 0.85 + 0.15 * math.min(1, fillTime / 0.4)
     else
-        progress = math.min(0.85, elapsed_ / (MIN_SHOW_DURATION * 1.2))
+        progress = math.min(0.85, elapsed_ / (minShowDuration_ * 1.2))
     end
     if progressFill_ and progressFill_.SetStyle then
         progressFill_:SetStyle({ width = math.floor(progress * 100) .. "%" })
     end
 
     -- ── 立绘轮播 ──
-    slideElapsed_ = slideElapsed_ + dt
+    if showPortraits_ then
+        slideElapsed_ = slideElapsed_ + dt
 
-    if fadeState_ == "display" then
-        if slideElapsed_ >= DISPLAY_DURATION then
-            fadeState_ = "fadeout"
-            fadeElapsed_ = 0
-        end
-    elseif fadeState_ == "fadeout" then
-        fadeElapsed_ = fadeElapsed_ + dt
-        local t = math.min(fadeElapsed_ / CROSSFADE_DURATION, 1)
-        if portraitWidget_ and portraitWidget_.SetStyle then
-            portraitWidget_:SetStyle({ opacity = 1 - t })
-        end
-        if t >= 1 then
-            -- 切换到下一张
-            currentIndex_ = (currentIndex_ % #PORTRAITS) + 1
-            local p = PORTRAITS[currentIndex_]
+        if fadeState_ == "display" then
+            if slideElapsed_ >= DISPLAY_DURATION then
+                fadeState_ = "fadeout"
+                fadeElapsed_ = 0
+            end
+        elseif fadeState_ == "fadeout" then
+            fadeElapsed_ = fadeElapsed_ + dt
+            local t = math.min(fadeElapsed_ / CROSSFADE_DURATION, 1)
             if portraitWidget_ and portraitWidget_.SetStyle then
-                portraitWidget_:SetStyle({
-                    backgroundImage = p.path,
-                    opacity = 0,
-                })
+                portraitWidget_:SetStyle({ opacity = 1 - t })
             end
-            if nameLabel_ then
-                nameLabel_:SetText(p.name .. "  ·  " .. p.title)
+            if t >= 1 then
+                -- 切换到下一张
+                currentIndex_ = (currentIndex_ % #PORTRAITS) + 1
+                local p = PORTRAITS[currentIndex_]
+                if portraitWidget_ and portraitWidget_.SetStyle then
+                    portraitWidget_:SetStyle({
+                        backgroundImage = p.path,
+                        opacity = 0,
+                    })
+                end
+                if nameLabel_ then
+                    nameLabel_:SetText(p.name .. "  ·  " .. p.title)
+                end
+                fadeState_ = "fadein"
+                fadeElapsed_ = 0
             end
-            fadeState_ = "fadein"
-            fadeElapsed_ = 0
-        end
-    elseif fadeState_ == "fadein" then
-        fadeElapsed_ = fadeElapsed_ + dt
-        local t = math.min(fadeElapsed_ / CROSSFADE_DURATION, 1)
-        if portraitWidget_ and portraitWidget_.SetStyle then
-            portraitWidget_:SetStyle({ opacity = t })
-        end
-        if t >= 1 then
-            fadeState_ = "display"
-            slideElapsed_ = 0
+        elseif fadeState_ == "fadein" then
+            fadeElapsed_ = fadeElapsed_ + dt
+            local t = math.min(fadeElapsed_ / CROSSFADE_DURATION, 1)
+            if portraitWidget_ and portraitWidget_.SetStyle then
+                portraitWidget_:SetStyle({ opacity = t })
+            end
+            if t >= 1 then
+                fadeState_ = "display"
+                slideElapsed_ = 0
+            end
         end
     end
 
     -- ── 自动关闭检测 ──
-    if workDone_ and elapsed_ >= MIN_SHOW_DURATION then
+    if workDone_ and elapsed_ >= minShowDuration_ then
         Loading.Close()
     end
 end

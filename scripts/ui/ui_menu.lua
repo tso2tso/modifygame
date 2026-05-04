@@ -24,6 +24,8 @@ local onStateChanged_ = nil
 ---@type function|nil
 local onNewGame_ = nil
 ---@type function|nil
+local onNewGameRequested_ = nil
+---@type function|nil
 local onDifficultyChanged_ = nil
 ---@type table|nil 存档操作卡片引用（用于局部刷新）
 local saveCardRef_ = nil
@@ -36,6 +38,7 @@ function MenuPage.Create(state, callbacks)
     stateRef_ = state
     onStateChanged_ = callbacks and callbacks.onStateChanged
     onNewGame_ = callbacks and callbacks.onNewGame
+    onNewGameRequested_ = callbacks and callbacks.onNewGameRequested
     onDifficultyChanged_ = callbacks and callbacks.onDifficultyChanged
     saveCardRef_ = nil
     return MenuPage._BuildContent(state)
@@ -578,12 +581,14 @@ end
 
 --- 新游戏
 function MenuPage._OnNewGame()
-    local newState = GameState.CreateNew()
-    newState.ap.max = GameState.CalcMaxAP(newState)
-    newState.ap.current = newState.ap.max
-    GameState.AddLog(newState, "科瓦奇家族在巴科维奇矿区开始了创业之路。")
-    UI.Toast.Show("新的百年传奇开始了！", { variant = "info", duration = 2 })
-    if onNewGame_ then
+    if onNewGameRequested_ then
+        onNewGameRequested_()
+    elseif onNewGame_ then
+        local newState = GameState.CreateNew()
+        newState.ap.max = GameState.CalcMaxAP(newState)
+        newState.ap.current = newState.ap.max
+        GameState.AddLog(newState, "科瓦奇家族在巴科维奇矿区开始了创业之路。")
+        UI.Toast.Show("新的百年传奇开始了！", { variant = "info", duration = 2 })
         onNewGame_(newState)
     end
 end

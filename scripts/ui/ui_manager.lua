@@ -40,6 +40,8 @@ local stateRef_ = nil
 local onEndTurn_ = nil
 ---@type function|nil 新游戏/读档回调
 local onNewGame_ = nil
+---@type function|nil 新游戏请求回调（先展示 Loading，再创建状态）
+local onNewGameRequested_ = nil
 ---@type function|nil 事件处理回调
 local onProcessEvent_ = nil
 ---@type table|nil 设置 Drawer 实例
@@ -80,6 +82,7 @@ function UIManager.Create(state, callbacks)
     stateRef_ = state
     onEndTurn_ = callbacks and callbacks.onEndTurn
     onNewGame_ = callbacks and callbacks.onNewGame
+    onNewGameRequested_ = callbacks and callbacks.onNewGameRequested
     onProcessEvent_ = callbacks and callbacks.onProcessEvent
     onDifficultyChanged_ = callbacks and callbacks.onDifficultyChanged
 
@@ -129,6 +132,7 @@ function UIManager.Create(state, callbacks)
     EndingModal.SetRoot(uiRoot_)
     EndingModal.SetCallbacks({
         onNewGame = onNewGame_,
+        onNewGameRequested = onNewGameRequested_,
         onStateChanged = function()
             UIManager.RefreshAll(stateRef_)
         end,
@@ -171,9 +175,11 @@ function UIManager._CreateContentArea(state)
         },
     }
 
+    dashboardPage_._loaded = true
+
     local pageChildren = { dashboardPage_ }
     for _, tab in ipairs(Config.TABS) do
-        local page = UIManager._CreatePage(tab.id, state)
+        local page = UIManager._CreatePage(tab.id, state, true)
         pages_[tab.id] = page
         table.insert(pageChildren, page)
     end
@@ -188,9 +194,12 @@ function UIManager._CreateContentArea(state)
     }
 end
 
-function UIManager._CreatePage(tabId, state)
-    local content = UIManager._CreatePageContent(tabId, state)
-    return UI.ScrollView {
+function UIManager._CreatePage(tabId, state, lazy)
+    local content = nil
+    if not lazy then
+        content = UIManager._CreatePageContent(tabId, state)
+    end
+    local page = UI.ScrollView {
         id = "page_" .. tabId,
         width = "100%",
         height = "100%",
@@ -199,8 +208,10 @@ function UIManager._CreatePage(tabId, state)
         top = 0, left = 0, right = 0, bottom = 0,
         padding = S.page_padding,
         bounces = false,
-        children = { content },
+        children = content and { content } or {},
     }
+    page._loaded = not lazy
+    return page
 end
 
 function UIManager._CreatePageContent(tabId, state)
@@ -344,8 +355,9 @@ function UIManager._ShowView(viewId)
         end
     else
         local page = pages_[viewId]
-        if page and page._dirty then
+        if page and (page._dirty or not page._loaded) then
             page._dirty = false
+            page._loaded = true
             page:ClearChildren()
             page:AddChild(UIManager._CreatePageContent(viewId, stateRef_))
         end
@@ -452,6 +464,7 @@ function UIManager._OpenSettings()
             UIManager.RefreshAll(stateRef_)
         end,
         onNewGame = onNewGame_,
+        onNewGameRequested = onNewGameRequested_,
         onDifficultyChanged = onDifficultyChanged_,
     }
 

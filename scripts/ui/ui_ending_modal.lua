@@ -19,6 +19,8 @@ local modal_ = nil
 local uiRoot_ = nil
 ---@type function|nil 新游戏回调
 local onNewGame_ = nil
+---@type function|nil 新游戏请求回调（先展示 Loading，再创建状态）
+local onNewGameRequested_ = nil
 ---@type function|nil 状态变化回调
 local onStateChanged_ = nil
 
@@ -32,6 +34,7 @@ end
 ---@param callbacks table|nil
 function EndingModal.SetCallbacks(callbacks)
     onNewGame_ = callbacks and callbacks.onNewGame
+    onNewGameRequested_ = callbacks and callbacks.onNewGameRequested
     onStateChanged_ = callbacks and callbacks.onStateChanged
 end
 
@@ -397,17 +400,21 @@ function EndingModal._GetAccent(ending)
 end
 
 function EndingModal._StartNewGame()
-    if not onNewGame_ then
+    if not onNewGame_ and not onNewGameRequested_ then
         UI.Toast.Show("新游戏入口不可用", { variant = "error", duration = 1.5 })
         return
     end
 
-    local newState = GameState.CreateNew()
-    newState.ap.max = GameState.CalcMaxAP(newState)
-    newState.ap.current = newState.ap.max
-    GameState.AddLog(newState, "科瓦奇家族在巴科维奇矿区开始了创业之路。")
     EndingModal.Close()
-    onNewGame_(newState)
+    if onNewGameRequested_ then
+        onNewGameRequested_()
+    else
+        local newState = GameState.CreateNew()
+        newState.ap.max = GameState.CalcMaxAP(newState)
+        newState.ap.current = newState.ap.max
+        GameState.AddLog(newState, "科瓦奇家族在巴科维奇矿区开始了创业之路。")
+        onNewGame_(newState)
+    end
 end
 
 function EndingModal.Close()
