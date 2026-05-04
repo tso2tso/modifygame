@@ -576,6 +576,45 @@ function UIManager.RefreshLight(state)
     Dashboard.RefreshDynamic(dashboardPage_, stateRef_)
 end
 
+--- 新游戏/读档切换状态时使用：清掉旧局已加载的隐藏页，只保留首屏仪表盘。
+function UIManager.ResetForStateSwitch(state)
+    stateRef_ = state or stateRef_
+    if not uiRoot_ then return end
+
+    refreshPending_ = false
+    UIManager.CloseSettingsDrawer()
+    TopBar.Refresh(uiRoot_, stateRef_)
+
+    if dashboardPage_ then
+        dashboardPage_:ClearChildren()
+        dashboardPage_:AddChild(Dashboard.Create(stateRef_, {
+            onEndTurn = onEndTurn_,
+            onProcessEvent = function(index)
+                if onProcessEvent_ then onProcessEvent_(index) end
+            end,
+            onQuickAction = function(actionId)
+                UIManager._OnQuickAction(actionId)
+            end,
+            onStateChanged = function()
+                UIManager.RefreshAll(stateRef_)
+            end,
+            onLightRefresh = function()
+                UIManager.RefreshLight(stateRef_)
+            end,
+        }))
+        dashboardPage_._dirty = false
+        dashboardPage_._loaded = true
+    end
+
+    for _, page in pairs(pages_) do
+        page:ClearChildren()
+        page._dirty = false
+        page._loaded = false
+    end
+
+    UIManager._ShowView("dashboard")
+end
+
 --- 每帧调用：如果有待处理的延迟刷新，执行实际页面重建
 function UIManager.FlushPendingRefresh()
     if not refreshPending_ then return end

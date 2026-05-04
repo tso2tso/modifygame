@@ -198,6 +198,35 @@ end
 ---@type table|nil { frames: number, fn: function }
 local pendingAction_ = nil
 
+local function QueueLoadingSteps(steps, initialFrames)
+    pendingAction_ = {
+        frames = initialFrames or 1,
+        steps = steps,
+        index = 1,
+    }
+end
+
+local function QueueStateLoadSteps(initialFrames, createStateFn)
+    QueueLoadingSteps({
+        function()
+            if createStateFn then
+                state_ = createStateFn()
+                print(string.format("[新游戏] %s，现金 %d，黄金 %d",
+                    GameState.GetTurnText(state_), state_.cash, state_.gold))
+            end
+        end,
+        function()
+            AudioManager.UpdateBGM(state_)
+        end,
+        function()
+            UIManager.ResetForStateSwitch(state_)
+        end,
+        function()
+            _FinishStateLoad()
+        end,
+    }, initialFrames)
+end
+
 --- 新游戏或读档回调（从菜单页触发）
 ---@param newState table 新的游戏状态
 function HandleNewGame(newState)
@@ -206,33 +235,25 @@ function HandleNewGame(newState)
     print(string.format("[新游戏/读档] %s，现金 %d，黄金 %d",
         GameState.GetTurnText(state_), state_.cash, state_.gold))
 
-    -- 重置 BGM
-    AudioManager.UpdateBGM(state_)
-
     -- 展示加载界面（挂载到当前 UI 根节点上层）
-    Loading.Show(UIManager.GetRoot(), nil, { minDuration = 2.5 })
+    Loading.Show(UIManager.GetRoot(), nil, { minDuration = 0.8 })
 
-    -- 延迟 3 帧执行 UI 刷新，让加载界面先渲染几帧动画
-    pendingAction_ = { frames = 3, fn = _PerformUIRebuild }
+    -- 分帧执行状态切换和 UI 重建，让 Loading 轮播持续覆盖加载期。
+    QueueStateLoadSteps(3)
 end
 
 --- 请求开始新游戏：先显示 Loading，再在后续帧创建新状态，避免点击后长时间无反馈
 function HandleNewGameRequested()
     pendingReport_ = nil
-    Loading.Show(UIManager.GetRoot(), nil, { minDuration = 2.5 })
-    pendingAction_ = { frames = 3, fn = function()
+    Loading.Show(UIManager.GetRoot(), nil, { minDuration = 0.8 })
+    QueueStateLoadSteps(3, function()
         local newState = GameState.CreateNew()
         newState.ap.max = GameState.CalcMaxAP(newState)
         newState.ap.current = newState.ap.max
         GameState.AddLog(newState, "科瓦奇家族在巴科维奇矿区开始了创业之路。")
         UI.Toast.Show("新的百年传奇开始了！", { variant = "info", duration = 2 })
-
-        state_ = newState
-        print(string.format("[新游戏] %s，现金 %d，黄金 %d",
-            GameState.GetTurnText(state_), state_.cash, state_.gold))
-        AudioManager.UpdateBGM(state_)
-        _PerformUIRebuild()
-    end }
+        return newState
+    end)
 end
 
 --- 难度切换回调（从菜单页设置 Drawer 触发）
@@ -242,15 +263,8 @@ function HandleDifficultyChanged()
     UI.Toast.Show("难度已切换", { variant = "success", duration = 1.0 })
 end
 
---- 实际执行 UI 刷新（在加载界面展示后调用）
---- 使用增量 RefreshAll 而非全量 Create，避免重建整棵 UI 树导致长时间阻塞
-function _PerformUIRebuild()
-    -- 增量刷新：更新 stateRef、刷新 TopBar、标记所有页面脏
-    -- 不调用 UIManager.Create()，uiRoot_ 不变，Loading 面板仍在原位
-    UIManager.RefreshAll(state_)
-    UIManager.BackToDashboard()
-    UIManager.FlushPendingRefresh()
-
+--- 完成状态加载：所有收尾工作都在 Loading 仍覆盖屏幕时准备好
+function _FinishStateLoad()
     -- 结局/胜利检查不依赖 Loading 关闭
     if GameState.IsGameOver(state_) then
         Loading.Close()
@@ -260,7 +274,7 @@ function _PerformUIRebuild()
         UIManager.ShowVictoryPrompt(state_)
     else
         if state_.turn_count == 0 and not state_.tutorial_done then
-            -- 图片预加载提前到 Loading 覆盖期间；关闭后只创建引导面板。
+            -- 图片预加载提前到 Loading 覆盖期间；关闭时先创建引导面板再移除 Loading。
             Tutorial.PreloadImages()
             Loading.MarkDone(function()
                 _OnLoadingClosed()
@@ -739,9 +753,21 @@ function HandleUpdate(eventType, eventData)
     if pendingAction_ then
         pendingAction_.frames = pendingAction_.frames - 1
         if pendingAction_.frames <= 0 then
-            local fn = pendingAction_.fn
-            pendingAction_ = nil
-            fn()
+            if pendingAction_.steps then
+                local action = pendingAction_
+                local step = action.steps[action.index]
+                action.index = action.index + 1
+                if action.index > #action.steps then
+                    pendingAction_ = nil
+                else
+                    action.frames = 1
+                end
+                step()
+            else
+                local fn = pendingAction_.fn
+                pendingAction_ = nil
+                fn()
+            end
         end
     end
     -- 延迟页面刷新：在 onClick 回调栈外执行 ClearChildren+rebuild，防止按钮闪烁

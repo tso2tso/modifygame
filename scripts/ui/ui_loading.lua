@@ -324,6 +324,10 @@ end
 --- 立即关闭加载界面
 function Loading.Close()
     if not showing_ then return end
+    local cb = onClosed_
+    onClosed_ = nil
+    if cb then cb() end
+
     showing_ = false
     if panel_ then
         panel_:Destroy()
@@ -332,9 +336,6 @@ function Loading.Close()
     portraitWidget_ = nil
     nameLabel_ = nil
     progressFill_ = nil
-    local cb = onClosed_
-    onClosed_ = nil
-    if cb then cb() end
 end
 
 --- 是否正在展示
