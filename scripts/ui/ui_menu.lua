@@ -601,9 +601,10 @@ function MenuPage._OnNewGame()
     end
 
     if onNewGameRequested_ then
-        onNewGameRequested_()
+        onNewGameRequested_(true)
     elseif onNewGame_ then
         local newState = GameState.CreateNew()
+        newState.tutorial_done = true
         newState.ap.max = GameState.CalcMaxAP(newState)
         newState.ap.current = newState.ap.max
         GameState.AddLog(newState, "科瓦奇家族在巴科维奇矿区开始了创业之路。")

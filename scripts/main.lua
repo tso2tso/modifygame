@@ -284,11 +284,15 @@ function HandleNewGame(newState)
 end
 
 --- 请求开始新游戏：先显示 Loading，再在后续帧创建新状态，避免点击后长时间无反馈
-function HandleNewGameRequested()
+---@param skipTutorial boolean|nil 是否跳过新手引导
+function HandleNewGameRequested(skipTutorial)
     pendingReport_ = nil
-    Loading.Show(UIManager.GetRoot(), nil, { minDuration = 2.4 })
+    Loading.Show(UIManager.GetRoot(), nil, { minDuration = skipTutorial and 0.8 or 2.4 })
     QueueStateLoadSteps(3, function()
         local newState = GameState.CreateNew()
+        if skipTutorial then
+            newState.tutorial_done = true
+        end
         newState.ap.max = GameState.CalcMaxAP(newState)
         newState.ap.current = newState.ap.max
         GameState.AddLog(newState, "科瓦奇家族在巴科维奇矿区开始了创业之路。")
