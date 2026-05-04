@@ -14,6 +14,7 @@ local GrandPowers = require("systems.grand_powers")
 local BranchEvents = require("systems.branch_events")
 local Equipment = require("systems.equipment")
 local MapTilesData = require("data.map_tiles_data")
+local RegionsData = require("data.regions_data")
 
 local BV = Balance.VICTORY
 
@@ -933,6 +934,32 @@ function TurnEngine.EndTurn(state)
         Events.Enqueue(state, branchEvents)
         for _, ev in ipairs(branchEvents) do
             table.insert(report.events_triggered, ev.title)
+        end
+    end
+
+    -- ========================================
+    -- 阶段 6.9: 动态治安等级调整
+    -- 根据玩家军事力量 vs AI 区域威胁 + 控制度直接计算目标治安
+    -- ========================================
+    do
+        -- 记录旧值用于报告
+        local oldSecurity = {}
+        for _, r in ipairs(state.regions or {}) do
+            oldSecurity[r.id] = r.security or 3
+        end
+        -- 直接计算目标治安
+        GameState.RecalcSecurity(state)
+        -- 生成变化报告
+        for _, r in ipairs(state.regions or {}) do
+            local old = oldSecurity[r.id] or 3
+            if r.security ~= old then
+                local dirText = r.security > old and "改善" or "恶化"
+                local msg = string.format("%s 治安%s：%s → %s",
+                    r.name, dirText,
+                    RegionsData.GetSecurityText(old),
+                    RegionsData.GetSecurityText(r.security))
+                table.insert(report.ai_changes, msg)
+            end
         end
     end
 

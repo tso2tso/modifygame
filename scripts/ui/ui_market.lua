@@ -1188,23 +1188,6 @@ function MarketPage._StockRow(state, stock, index, accent)
     -- 公允价值 vs 当前价格 → 估值标签
     local valuationTag = ""
     local valuationColor = C.text_muted
-    local fv = stock.fair_value or 0
-    if fv > 0 and stock.price > 0 then
-        local ratio = stock.price / fv
-        if ratio < 0.7 then
-            valuationTag = " · 低估"
-            valuationColor = C.accent_green
-        elseif ratio > 1.4 then
-            valuationTag = " · 高估"
-            valuationColor = C.accent_red
-        elseif ratio < 0.85 then
-            valuationTag = " · 偏低"
-            valuationColor = C.accent_green
-        elseif ratio > 1.2 then
-            valuationTag = " · 偏高"
-            valuationColor = C.accent_amber
-        end
-    end
 
     -- 持仓标记
     local holding = state.portfolio and state.portfolio.holdings
@@ -1443,11 +1426,9 @@ function MarketPage._OpenTradeModal(state, stock, accent)
                     },
                 },
             },
-            -- 基本面
+            -- 板块信息
             UI.Label {
-                text = string.format("板块：%s  |  长期漂移 μ=%+.3f  波动 σ=%.2f",
-                    SECTOR_NAMES[stock.sector] or "",
-                    stock.mu or 0, stock.sigma or 0),
+                text = string.format("板块：%s", SECTOR_NAMES[stock.sector] or ""),
                 fontSize = F.body_minor,
                 fontColor = C.text_secondary,
             },
@@ -1487,16 +1468,27 @@ function MarketPage._OpenTradeModal(state, stock, accent)
                     end),
                 },
             },
-            -- 全仓快捷
-            holdingShares > 0 and UI.Panel {
+            -- 梭哈 + 全仓快捷
+            UI.Panel {
                 flexDirection = "row",
+                gap = 8,
                 children = {
-                    MarketPage._ActionBtn("全部卖出 (×" .. holdingShares .. ")",
-                        C.accent_amber, function()
-                            MarketPage._OnSell(state, stock.id, holdingShares)
-                        end),
+                    MarketPage._ActionBtn("🔥 梭哈", C.accent_gold, function()
+                        local maxQty = math.floor((state.cash or 0) / stock.price)
+                        if maxQty >= 1 then
+                            MarketPage._OnBuy(state, stock.id, maxQty)
+                        else
+                            UI.Toast.Show("现金不足，无法买入", { variant = "error", duration = 1.5 })
+                        end
+                    end),
+                    holdingShares > 0
+                        and MarketPage._ActionBtn("全部卖出 (×" .. holdingShares .. ")",
+                            C.accent_amber, function()
+                                MarketPage._OnSell(state, stock.id, holdingShares)
+                            end)
+                        or UI.Panel { width = 0, height = 0 },
                 },
-            } or UI.Panel { width = 0, height = 0 },
+            },
         },
     }
     tradeModal_:AddContent(content)

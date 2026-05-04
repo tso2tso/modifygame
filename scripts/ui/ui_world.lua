@@ -14,6 +14,7 @@ local GrandPowers = require("systems.grand_powers")
 local PlayerActionsGP = require("systems.player_actions_gp")
 local ForeignOps = require("systems.foreign_ops")
 local EuropeData = require("data.europe_data")
+local ActionModals = require("ui.ui_action_modals")
 
 -- 构建国家ID→中文名映射表
 local _countryLabels = {}
@@ -76,6 +77,12 @@ function WorldPage.InvalidatePrecomputed()
     cachedPrecomputed_ = nil
 end
 
+--- 新游戏/读档时重置页面状态（清除选中节点和子标签）
+function WorldPage.Reset()
+    selectedNodeId_ = nil
+    activeSubTab_ = "map"
+end
+
 -- 子 Tab 定义（关系+势力合并为"势力与外交"）
 local SUB_TABS = {
     { id = "map",       label = "地图" },
@@ -96,9 +103,12 @@ function WorldPage.Create(state, callbacks)
     callbacksRef_ = callbacks or {}
     MapTilesData.EnsureState(state)
     MapTilesData.SyncTilesFromRegions(state)
-    selectedNodeId_ = state.map_tiles[1] and state.map_tiles[1].id
-        or (state.regions[1] and state.regions[1].id or nil)
-    activeSubTab_ = "map"
+    -- 页面重建时保留已选中的节点和子标签（避免操作后跳回默认区域）
+    if not selectedNodeId_ then
+        selectedNodeId_ = state.map_tiles[1] and state.map_tiles[1].id
+            or (state.regions[1] and state.regions[1].id or nil)
+    end
+    activeSubTab_ = activeSubTab_ or "map"
     WorldPage.InvalidatePrecomputed()
     return WorldPage._BuildContent(state)
 end
@@ -1929,9 +1939,8 @@ function WorldPage._CreateUnifiedFactionCard(state, faction, precomputed)
                         paddingVertical = 6,
                         width = "100%",
                         onClick = Config.ClickGuard(function()
-                            if callbacksRef_ and callbacksRef_.onAction then
-                                callbacksRef_.onAction("diplomacy", { target = faction.id })
-                            end
+                            local accent = Config.GetEraAccent(stateRef_)
+                            ActionModals.ShowDiplomacy(stateRef_, accent)
                         end),
                     },
                 },

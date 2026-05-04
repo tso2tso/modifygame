@@ -346,6 +346,7 @@ function UIManager._ShowView(viewId)
         if dashboardPage_ and dashboardPage_._dirty then
             dashboardPage_._dirty = false
             dashboardPage_:ClearChildren()
+            dashboardPage_:ScrollToTop()
             dashboardPage_:AddChild(Dashboard.Create(stateRef_, {
                 onEndTurn = onEndTurn_,
                 onProcessEvent = function(index)
@@ -593,6 +594,9 @@ function UIManager.ResetForStateSwitch(state)
     refreshPending_ = false
     UIManager.CloseSettingsDrawer()
     TopBar.Refresh(uiRoot_, stateRef_)
+
+    -- 重置各页面的局内状态（选中节点等），避免新局继承旧局状态
+    WorldPage.Reset()
 
     -- 不复用旧 ScrollView。旧局待办事件较多时，首页可能保留滚动偏移、
     -- 惯性或触摸捕获状态，导致新局首屏从中段开始或内容区暂时不可点。

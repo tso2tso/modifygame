@@ -10,12 +10,22 @@ local SaveLoad = require("utils.save_load")
 local Balance = require("data.balance")
 
 local AudioManager = require("systems.audio_manager")
+local TechData = require("data.tech_data")
+local EquipmentData = require("data.equipment_data")
 
 local C = Config.COLORS
 local F = Config.FONT
 local S = Config.SIZE
 
 local MenuPage = {}
+
+-- ============================================================================
+-- 测试作弊：连续点击"游戏统计"标题 6 次触发
+-- ============================================================================
+local cheatTapCount_ = 0
+local cheatLastTapTime_ = 0
+local CHEAT_TAP_REQUIRED = 6
+local CHEAT_TAP_WINDOW = 3.0  -- 秒
 
 ---@type table
 local stateRef_ = nil
@@ -466,6 +476,188 @@ function MenuPage._CreateSaveCard(state, hasSave)
     }
 end
 
+-- ============================================================================
+-- 作弊模式：拉满所有属性
+-- ============================================================================
+
+--- 拉满所有属性用于测试
+---@param state table
+function MenuPage._ApplyCheat(state)
+    -- 1. 资源拉满
+    state.cash = 999999
+    state.gold = 9999
+    state.copper = 9999
+    state.coal = 9999
+
+    -- 2. AP 拉满
+    state.ap.max = 10
+    state.ap.current = 10
+    state.ap.temp = 5
+
+    -- 3. 家族成员属性拉满
+    for _, m in ipairs(state.family.members) do
+        m.attrs.management = 10
+        m.attrs.strategy = 10
+        m.attrs.charisma = 10
+        m.attrs.knowledge = 10
+        m.attrs.ambition = 10
+        if m.hidden then
+            m.hidden.loyalty = 10
+            m.hidden.corruption = 1
+            m.hidden.radical = 1
+        end
+        m.status = "active"
+        m.disabled_turns = 0
+        m.onboarding_remaining = nil
+        m.cooldown_turns = nil
+    end
+
+    -- 4. 矿山拉满
+    for _, mine in ipairs(state.mines) do
+        mine.level = 5
+        mine.reserve = 9999
+        mine.output_bonus = 5
+    end
+    state.mine_slots_bonus = 4
+
+    -- 5. 科技全部研发（每个分支选 a 路线）
+    local techPicks = {
+        "a1_hand_drill", "a2_steam_drill", "a3_electric_mine",
+        "a4a_ventilation", "a5_conveyor", "a6a_hydraulic", "a7_wartime_extraction",
+        "b1_bookkeeping", "b2_accounting", "b3_telegraph",
+        "b4a_trade_route", "b5_finance_net", "b6_stock_exchange",
+        "b7a_intl_trade", "b8_central_banking",
+        "c1_rifled_arms", "c2_logistics", "c3_machine_gun",
+        "c4a_fortification", "c5_motorized", "c6a_intelligence", "c7_elite_force",
+        "d1_propaganda", "d2_education", "d3_newspaper",
+        "d4a_nationalism", "d5_radio", "d6a_university", "d7_wartime_media",
+    }
+    state.tech = state.tech or { researched = {} }
+    state.tech.in_progress = nil
+    for _, tid in ipairs(techPicks) do
+        state.tech.researched[tid] = true
+    end
+
+    -- 6. 科技派生加成拉满
+    state.mine_output_base_bonus = 10
+    state.mine_output_mult_bonus = 1.0
+    state.worker_efficiency_bonus = 0.5
+    state.guard_power_tech_bonus = 1.0
+    state.research_speed_bonus = 3
+    state.trade_passive_income = 200
+    state.finance_passive_income = 200
+    state.finance_supply_discount = 0.20
+    state.gold_price_bonus = 0.3
+    state.hire_cost_discount = 0.3
+    state.supply_reduction_bonus = 0.3
+    state.accident_rate_mod = -0.5
+    state.passive_influence = 20
+    state.prospect_success_bonus = 0.3
+
+    -- 7. 军事拉满
+    state.military.guards = 200
+    state.military.morale = 100
+    state.military.supply = 9999
+    state.military.factory = { level = 3 }
+    -- 创建满编精英小队
+    state.military.squads = {}
+    for i = 1, 6 do
+        table.insert(state.military.squads, {
+            id = "cheat_squad_" .. i,
+            name = "精锐第" .. i .. "队",
+            size = 8,
+            equip_id = "elite_kit",
+            veterancy = 3,
+            condition = 100,
+            battles = 20,
+        })
+    end
+
+    -- 8. 工人拉满
+    state.workers.hired = 200
+    state.workers.morale = 100
+
+    -- 9. 地区拉满
+    for _, r in ipairs(state.regions) do
+        r.control = 100
+        r.influence = 500
+        r.security = 5
+        r.development = 5
+        r.ai_presence.local_clan = 0
+        r.ai_presence.foreign_capital = 0
+        if r.resources then
+            if r.resources.gold_reserve then r.resources.gold_reserve = 9999 end
+            if r.resources.copper_reserve then r.resources.copper_reserve = 9999 end
+            if r.resources.coal_reserve then r.resources.coal_reserve = 9999 end
+        end
+    end
+
+    -- 10. 胜利分数拉满
+    state.victory = state.victory or {}
+    state.victory.economic = 2000
+    state.victory.military = 2500
+
+    -- 11. 清除负面状态
+    state.loans = {}
+    state.loan_consecutive_defaults = 0
+    state.negative_net_worth_turns = 0
+    state.bankrupt = false
+    state.regulation_pressure = 0
+
+    -- 12. 战斗记录
+    state.battle_wins_total = 50
+    state.battle_wins_unclaimed = 3
+
+    -- 13. 弱化 AI
+    if state.ai_factions then
+        for _, ai in ipairs(state.ai_factions) do
+            ai.cash = 100
+            ai.power = 10
+            if ai.victory then
+                ai.victory.economic = 0
+                ai.victory.military = 0
+            end
+        end
+    end
+
+    -- 14. 通胀保持正常
+    state.inflation_factor = 1.0
+
+    -- 15. 重算 AP 上限
+    state.ap.max = GameState.CalcMaxAP(state)
+    state.ap.current = state.ap.max
+
+    -- 16. 存档
+    SaveLoad.Save(state, SaveLoad.SLOT_AUTO)
+
+    print("[CHEAT] 所有属性已拉满！")
+end
+
+--- 处理统计标题点击（连续 6 次触发作弊）
+function MenuPage._OnStatsTitleTap()
+    local now = os.clock()
+    if now - cheatLastTapTime_ > CHEAT_TAP_WINDOW then
+        cheatTapCount_ = 0
+    end
+    cheatTapCount_ = cheatTapCount_ + 1
+    cheatLastTapTime_ = now
+
+    if cheatTapCount_ >= CHEAT_TAP_REQUIRED then
+        cheatTapCount_ = 0
+        if stateRef_ then
+            MenuPage._ApplyCheat(stateRef_)
+            AudioManager.PlayEffect("event_trigger")
+            UI.Toast.Show("🔓 测试模式：所有属性已拉满！", { variant = "success", duration = 3 })
+            if onStateChanged_ then
+                onStateChanged_()
+            end
+        end
+    else
+        local remaining = CHEAT_TAP_REQUIRED - cheatTapCount_
+        print(string.format("[DEBUG] 统计点击 %d/%d", cheatTapCount_, CHEAT_TAP_REQUIRED))
+    end
+end
+
 --- 游戏统计卡片
 function MenuPage._CreateStatsCard(state)
     local totalTurns = state.turn_count
@@ -490,11 +682,19 @@ function MenuPage._CreateStatsCard(state)
         flexDirection = "column",
         gap = 6,
         children = {
-            UI.Label {
-                text = "游戏统计",
-                fontSize = F.subtitle,
-                fontWeight = "bold",
-                fontColor = C.text_primary,
+            UI.Panel {
+                width = "100%",
+                onClick = function()
+                    MenuPage._OnStatsTitleTap()
+                end,
+                children = {
+                    UI.Label {
+                        text = "游戏统计",
+                        fontSize = F.subtitle,
+                        fontWeight = "bold",
+                        fontColor = C.text_primary,
+                    },
+                },
             },
             UI.Divider { color = C.divider },
             MenuPage._InfoRow("已度过回合", tostring(totalTurns)),
