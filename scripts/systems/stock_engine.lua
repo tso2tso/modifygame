@@ -497,11 +497,35 @@ function StockEngine.Sell(state, stockId, shares)
     if not h or h.shares < shares then
         return false, "持仓不足"
     end
-    local gain = math.floor(stock.price * shares)
+    local revenue = stock.price * shares
+    local costBasis = (h.avg_cost or stock.price) * shares
+    local profit = revenue - costBasis
+    -- 科技加成：盈利时增加收益，亏损时减少亏损
+    local bonus = state.stock_return_bonus or 0
+    local bonusAmount = 0
+    if bonus > 0 and profit ~= 0 then
+        if profit > 0 then
+            -- 盈利：额外获得 profit * bonus
+            bonusAmount = math.floor(profit * bonus)
+        else
+            -- 亏损：减少 |profit| * bonus 的亏损（bonusAmount 为正数，补偿玩家）
+            bonusAmount = math.floor(math.abs(profit) * bonus)
+        end
+    end
+    local gain = math.floor(revenue) + bonusAmount
     state.cash = state.cash + gain
     h.shares = h.shares - shares
     if h.shares <= 0 then
         state.portfolio.holdings[stockId] = nil
+    end
+    if bonusAmount > 0 then
+        if profit > 0 then
+            return true, string.format("卖出 %d 股 @ %.2f 获现 %d（含收益加成 +%d）",
+                shares, stock.price, gain, bonusAmount)
+        else
+            return true, string.format("卖出 %d 股 @ %.2f 获现 %d（已减少亏损 %d）",
+                shares, stock.price, gain, bonusAmount)
+        end
     end
     return true, string.format("卖出 %d 股 @ %.2f 获现 %d", shares, stock.price, gain)
 end

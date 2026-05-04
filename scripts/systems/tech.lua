@@ -179,9 +179,8 @@ local function applyEffect(state, eff, techId)
         state.finance_passive_income = 80
 
     elseif eff.kind == "stock_boost_all" then
-        for _, s in ipairs(state.stocks or {}) do
-            s.mu = s.mu + (eff.value or 0.02)
-        end
+        -- 卖出结算时收益加成：盈利+10%，亏损减少10%
+        state.stock_return_bonus = (state.stock_return_bonus or 0) + (eff.value or 0.10)
 
     elseif eff.kind == "influence_gain" then
         state.passive_influence = (state.passive_influence or 0) + eff.value

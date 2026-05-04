@@ -242,9 +242,9 @@ function TechData.GetAll()
             cost = 1100, turns = 6,
             requires = "b5_finance_net",
             era_hint = "1920s",
-            effect_desc = "所有股票期望收益率 +2%",
+            effect_desc = "所有股票收益率 +10%",
             effects = {
-                { kind = "stock_boost_all", value = 0.02 },
+                { kind = "stock_boost_all", value = 0.10 },
             },
         },
         -- ── 分叉2: 国际贸易 vs 战时经济 ──
