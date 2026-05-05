@@ -64,6 +64,10 @@ local drawerPanel_ = nil
 local activeSubTab_ = "map"
 ---@type string|nil
 local selectedNodeId_ = nil
+---@type string 当前称号分支
+local activeTitleCategoryId_ = "military"
+---@type string|nil 当前展开的称号
+local expandedTitleId_ = nil
 
 -- ── 势力页缓存：避免每次切 Tab 都重新计算 ──
 ---@type table|nil
@@ -81,6 +85,8 @@ end
 function WorldPage.Reset()
     selectedNodeId_ = nil
     activeSubTab_ = "map"
+    activeTitleCategoryId_ = "military"
+    expandedTitleId_ = nil
 end
 
 -- 子 Tab 定义（关系+势力合并为"势力与外交"）
@@ -1965,7 +1971,7 @@ function WorldPage._BuildReportTab(state)
     -- 1. 本季结算摘要
     table.insert(widgets, WorldPage._CreateSeasonSummary(state))
 
-    -- 1.5. 称号卡片（有称号时才显示）
+    -- 1.5. 称号殿堂（常驻）
     local titlesCard = WorldPage._CreateTitlesCard(state)
     if titlesCard then
         table.insert(widgets, titlesCard)
@@ -1986,32 +1992,309 @@ function WorldPage._BuildReportTab(state)
     })
 end
 
---- 称号卡片：展示已获得称号 + 各类别进度
+local TITLE_BRANCH_COLORS = {
+    military      = { 200, 80, 80, 255 },
+    plunder       = { 120, 110, 100, 255 },
+    economy       = { 218, 165, 32, 255 },
+    stock         = { 58, 107, 138, 255 },
+    comprehensive = { 120, 140, 220, 255 },
+}
+
+local function getTitleBranchColor(catId)
+    return TITLE_BRANCH_COLORS[catId] or C.accent_gold
+end
+
+local function getTitleCategoryById(TitlesData, catId)
+    for _, cat in ipairs(TitlesData.CATEGORIES) do
+        if cat.id == catId then return cat end
+    end
+    return TitlesData.CATEGORIES[1]
+end
+
+local function refreshReportTab()
+    if activeSubTab_ == "report" then
+        WorldPage._SwitchSubTab(stateRef_, "report")
+    end
+end
+
+local function getNewTitleIds(state)
+    local ids = {}
+    for _, item in ipairs(state.titles_new or {}) do
+        local id = type(item) == "table" and item.id or item
+        if id then ids[id] = true end
+    end
+    return ids
+end
+
+--- 称号分支 Tab：复用科技研发的分支选择样式
+function WorldPage._CreateTitleBranchTab(state, cat, isActive)
+    local Titles = require("systems.titles")
+    local unlocked, total = Titles.CategoryProgress(state, cat.id)
+    local progress = total > 0 and (unlocked / total) or 0
+    local accent = getTitleBranchColor(cat.id)
+
+    return UI.Panel {
+        flexGrow = 1,
+        flexShrink = 1,
+        flexBasis = 0,
+        minWidth = 70,
+        padding = 6,
+        backgroundColor = isActive and { accent[1], accent[2], accent[3], 55 } or C.bg_elevated,
+        borderRadius = S.radius_card,
+        borderWidth = isActive and 1.5 or 1,
+        borderColor = isActive and accent or { 60, 60, 70, 255 },
+        flexDirection = "column",
+        alignItems = "center",
+        gap = 2,
+        pointerEvents = "auto",
+        onPointerUp = Config.TapGuard(function()
+            if activeTitleCategoryId_ ~= cat.id then
+                activeTitleCategoryId_ = cat.id
+                expandedTitleId_ = nil
+                refreshReportTab()
+            end
+        end),
+        children = {
+            UI.Label {
+                text = (cat.icon or "•") .. " " .. cat.label,
+                fontSize = isActive and F.body or F.body_minor,
+                fontWeight = isActive and "bold" or "medium",
+                fontColor = isActive and accent or C.text_secondary,
+                pointerEvents = "none",
+            },
+            UI.Panel {
+                width = "90%",
+                height = 3,
+                borderRadius = 2,
+                backgroundColor = { 50, 50, 60, 255 },
+                children = {
+                    UI.Panel {
+                        width = string.format("%d%%", math.floor(progress * 100)),
+                        height = "100%",
+                        borderRadius = 2,
+                        backgroundColor = accent,
+                    },
+                },
+            },
+            UI.Label {
+                text = string.format("%d/%d", unlocked, total),
+                fontSize = 10,
+                fontColor = C.text_muted,
+                pointerEvents = "none",
+            },
+        },
+    }
+end
+
+function WorldPage._CreateTitlePortrait(title, isUnlocked, accent)
+    if title.portraitImage then
+        return UI.Panel {
+            width = 92,
+            height = 92,
+            borderRadius = S.radius_card,
+            backgroundImage = title.portraitImage,
+            backgroundFit = "cover",
+            borderWidth = 1,
+            borderColor = isUnlocked and accent or C.border_card,
+            imageTint = isUnlocked and nil or { 120, 120, 120, 255 },
+            flexShrink = 0,
+        }
+    end
+
+    return UI.Panel {
+        width = 92,
+        height = 92,
+        borderRadius = S.radius_card,
+        backgroundColor = C.bg_inset,
+        borderWidth = 1,
+        borderColor = isUnlocked and accent or C.border_soft,
+        justifyContent = "center",
+        alignItems = "center",
+        flexDirection = "column",
+        gap = 3,
+        flexShrink = 0,
+        children = {
+            UI.Label {
+                text = title.icon or "🏅",
+                fontSize = 30,
+                fontColor = isUnlocked and accent or C.text_muted,
+                pointerEvents = "none",
+            },
+            UI.Label {
+                text = "1:1 立绘",
+                fontSize = F.label,
+                fontColor = C.text_muted,
+                pointerEvents = "none",
+            },
+        },
+    }
+end
+
+function WorldPage._CreateTitleNode(state, title, cat, isExpanded, isNew)
+    local isUnlocked = state.titles_unlocked and state.titles_unlocked[title.id]
+    local accent = getTitleBranchColor(cat.id)
+    local statusText = isUnlocked and "已获得" or "未达成"
+    local statusColor = isUnlocked and C.accent_green or C.text_muted
+    if isNew then
+        statusText = "新称号"
+        statusColor = C.accent_gold
+    end
+
+    local nodeChildren = {
+        UI.Panel {
+            width = "100%",
+            flexDirection = "row",
+            justifyContent = "space-between",
+            alignItems = "center",
+            pointerEvents = "none",
+            children = {
+                UI.Panel {
+                    flexDirection = "row",
+                    alignItems = "center",
+                    gap = 7,
+                    flexShrink = 1,
+                    children = {
+                        UI.Label {
+                            text = isUnlocked and (title.icon or "🏅") or "◇",
+                            fontSize = F.body,
+                            fontColor = isUnlocked and accent or C.text_muted,
+                            pointerEvents = "none",
+                        },
+                        UI.Label {
+                            text = title.name,
+                            fontSize = F.body,
+                            fontWeight = (isExpanded or isUnlocked) and "bold" or "medium",
+                            fontColor = isUnlocked and C.text_primary or C.text_muted,
+                            flexShrink = 1,
+                            pointerEvents = "none",
+                        },
+                    },
+                },
+                UI.Panel {
+                    paddingHorizontal = 6,
+                    paddingVertical = 2,
+                    borderRadius = S.radius_badge,
+                    backgroundColor = { statusColor[1], statusColor[2], statusColor[3], 38 },
+                    children = {
+                        UI.Label {
+                            text = statusText,
+                            fontSize = F.label,
+                            fontWeight = "bold",
+                            fontColor = statusColor,
+                            pointerEvents = "none",
+                        },
+                    },
+                },
+            },
+        },
+    }
+
+    if isExpanded then
+        local unlockedTurn = isUnlocked and tostring(isUnlocked) or "尚未获得"
+        table.insert(nodeChildren, UI.Panel {
+            width = "100%",
+            flexDirection = "row",
+            gap = 10,
+            marginTop = 6,
+            paddingTop = 8,
+            borderTopWidth = 1,
+            borderTopColor = C.divider,
+            children = {
+                WorldPage._CreateTitlePortrait(title, isUnlocked, accent),
+                UI.Panel {
+                    flexGrow = 1,
+                    flexBasis = 0,
+                    flexShrink = 1,
+                    flexDirection = "column",
+                    gap = 5,
+                    children = {
+                        UI.Label {
+                            text = title.desc,
+                            fontSize = F.body_minor,
+                            fontColor = C.text_secondary,
+                            whiteSpace = "normal",
+                            width = "100%",
+                        },
+                        UI.Panel { width = "100%", height = 1, backgroundColor = C.divider },
+                        WorldPage._InfoRow("所属分支", (cat.icon or "•") .. " " .. cat.label, accent),
+                        WorldPage._InfoRow("获得回合", unlockedTurn, isUnlocked and C.accent_green or C.text_muted),
+                        UI.Label {
+                            text = title.portraitImage
+                                and ("立绘资源：" .. title.portraitImage)
+                                or "立绘接口：portraitImage（1:1）",
+                            fontSize = F.label,
+                            fontColor = C.text_muted,
+                            whiteSpace = "normal",
+                        },
+                    },
+                },
+            },
+        })
+    end
+
+    return UI.Panel {
+        width = "100%",
+        paddingVertical = isExpanded and 8 or 6,
+        paddingHorizontal = 9,
+        backgroundColor = isExpanded and { accent[1], accent[2], accent[3], 28 } or C.paper_dark,
+        borderRadius = S.radius_card,
+        borderLeftWidth = 3,
+        borderLeftColor = isUnlocked and accent or { 60, 60, 70, 255 },
+        borderWidth = isExpanded and 1 or 0,
+        borderColor = isExpanded and accent or nil,
+        flexDirection = "column",
+        pointerEvents = "auto",
+        onPointerUp = Config.TapGuard(function()
+            expandedTitleId_ = (expandedTitleId_ == title.id) and nil or title.id
+            refreshReportTab()
+        end),
+        children = nodeChildren,
+    }
+end
+
+--- 称号卡片：常驻展示分支、称号节点与详情
 function WorldPage._CreateTitlesCard(state)
     local TitlesData = require("data.titles_data")
     local Titles = require("systems.titles")
 
     local unlockedCount = Titles.UnlockedCount(state)
     local totalCount = #TitlesData.TITLES
-
-    -- 没有称号且没有新称号提示时不显示卡片
     local hasNew = state.titles_new and #state.titles_new > 0
-    if unlockedCount == 0 and not hasNew then return nil end
-
+    local newIds = getNewTitleIds(state)
+    local activeCat = getTitleCategoryById(TitlesData, activeTitleCategoryId_)
+    if not activeCat then
+        activeCat = TitlesData.CATEGORIES[1]
+        activeTitleCategoryId_ = activeCat and activeCat.id or activeTitleCategoryId_
+    end
+    local activeAccent = getTitleBranchColor(activeCat.id)
     local children = {}
 
     -- 标题行
     table.insert(children, UI.Panel {
+        width = "100%",
         flexDirection = "row",
         alignItems = "center",
-        gap = 8,
+        justifyContent = "space-between",
         children = {
-            UI.Label { text = "🏅", fontSize = S.icon_size },
+            UI.Panel {
+                flexDirection = "row",
+                alignItems = "center",
+                gap = 8,
+                children = {
+                    UI.Label { text = "🏅", fontSize = S.icon_size },
+                    UI.Label {
+                        text = "称号殿堂",
+                        fontSize = F.card_title,
+                        fontWeight = "bold",
+                        fontColor = C.accent_gold,
+                    },
+                },
+            },
             UI.Label {
-                text = string.format("称号殿堂 (%d/%d)", unlockedCount, totalCount),
-                fontSize = F.card_title,
+                text = string.format("%d/%d", unlockedCount, totalCount),
+                fontSize = F.body,
                 fontWeight = "bold",
-                fontColor = C.accent_gold,
+                fontColor = unlockedCount > 0 and C.accent_gold or C.text_muted,
             },
         },
     })
@@ -2019,96 +2302,96 @@ function WorldPage._CreateTitlesCard(state)
 
     -- 新解锁提示
     if hasNew then
+        local newNames = {}
         for _, tid in ipairs(state.titles_new) do
-            local t = TitlesData.GetById(tid)
+            local id = type(tid) == "table" and tid.id or tid
+            local t = TitlesData.GetById(id)
             if t then
-                table.insert(children, UI.Panel {
-                    width = "100%",
-                    backgroundColor = "#3a2a00",
-                    borderRadius = 4,
-                    padding = 6,
-                    flexDirection = "row",
-                    alignItems = "center",
-                    gap = 6,
-                    children = {
-                        UI.Label { text = "✨", fontSize = F.body },
-                        UI.Label {
-                            text = string.format("新称号「%s」— %s", t.name, t.desc),
-                            fontSize = F.body,
-                            fontColor = "#FFD700",
-                        },
-                    },
-                })
+                table.insert(newNames, "「" .. t.name .. "」")
             end
         end
+        table.insert(children, UI.Panel {
+            width = "100%",
+            backgroundColor = "#3a2a00",
+            borderRadius = 4,
+            padding = 7,
+            flexDirection = "row",
+            alignItems = "center",
+            gap = 6,
+            children = {
+                UI.Label { text = "✨", fontSize = F.body },
+                UI.Label {
+                    text = "新获得：" .. table.concat(newNames, "  "),
+                    fontSize = F.body,
+                    fontWeight = "bold",
+                    fontColor = "#FFD700",
+                    flexShrink = 1,
+                },
+            },
+        })
         -- 清除新称号提示（已展示）
         state.titles_new = {}
     end
 
-    -- 各类别进度
+    -- 一级目录：称号分支
+    local tabChildren = {}
     for _, cat in ipairs(TitlesData.CATEGORIES) do
-        local catTitles = TitlesData.GetByCategory(cat.id)
-        local unlocked = 0
-        local unlockedNames = {}
-        for _, t in ipairs(catTitles) do
-            if state.titles_unlocked and state.titles_unlocked[t.id] then
-                unlocked = unlocked + 1
-                table.insert(unlockedNames, t.name)
-            end
-        end
-        if unlocked > 0 then
-            local namesText = table.concat(unlockedNames, "  ")
-            table.insert(children, UI.Panel {
-                width = "100%",
-                flexDirection = "column",
-                gap = 2,
-                children = {
-                    UI.Panel {
-                        flexDirection = "row",
-                        alignItems = "center",
-                        gap = 4,
-                        children = {
-                            UI.Label {
-                                text = (cat.icon or "•") .. " " .. cat.label,
-                                fontSize = F.small,
-                                fontColor = C.text_secondary,
-                            },
-                            UI.Label {
-                                text = string.format("(%d/%d)", unlocked, #catTitles),
-                                fontSize = F.small,
-                                fontColor = C.text_dim,
-                            },
-                        },
-                    },
-                    UI.Label {
-                        text = namesText,
-                        fontSize = F.small,
-                        fontColor = C.accent_gold,
-                        paddingLeft = 8,
-                    },
-                },
-            })
-        else
-            -- 未解锁：仅显示类别进度
-            table.insert(children, UI.Panel {
-                flexDirection = "row",
-                alignItems = "center",
-                gap = 4,
-                children = {
-                    UI.Label {
-                        text = (cat.icon or "•") .. " " .. cat.label,
-                        fontSize = F.small,
-                        fontColor = C.text_dim,
-                    },
-                    UI.Label {
-                        text = string.format("(0/%d)", #catTitles),
-                        fontSize = F.small,
-                        fontColor = C.text_dim,
-                    },
-                },
-            })
+        table.insert(tabChildren, WorldPage._CreateTitleBranchTab(state, cat, cat.id == activeCat.id))
+    end
+    table.insert(children, UI.Panel {
+        width = "100%",
+        flexDirection = "row",
+        flexWrap = "wrap",
+        gap = 5,
+        children = tabChildren,
+    })
+
+    -- 二级目录：当前分支称号；三级目录：点击称号展开详情
+    local catTitles = TitlesData.GetByCategory(activeCat.id)
+    local unlockedInCat = 0
+    for _, title in ipairs(catTitles) do
+        if state.titles_unlocked and state.titles_unlocked[title.id] then
+            unlockedInCat = unlockedInCat + 1
         end
     end
+
+    table.insert(children, UI.Panel {
+        width = "100%",
+        flexDirection = "row",
+        justifyContent = "space-between",
+        alignItems = "center",
+        paddingHorizontal = 2,
+        children = {
+            UI.Label {
+                text = (activeCat.icon or "•") .. " " .. activeCat.label .. "分支",
+                fontSize = F.subtitle,
+                fontWeight = "bold",
+                fontColor = activeAccent,
+            },
+            UI.Label {
+                text = string.format("点击称号查看描述  (%d/%d)", unlockedInCat, #catTitles),
+                fontSize = F.label,
+                fontColor = C.text_secondary,
+            },
+        },
+    })
+
+    local titleNodes = {}
+    for _, title in ipairs(catTitles) do
+        table.insert(titleNodes, WorldPage._CreateTitleNode(
+            state,
+            title,
+            activeCat,
+            expandedTitleId_ == title.id,
+            newIds[title.id] == true
+        ))
+    end
+    table.insert(children, UI.Panel {
+        width = "100%",
+        flexDirection = "column",
+        gap = 4,
+        children = titleNodes,
+    })
 
     return UI.Panel {
         width = "100%",
@@ -2118,7 +2401,7 @@ function WorldPage._CreateTitlesCard(state)
         borderColor = C.border_gold,
         padding = S.card_padding,
         flexDirection = "column",
-        gap = 6,
+        gap = 7,
         children = children,
     }
 end

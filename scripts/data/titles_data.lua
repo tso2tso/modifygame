@@ -15,6 +15,7 @@ TitlesData.CATEGORIES = {
 }
 
 --- 所有称号定义
+--- portraitImage 为可选 1:1 立绘资源接口，例如 "image/titles/first_blood.png"
 --- check(state, stats) → boolean
 TitlesData.TITLES = {
 
