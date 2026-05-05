@@ -11,13 +11,29 @@ local EquipmentData = require("data.equipment_data")
 
 local Tech = {}
 
---- 检查前置科技是否满足（支持 "a|b" 管道语法）
+--- 检查前置科技是否满足（支持 "a|b" OR 管道语法 + "a,b" AND 逗号语法）
 ---@param requires string|nil
 ---@param researched table
 ---@return boolean
 local function checkRequires(requires, researched)
     if not requires then return true end
-    -- 管道语法: "a|b" 表示 a 或 b 任一已研发即可
+    -- 逗号语法: "a,b" 表示 a 且 b 均已研发才满足（AND）
+    if requires:find(",") then
+        for part in requires:gmatch("[^,]+") do
+            -- 每个 AND 子项内部仍可包含 OR（如 "a1|a2,b1"）
+            local subOk = false
+            if part:find("|") then
+                for sub in part:gmatch("[^|]+") do
+                    if researched[sub] then subOk = true; break end
+                end
+            else
+                subOk = researched[part] == true
+            end
+            if not subOk then return false end
+        end
+        return true
+    end
+    -- 管道语法: "a|b" 表示 a 或 b 任一已研发即可（OR）
     if requires:find("|") then
         for part in requires:gmatch("[^|]+") do
             if researched[part] then return true end
@@ -37,17 +53,41 @@ local function checkExcludes(excludes, researched)
     return researched[excludes] == true
 end
 
---- 获取前置科技名称列表（用于提示信息）
+--- 获取前置科技名称列表（用于提示信息，支持 AND/OR）
 ---@param requires string|nil
 ---@return string
 local function getRequiresNames(requires)
     if not requires then return "" end
-    local names = {}
-    for part in requires:gmatch("[^|]+") do
-        local t = TechData.GetById(part)
-        table.insert(names, t and t.name or part)
+    -- AND 语法 "a,b" → "科技A 且 科技B"
+    if requires:find(",") then
+        local groups = {}
+        for part in requires:gmatch("[^,]+") do
+            if part:find("|") then
+                local orNames = {}
+                for sub in part:gmatch("[^|]+") do
+                    local t = TechData.GetById(sub)
+                    table.insert(orNames, t and t.name or sub)
+                end
+                table.insert(groups, "(" .. table.concat(orNames, " 或 ") .. ")")
+            else
+                local t = TechData.GetById(part)
+                table.insert(groups, t and t.name or part)
+            end
+        end
+        return table.concat(groups, " 且 ")
     end
-    return table.concat(names, " 或 ")
+    -- OR 语法 "a|b" → "科技A 或 科技B"
+    if requires:find("|") then
+        local names = {}
+        for part in requires:gmatch("[^|]+") do
+            local t = TechData.GetById(part)
+            table.insert(names, t and t.name or part)
+        end
+        return table.concat(names, " 或 ")
+    end
+    -- 单一前置
+    local t = TechData.GetById(requires)
+    return t and t.name or requires
 end
 
 --- 开始研发一项科技
@@ -213,6 +253,15 @@ local function applyEffect(state, eff, techId)
 
     elseif eff.kind == "prospect_success" then
         state.prospect_success_bonus = (state.prospect_success_bonus or 0) + eff.value
+
+    elseif eff.kind == "plunder_loot_mult" then
+        state.plunder_loot_mult_bonus = (state.plunder_loot_mult_bonus or 0) + eff.value
+
+    elseif eff.kind == "rep_recovery_bonus" then
+        state.rep_recovery_bonus = (state.rep_recovery_bonus or 0) + eff.value
+
+    elseif eff.kind == "plunder_cooldown_reduction" then
+        state.plunder_cooldown_reduction = (state.plunder_cooldown_reduction or 0) + eff.value
     end
 end
 

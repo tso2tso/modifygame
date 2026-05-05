@@ -385,7 +385,7 @@ Config.TABS = {
 -- ============================================================================
 -- ap_cost 为"典型"消耗（仅展示用；不同操作实际消耗见 data/balance.lua）
 Config.QUICK_ACTIONS = {
-    { id = "intelligence",label = "情报行动", icon = "👁️", ap_cost = 1 },
+    { id = "plunder",     label = "掠夺行动", icon = "⚔️", ap_cost = 1 },
     { id = "technology",  label = "科技研发", icon = "🔬", ap_cost = 2 },
     { id = "diplomacy",   label = "政治外交", icon = "🤝", ap_cost = 1 },
     { id = "trade",       label = "资产交易", icon = "🏭", ap_cost = 2 },
@@ -486,6 +486,12 @@ function Config.TapGuard(fn)
         lastTapCounter_ = counter
         fn(self)
     end
+end
+
+--- 消费当前点击计数器，阻止后续 TapGuard 回调触发。
+--- 典型场景：Modal overlay 关闭时调用，防止点击穿透到底层按钮。
+function Config.ConsumeTap()
+    lastTapCounter_ = tapDownCounter_
 end
 
 return Config

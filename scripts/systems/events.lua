@@ -173,7 +173,248 @@ function Events._CheckTrigger(state, event)
         end
     end
 
+    -- 最低声誉（注意：声誉为负数，min_reputation = -20 表示声誉 <= -20 才触发）
+    if trigger.min_reputation then
+        if (state.reputation or 0) > trigger.min_reputation then
+            return false
+        end
+    end
+
+    -- 需要已强占矿脉
+    if trigger.has_seized_veins then
+        if not state.has_seized_veins then
+            return false
+        end
+    end
+
+    -- 最低护卫数
+    if trigger.min_guards then
+        local guards = 0
+        local mineRegion = GameState.GetRegion(state, "mine_district")
+        if mineRegion then
+            guards = mineRegion.guards or 0
+        end
+        if guards < trigger.min_guards then
+            return false
+        end
+    end
+
+    -- 最低影响力（使用所有地区总和）
+    if trigger.min_influence then
+        if GameState.CalcTotalInfluence(state) < trigger.min_influence then
+            return false
+        end
+    end
+
+    -- 需要特定科技已研究（单个 string）
+    if trigger.requires_tech then
+        local researched = state.tech and state.tech.researched or {}
+        if not researched[trigger.requires_tech] then
+            return false
+        end
+    end
+
+    -- 需要任意一个科技已研究（数组，OR 逻辑）
+    if trigger.requires_tech_any then
+        local researched = state.tech and state.tech.researched or {}
+        local anyMet = false
+        for _, tid in ipairs(trigger.requires_tech_any) do
+            if researched[tid] then anyMet = true; break end
+        end
+        if not anyMet then return false end
+    end
+
     return true
+end
+
+-- ============================================================================
+-- Market Intel 事件处理（type = "market_intel"）
+-- ============================================================================
+
+--- 股票名称映射
+local STOCK_NAMES = {
+    sarajevo_mining  = "萨拉热窝矿业",
+    imperial_railway = "帝国铁路",
+    balkan_shipping  = "巴尔干航运",
+    military_industry = "军工联合体",
+    austro_bank_trust = "奥匈银行信托",
+    oriental_trading  = "东方贸易公司",
+    balkan_press      = "巴尔干新闻社",
+}
+
+--- 板块名称映射
+local SECTOR_NAMES = {
+    mining    = "矿业",
+    transport = "运输",
+    military  = "军工",
+    finance   = "金融",
+    trade     = "贸易",
+    media     = "媒体",
+}
+
+--- 解析 target_mode，返回 { target_stock_id, target_sector, stock_name, sector_name }
+---@param state table
+---@param event table
+---@return table|nil info  目标信息，nil 表示无有效目标
+local function ResolveMarketIntelTarget(state, event)
+    local mode = event.target_mode
+    if not mode then return nil end
+
+    if mode == "random_stock_exclude_press" then
+        -- 随机选择一只非新闻社股票
+        local candidates = {}
+        for _, stock in ipairs(state.stocks or {}) do
+            if stock.id ~= "balkan_press" then
+                table.insert(candidates, stock)
+            end
+        end
+        if #candidates == 0 then return nil end
+        local pick = candidates[math.random(1, #candidates)]
+        return {
+            target_stock_id = pick.id,
+            stock_name = STOCK_NAMES[pick.id] or pick.id,
+            sector_name = SECTOR_NAMES[pick.sector] or pick.sector,
+        }
+
+    elseif mode == "random_sector" then
+        -- 随机选择一个有股票的 sector（排除 media）
+        local sectorSet = {}
+        for _, stock in ipairs(state.stocks or {}) do
+            if stock.sector and stock.sector ~= "media" then
+                sectorSet[stock.sector] = true
+            end
+        end
+        local sectors = {}
+        for s in pairs(sectorSet) do table.insert(sectors, s) end
+        if #sectors == 0 then return nil end
+        local pick = sectors[math.random(1, #sectors)]
+        return {
+            target_sector = pick,
+            sector_name = SECTOR_NAMES[pick] or pick,
+        }
+
+    elseif mode == "war_rumor" then
+        -- 固定影响军工 + 航运，无需动态目标
+        return {
+            target_stock_id = "military_industry",
+            stock_name = STOCK_NAMES["military_industry"],
+            sector_name = SECTOR_NAMES["military"],
+        }
+    end
+
+    return nil
+end
+
+--- 将 {target} / {sector} 占位符替换为实际 stock_id / sector 的 stock_id 列表
+---@param mods table[]  event_market_effects 的效果数组
+---@param info table    ResolveMarketIntelTarget 返回的 info
+---@param state table   游戏状态（用于 sector → stock_id 列表）
+---@return table[] resolved  替换后的效果数组
+local function ResolveEffectPlaceholders(mods, info, state)
+    local resolved = {}
+    for _, mod in ipairs(mods) do
+        if mod.stock_id == "{target}" then
+            if info.target_stock_id then
+                table.insert(resolved, {
+                    stock_id = info.target_stock_id,
+                    delta_mu = mod.delta_mu,
+                    duration = mod.duration,
+                })
+            end
+        elseif mod.stock_id == "{sector}" then
+            -- 板块所有股票都受影响
+            local sectorId = info.target_sector
+            if sectorId then
+                for _, stock in ipairs(state.stocks or {}) do
+                    if stock.sector == sectorId then
+                        table.insert(resolved, {
+                            stock_id = stock.id,
+                            delta_mu = mod.delta_mu,
+                            duration = mod.duration,
+                        })
+                    end
+                end
+            end
+        else
+            -- 直接使用（如 war_rumor 中的固定 stock_id）
+            table.insert(resolved, {
+                stock_id = mod.stock_id,
+                delta_mu = mod.delta_mu,
+                duration = mod.duration,
+            })
+        end
+    end
+    return resolved
+end
+
+--- 替换消息文本中的 {stock_name} / {sector_name} 占位符
+local function ReplaceMessagePlaceholders(msg, info)
+    if not msg then return "" end
+    if info.stock_name then
+        msg = msg:gsub("{stock_name}", info.stock_name)
+    end
+    if info.sector_name then
+        msg = msg:gsub("{sector_name}", info.sector_name)
+    end
+    return msg
+end
+
+--- 处理 market_intel 事件：解析目标、应用股价效果、生成消息
+--- 返回 turn_message 表（供 ui_manager 展示新闻快报弹窗）
+---@param state table
+---@param event table
+---@return table|nil message  { title, public, hint, intel, event_id }
+function Events.ApplyMarketIntel(state, event)
+    -- 1. 解析目标
+    local info = ResolveMarketIntelTarget(state, event)
+    if not info then return nil end
+
+    -- 2. 获取效果映射并替换占位符
+    local rawMods = EventMarketEffects.Get(event.id)
+    if rawMods then
+        local resolved = ResolveEffectPlaceholders(rawMods, info, state)
+        for _, mod in ipairs(resolved) do
+            StockEngine.ApplyEventModifier(state,
+                mod.stock_id, mod.delta_mu, mod.duration,
+                event.id)
+        end
+    end
+
+    -- 3. 标记已触发 + 设置冷却
+    state.events_fired[event.id] = true
+    if event.trigger and event.trigger.cooldown then
+        state.random_cooldowns[event.id] = event.trigger.cooldown
+    end
+
+    -- 4. 判断文化顾问等级
+    local advisorBonus = GameState.GetPositionBonus(state, "culture_advisor")
+    local advisorLevel = "none"  -- 无顾问
+    if advisorBonus >= 1.0 then
+        advisorLevel = "excellent"  -- 满配
+    elseif advisorBonus > 0 then
+        advisorLevel = "normal"  -- 在任但非满配
+    end
+
+    -- 5. 构造消息
+    local publicText = ReplaceMessagePlaceholders(event.public_message, info)
+    local hintText = ReplaceMessagePlaceholders(event.hint_message, info)
+    local intelText = ReplaceMessagePlaceholders(event.intel_message, info)
+
+    local message = {
+        type = "market_intel",
+        event_id = event.id,
+        title = event.title,
+        icon = event.icon or "📰",
+        public = publicText,
+        hint = (advisorLevel ~= "none") and hintText or nil,
+        intel = (advisorLevel == "excellent") and intelText or nil,
+        advisor_level = advisorLevel,
+    }
+
+    -- 6. 日志
+    GameState.AddLog(state, string.format("[市场情报] %s", event.title))
+
+    return message
 end
 
 --- 将事件加入处理队列（自动去重 + 标记 events_fired 防止重复触发）
@@ -365,6 +606,21 @@ function Events.ApplyOption(state, event, optionIndex)
         local kept = {}
         for _, m in ipairs(state.modifiers) do
             if m.target ~= "worker_morale" then
+                table.insert(kept, m)
+            end
+        end
+        state.modifiers = kept
+    end
+
+    -- 6.5 声誉修正（立即应用到 state.reputation）
+    local repMod = GameState.GetModifierValue(state, "reputation_penalty")
+    if repMod ~= 0 then
+        local BRep = Balance.REPUTATION
+        state.reputation = math.max(BRep.min,
+            math.min(BRep.max, (state.reputation or 0) + repMod))
+        local kept = {}
+        for _, m in ipairs(state.modifiers) do
+            if m.target ~= "reputation_penalty" then
                 table.insert(kept, m)
             end
         end

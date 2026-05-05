@@ -1,5 +1,5 @@
 -- ============================================================================
--- 快速操作弹窗集合：科技 / 情报 / 外交 / 资产交易
+-- 快速操作弹窗集合：科技 / 情报 / 外交 / 资产交易 / 市场操盘
 -- 每个弹窗呈现对应模块的可用操作，玩家点击执行
 -- ============================================================================
 
@@ -10,6 +10,7 @@ local Balance = require("data.balance")
 local Tech = require("systems.tech")
 local TechData = require("data.tech_data")
 local Combat = require("systems.combat")
+local StockEngine = require("systems.stock_engine")
 local RegionsData = require("data.regions_data")
 
 local AudioManager = require("systems.audio_manager")
@@ -324,10 +325,26 @@ function ActionModals.ShowDiplomacy(state, accent)
                     fontWeight = "bold",
                     fontColor = C.text_primary,
                 },
+                -- 情报信息（侦察后显示）
+                faction.scouted and UI.Label {
+                    text = string.format("📋 情报：现金 %d  势力 %d  态度 %d",
+                        faction.cash, faction.power, faction.attitude),
+                    fontSize = F.label,
+                    fontColor = C.text_secondary,
+                } or UI.Label {
+                    text = "📋 情报：未知（先侦察）",
+                    fontSize = F.label,
+                    fontColor = C.text_muted,
+                },
                 UI.Panel {
                     flexDirection = "row",
                     gap = 6,
+                    flexWrap = "wrap",
                     children = {
+                        actionBtn("侦察",
+                            { 100, 140, 180, 255 },
+                            function() ActionModals._IntelScout(state, factionLocal) end,
+                            not ActionModals._CanAfford(state, Balance.INTEL.scout)),
                         actionBtn("送礼",
                             C.accent_green,
                             function() ActionModals._DiploGift(state, factionLocal) end,
@@ -347,7 +364,7 @@ function ActionModals.ShowDiplomacy(state, accent)
         end
     end
 
-    ActionModals._ShowList("🤝 政治外交", rows)
+    ActionModals._ShowList("🤝 政治外交 / 情报", rows)
 end
 
 function ActionModals._DiploGift(state, faction)
@@ -476,6 +493,132 @@ function ActionModals.ShowTrade(state, accent)
             not ActionModals._CanAfford(state, attackCfg)
         ))
         end
+    end
+
+    -- ----------------------------------------------------------------
+    -- 📊 市场操盘分组（需前置科技解锁）
+    -- ----------------------------------------------------------------
+    local hasAnyManipTech = (state.tech and state.tech.researched)
+        and (state.tech.researched["d3_newspaper"]
+            or state.tech.researched["d5_radio"]
+            or state.tech.researched["d7_wartime_media"])
+    if hasAnyManipTech then
+        -- 分组标题 + 公信力显示
+        local credibility = state.press_credibility or 100
+        local credMult = StockEngine.GetCredibilityMultiplier(state)
+        local credColor = credibility >= 70 and C.accent_green
+            or credibility >= 40 and C.accent_yellow
+            or C.accent_red
+        table.insert(rows, UI.Panel {
+            width = "100%",
+            paddingVertical = 6,
+            flexDirection = "row",
+            justifyContent = "space-between",
+            alignItems = "center",
+            children = {
+                UI.Label {
+                    text = "📊 市场操盘",
+                    fontSize = F.body,
+                    fontWeight = "bold",
+                    fontColor = C.accent_yellow,
+                },
+                UI.Label {
+                    text = string.format("公信力 %d/100（×%.0f%%）", credibility, credMult * 100),
+                    fontSize = F.small,
+                    fontColor = credColor,
+                },
+            },
+        })
+
+        local manipCfg = Balance.MARKET_MANIPULATION
+        local cd = state.manipulation_cooldowns or {}
+        local researched = state.tech.researched
+
+        -- 1) 做多操盘
+        local pumpUnlocked = researched["d3_newspaper"]
+            and StockEngine.GetHoldingLevel(state, "balkan_press") ~= "none"
+        local pumpCd = cd.pump or 0
+        local pumpDesc
+        if pumpCd > 0 then
+            pumpDesc = string.format("冷却中（%d 季）", pumpCd)
+        elseif not researched["d3_newspaper"] then
+            pumpDesc = "需研究「地方报纸」"
+        elseif StockEngine.GetHoldingLevel(state, "balkan_press") == "none" then
+            pumpDesc = "需持有新闻社 ≥ 战略持股"
+        else
+            local pumpRate = manipCfg.pump.base_success * credMult
+            pumpDesc = string.format("%d AP / 市值×15%%（≥%d）  成功率 %.0f%%",
+                manipCfg.pump.ap, manipCfg.pump.min_cash,
+                pumpRate * 100)
+        end
+        table.insert(rows, ActionModals._TradeOption(
+            "📈 做多操盘",
+            pumpDesc,
+            C.accent_green,
+            function()
+                ActionModals._ShowStockPicker(state, "pump")
+            end,
+            not pumpUnlocked or pumpCd > 0 or state.cash < manipCfg.pump.min_cash
+        ))
+
+        -- 2) 做空操盘
+        local pressLevel = StockEngine.GetHoldingLevel(state, "balkan_press")
+        local dumpUnlocked = researched["d5_radio"]
+            and (pressLevel == "influence" or pressLevel == "control")
+        local dumpCd = cd.dump or 0
+        local dumpDesc
+        if dumpCd > 0 then
+            dumpDesc = string.format("冷却中（%d 季）", dumpCd)
+        elseif not researched["d5_radio"] then
+            dumpDesc = "需研究「广播电台」"
+        elseif pressLevel ~= "influence" and pressLevel ~= "control" then
+            dumpDesc = "需持有新闻社 ≥ 重要持股"
+        else
+            local dumpRate = manipCfg.dump.base_success * credMult
+            dumpDesc = string.format("%d AP / 市值×20%%（≥%d）  成功率 %.0f%%",
+                manipCfg.dump.ap, manipCfg.dump.min_cash,
+                dumpRate * 100)
+        end
+        table.insert(rows, ActionModals._TradeOption(
+            "📉 做空操盘",
+            dumpDesc,
+            C.accent_red,
+            function()
+                ActionModals._ShowStockPicker(state, "dump")
+            end,
+            not dumpUnlocked or dumpCd > 0 or state.cash < manipCfg.dump.min_cash
+        ))
+
+        -- 3) 联合操盘
+        local cultureBonus = GameState.GetPositionBonus(state, "culture_advisor")
+        local coordUnlocked = researched["d7_wartime_media"]
+            and pressLevel == "control"
+            and cultureBonus >= 0.8
+        local coordCd = cd.coordinated or 0
+        local coordDesc
+        if coordCd > 0 then
+            coordDesc = string.format("冷却中（%d 季）", coordCd)
+        elseif not researched["d7_wartime_media"] then
+            coordDesc = "需研究「战时媒体管控」"
+        elseif pressLevel ~= "control" then
+            coordDesc = "需持有新闻社 ≥ 控股"
+        elseif cultureBonus < 0.8 then
+            coordDesc = string.format("需文化顾问加成 ≥ 0.8（当前 %.1f）", cultureBonus)
+        else
+            local coordRate = manipCfg.coordinated.base_success * credMult
+            coordDesc = string.format("%d AP / 固定 %d  成功率 %.0f%%",
+                manipCfg.coordinated.ap, manipCfg.coordinated.fixed_cost,
+                coordRate * 100)
+        end
+        table.insert(rows, ActionModals._TradeOption(
+            "⚡ 联合操盘",
+            coordDesc,
+            C.accent_gold,
+            function()
+                ActionModals._ShowCoordinatedPicker(state)
+            end,
+            not coordUnlocked or coordCd > 0 or state.cash < manipCfg.coordinated.fixed_cost
+        ))
     end
 
     ActionModals._ShowList("🏭 资产交易", rows)
@@ -616,6 +759,441 @@ function ActionModals._TradeMilitaryStrike(state, faction)
 end
 
 -- ============================================================================
+-- 掠夺行动弹窗
+-- ============================================================================
+function ActionModals.ShowPlunder(state, accent)
+    AudioManager.PlayUI("ui_modal_open")
+    closeModal()
+
+    local rows = {}
+    local repTier = GameState.GetReputationTier(state)
+    local repLabel = GameState.GetReputationLabel(repTier)
+    local repColor = repTier <= 2 and C.accent_green or (repTier <= 3 and C.accent_yellow or C.accent_red)
+
+    -- 声誉状态栏
+    table.insert(rows, UI.Panel {
+        width = "100%",
+        padding = 10,
+        backgroundColor = { 45, 30, 30, 255 },
+        borderRadius = S.radius_card,
+        borderWidth = 1,
+        borderColor = repColor,
+        flexDirection = "row",
+        alignItems = "center",
+        gap = 8,
+        children = {
+            UI.Label {
+                text = "声誉等级",
+                fontSize = F.body,
+                fontWeight = "bold",
+                fontColor = C.text_primary,
+            },
+            UI.Panel { flexGrow = 1 },
+            UI.Label {
+                text = string.format("%s（%d）", repLabel, state.reputation or 0),
+                fontSize = F.body,
+                fontWeight = "bold",
+                fontColor = repColor,
+            },
+        },
+    })
+
+    -- 声誉效果提示（仅非清白时显示）
+    if repTier >= 2 then
+        local penalty = GameState.GetTradePenalty(state)
+        local effectText = string.format("交易加价 +%d%%", math.floor(penalty * 100))
+        if repTier >= 4 then
+            effectText = effectText .. "  AI攻击+20%"
+        end
+        if repTier >= 5 then
+            effectText = effectText .. "  控制力-2/季"
+        end
+        table.insert(rows, UI.Panel {
+            width = "100%",
+            padding = 8,
+            backgroundColor = { 60, 30, 30, 200 },
+            borderRadius = S.radius_badge,
+            children = {
+                UI.Label {
+                    text = "⚠ " .. effectText,
+                    fontSize = F.label,
+                    fontColor = C.accent_yellow,
+                },
+            },
+        })
+    end
+
+    -- 已夺取矿脉信息
+    local veins = state.seized_veins or {}
+    if #veins > 0 then
+        local veinText = {}
+        for i, v in ipairs(veins) do
+            table.insert(veinText, string.format("矿脉%d：剩余 %d 季，每季 %d 克朗", i, v.remaining, v.gold_per_turn))
+        end
+        table.insert(rows, UI.Panel {
+            width = "100%",
+            padding = 8,
+            backgroundColor = { 30, 45, 30, 200 },
+            borderRadius = S.radius_badge,
+            children = {
+                UI.Label {
+                    text = "⛏ " .. table.concat(veinText, "\n"),
+                    fontSize = F.label,
+                    fontColor = C.accent_green,
+                    whiteSpace = "normal",
+                },
+            },
+        })
+    end
+
+    -- 三个掠夺选项
+    local plunderActions = {
+        {
+            key = "raid_caravan",
+            title = "🗡️ 劫掠商队",
+            desc = "截击过路商队，掠取现金",
+            fn = function() ActionModals._PlunderRaidCaravan(state) end,
+        },
+        {
+            key = "seize_vein",
+            title = "⛏️ 夺取矿脉",
+            desc = "强占 AI 矿产，获得临时矿脉",
+            fn = function() ActionModals._PlunderSeizeVein(state) end,
+        },
+        {
+            key = "extort_foreign",
+            title = "💰 勒索外资",
+            desc = "威胁外国资本索取赎金",
+            fn = function() ActionModals._PlunderExtortForeign(state) end,
+        },
+    }
+
+    for _, act in ipairs(plunderActions) do
+        local cfg = Balance.PLUNDER[act.key]
+        local cd = (state.plunder_cooldowns or {})[act.key] or 0
+        local onCooldown = cd > 0
+        local canPay = ActionModals._CanAfford(state, cfg)
+        local disabled = onCooldown or not canPay
+        local inflation = GameState.GetInflationFactor(state)
+        local cashCost = math.floor(cfg.cash * inflation)
+
+        local statusText
+        if onCooldown then
+            statusText = string.format("冷却中（%d 季）", cd)
+        else
+            statusText = string.format("%d AP / %d 克朗  声誉 %d", cfg.ap, cashCost, cfg.rep_cost)
+        end
+
+        table.insert(rows, ActionModals._TradeOption(
+            act.title,
+            act.desc .. "\n" .. statusText,
+            onCooldown and C.text_muted or C.accent_red,
+            act.fn,
+            disabled
+        ))
+    end
+
+    ActionModals._ShowList("⚔️ 掠夺行动", rows)
+end
+
+-- ============================================================================
+-- 掠夺行动处理
+-- ============================================================================
+function ActionModals._PlunderRaidCaravan(state)
+    local cfg = Balance.PLUNDER.raid_caravan
+    local cd = (state.plunder_cooldowns or {}).raid_caravan or 0
+    if cd > 0 then
+        UI.Toast.Show(string.format("冷却中，还需 %d 季", cd), { variant = "warning", duration = 1.2 })
+        return
+    end
+    if not ActionModals._CanAfford(state, cfg) then
+        UI.Toast.Show("资源不足", { variant = "error", duration = 1.2 })
+        return
+    end
+    ActionModals._Spend(state, cfg)
+    local ok, msg = Combat.RaidCaravan(state)
+    if ok then
+        UI.Toast.Show(msg, { variant = "success", duration = 2.0 })
+    else
+        UI.Toast.Show(msg, { variant = "error", duration = 2.0 })
+    end
+    closeModal()
+    notifyChanged()
+end
+
+function ActionModals._PlunderSeizeVein(state)
+    local cfg = Balance.PLUNDER.seize_vein
+    local cd = (state.plunder_cooldowns or {}).seize_vein or 0
+    if cd > 0 then
+        UI.Toast.Show(string.format("冷却中，还需 %d 季", cd), { variant = "warning", duration = 1.2 })
+        return
+    end
+    if not ActionModals._CanAfford(state, cfg) then
+        UI.Toast.Show("资源不足", { variant = "error", duration = 1.2 })
+        return
+    end
+    ActionModals._Spend(state, cfg)
+    local ok, msg = Combat.SeizeVein(state)
+    if ok then
+        UI.Toast.Show(msg, { variant = "success", duration = 2.0 })
+    else
+        UI.Toast.Show(msg, { variant = "error", duration = 2.0 })
+    end
+    closeModal()
+    notifyChanged()
+end
+
+function ActionModals._PlunderExtortForeign(state)
+    local cfg = Balance.PLUNDER.extort_foreign
+    local cd = (state.plunder_cooldowns or {}).extort_foreign or 0
+    if cd > 0 then
+        UI.Toast.Show(string.format("冷却中，还需 %d 季", cd), { variant = "warning", duration = 1.2 })
+        return
+    end
+    if not ActionModals._CanAfford(state, cfg) then
+        UI.Toast.Show("资源不足", { variant = "error", duration = 1.2 })
+        return
+    end
+    ActionModals._Spend(state, cfg)
+    local ok, msg = Combat.ExtortForeign(state)
+    if ok then
+        UI.Toast.Show(msg, { variant = "success", duration = 2.0 })
+    else
+        UI.Toast.Show(msg, { variant = "error", duration = 2.0 })
+    end
+    closeModal()
+    notifyChanged()
+end
+
+-- ============================================================================
+-- 市场操盘 — 股票选择器
+-- ============================================================================
+
+--- 单目标选择器（做多/做空操盘）
+---@param state table
+---@param mode string "pump"|"dump"
+function ActionModals._ShowStockPicker(state, mode)
+    closeModal()
+    AudioManager.PlayUI("ui_modal_open")
+
+    local isPump = (mode == "pump")
+    local titleText = isPump and "📈 选择做多目标" or "📉 选择做空目标"
+    local accentColor = isPump and C.accent_green or C.accent_red
+
+    local rows = {}
+    for _, stock in ipairs(state.stocks or {}) do
+        local stockLocal = stock
+        local maxShares = StockEngine.GetMaxShares(stock)
+        local marketCap = stock.price * maxShares
+        local cfg = isPump and Balance.MARKET_MANIPULATION.pump or Balance.MARKET_MANIPULATION.dump
+        local baseCost = math.ceil(marketCap * cfg.cost_ratio)
+        -- 外交总监折扣
+        local discountKey = isPump and "pump" or "dump"
+        local diplomBonus = GameState.GetPositionBonus(state, "diplomat")
+        local discount = (diplomBonus > 0) and (Balance.MARKET_MANIPULATION.diplomat_discount[discountKey] or 0) or 0
+        local actualCost = math.ceil(baseCost * (1 - discount))
+        local finalCost = math.max(cfg.min_cash, actualCost)
+        local canAfford = state.cash >= finalCost
+            and (state.ap.current + (state.ap.temp or 0)) >= cfg.ap
+
+        local costText = string.format("价格 %.2f  市值 %d\n投入 %d 克朗",
+            stock.price, math.floor(marketCap), math.floor(finalCost))
+        if discount > 0 then
+            costText = costText .. string.format("（外交优惠 -%d%%）", math.floor(discount * 100))
+        end
+
+        table.insert(rows, UI.Panel {
+            width = "100%",
+            padding = 10,
+            backgroundColor = C.paper_dark,
+            borderRadius = S.radius_card,
+            borderLeftWidth = 2,
+            borderLeftColor = accentColor,
+            flexDirection = "row",
+            alignItems = "center",
+            gap = 8,
+            children = {
+                UI.Panel {
+                    flexGrow = 1, flexShrink = 1,
+                    flexDirection = "column",
+                    gap = 2,
+                    children = {
+                        UI.Label {
+                            text = (stock.name or stock.id),
+                            fontSize = F.body,
+                            fontWeight = "bold",
+                            fontColor = C.text_primary,
+                        },
+                        UI.Label {
+                            text = costText,
+                            fontSize = F.label,
+                            fontColor = C.text_secondary,
+                            whiteSpace = "normal",
+                        },
+                    },
+                },
+                actionBtn("选择", accentColor,
+                    function()
+                        closeModal()
+                        ActionModals._ExecManipulation(state, mode, stockLocal.id)
+                    end,
+                    not canAfford
+                ),
+            },
+        })
+    end
+
+    ActionModals._ShowList(titleText, rows)
+end
+
+--- 联合操盘双目标选择器
+---@param state table
+function ActionModals._ShowCoordinatedPicker(state)
+    closeModal()
+    AudioManager.PlayUI("ui_modal_open")
+
+    -- 第一步：选择做多目标
+    ActionModals._ShowCoordinatedStep1(state)
+end
+
+function ActionModals._ShowCoordinatedStep1(state)
+    local rows = {}
+    for _, stock in ipairs(state.stocks or {}) do
+        local stockLocal = stock
+        table.insert(rows, UI.Panel {
+            width = "100%",
+            padding = 10,
+            backgroundColor = C.paper_dark,
+            borderRadius = S.radius_card,
+            borderLeftWidth = 2,
+            borderLeftColor = C.accent_green,
+            flexDirection = "row",
+            alignItems = "center",
+            gap = 8,
+            children = {
+                UI.Panel {
+                    flexGrow = 1, flexShrink = 1,
+                    children = {
+                        UI.Label {
+                            text = (stock.name or stock.id),
+                            fontSize = F.body,
+                            fontWeight = "bold",
+                            fontColor = C.text_primary,
+                        },
+                        UI.Label {
+                            text = string.format("当前价格 %.2f", stock.price),
+                            fontSize = F.label,
+                            fontColor = C.text_secondary,
+                        },
+                    },
+                },
+                actionBtn("做多", C.accent_green,
+                    function()
+                        closeModal()
+                        ActionModals._ShowCoordinatedStep2(state, stockLocal.id)
+                    end,
+                    false
+                ),
+            },
+        })
+    end
+
+    ActionModals._ShowList("⚡ 联合操盘 — 选择做多目标", rows)
+end
+
+function ActionModals._ShowCoordinatedStep2(state, pumpStockId)
+    local rows = {}
+    local pumpStock = StockEngine.Find(state, pumpStockId)
+    local pumpName = pumpStock and pumpStock.name or pumpStockId
+
+    -- 提示已选做多目标
+    table.insert(rows, UI.Panel {
+        width = "100%",
+        padding = 8,
+        backgroundColor = { 30, 50, 30, 200 },
+        borderRadius = S.radius_badge,
+        children = {
+            UI.Label {
+                text = string.format("📈 做多目标：%s", pumpName),
+                fontSize = F.label,
+                fontColor = C.accent_green,
+            },
+        },
+    })
+
+    for _, stock in ipairs(state.stocks or {}) do
+        if stock.id ~= pumpStockId then
+            local stockLocal = stock
+            table.insert(rows, UI.Panel {
+                width = "100%",
+                padding = 10,
+                backgroundColor = C.paper_dark,
+                borderRadius = S.radius_card,
+                borderLeftWidth = 2,
+                borderLeftColor = C.accent_red,
+                flexDirection = "row",
+                alignItems = "center",
+                gap = 8,
+                children = {
+                    UI.Panel {
+                        flexGrow = 1, flexShrink = 1,
+                        children = {
+                            UI.Label {
+                                text = (stock.name or stock.id),
+                                fontSize = F.body,
+                                fontWeight = "bold",
+                                fontColor = C.text_primary,
+                            },
+                            UI.Label {
+                                text = string.format("当前价格 %.2f", stock.price),
+                                fontSize = F.label,
+                                fontColor = C.text_secondary,
+                            },
+                        },
+                    },
+                    actionBtn("做空", C.accent_red,
+                        function()
+                            closeModal()
+                            ActionModals._ExecCoordinated(state, pumpStockId, stockLocal.id)
+                        end,
+                        false
+                    ),
+                },
+            })
+        end
+    end
+
+    ActionModals._ShowList("⚡ 联合操盘 — 选择做空目标", rows)
+end
+
+--- 执行单目标操盘
+function ActionModals._ExecManipulation(state, mode, stockId)
+    local ok, msg
+    if mode == "pump" then
+        ok, msg = StockEngine.MarketPump(state, stockId)
+    else
+        ok, msg = StockEngine.MarketDump(state, stockId)
+    end
+    if ok then
+        UI.Toast.Show(msg or "操盘成功", { variant = "success", duration = 2.0 })
+    else
+        UI.Toast.Show(msg or "操盘失败", { variant = "error", duration = 2.0 })
+    end
+    notifyChanged()
+end
+
+--- 执行联合操盘
+function ActionModals._ExecCoordinated(state, pumpStockId, dumpStockId)
+    local ok, msg = StockEngine.CoordinatedOp(state, pumpStockId, dumpStockId)
+    if ok then
+        UI.Toast.Show(msg or "联合操盘成功", { variant = "success", duration = 2.0 })
+    else
+        UI.Toast.Show(msg or "联合操盘失败", { variant = "error", duration = 2.0 })
+    end
+    notifyChanged()
+end
+
+-- ============================================================================
 -- 通用列表弹窗
 -- ============================================================================
 function ActionModals._ShowList(title, rows)
@@ -626,6 +1204,7 @@ function ActionModals._ShowList(title, rows)
         closeOnEscape = true,
         showCloseButton = true,
         onClose = function(self)
+            Config.ConsumeTap()
             currentModal_ = nil
             self:Destroy()
         end,

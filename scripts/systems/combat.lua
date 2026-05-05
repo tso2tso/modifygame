@@ -193,6 +193,166 @@ function Combat.ApplyResult(state, faction, result)
 end
 
 -- ============================================================================
+-- 掠夺系统：轻量级力量检定（不走完整 Combat.Resolve）
+-- ============================================================================
+
+local BP = Balance.PLUNDER
+local BR = Balance.REPUTATION
+
+--- 掠夺力量检定（成功率 = clamp(玩家战力 / (难度 × 随机因子), floor, ceil)）
+---@param state table
+---@param actionKey string "raid_caravan"|"seize_vein"|"extort_foreign"
+---@return boolean success
+---@return number successRate
+function Combat.PlunderCheck(state, actionKey)
+    local cfg = BP[actionKey]
+    if not cfg then return false, 0 end
+    local playerPower = Combat.PlayerPower(state)
+    local randomFactor = 0.8 + math.random() * 0.4  -- 0.8~1.2
+    local successRate = Clamp(playerPower / (cfg.difficulty * randomFactor), BP.success_floor, BP.success_ceil)
+    local roll = math.random()
+    return roll < successRate, successRate
+end
+
+--- 劫掠商队
+---@param state table
+---@return boolean success
+---@return string msg
+function Combat.RaidCaravan(state)
+    local cfg = BP.raid_caravan
+    local success, rate = Combat.PlunderCheck(state, "raid_caravan")
+    -- 声誉代价（无论成败）
+    state.reputation = math.max(BR.min, (state.reputation or 0) + cfg.rep_cost)
+    -- 设置冷却
+    state.plunder_cooldowns = state.plunder_cooldowns or {}
+    state.plunder_cooldowns.raid_caravan = cfg.cooldown
+
+    -- 科技加成：冷却缩减
+    local cdReduction = state.plunder_cooldown_reduction or 0
+    if cdReduction > 0 then
+        state.plunder_cooldowns.raid_caravan = math.max(1, state.plunder_cooldowns.raid_caravan - cdReduction)
+    end
+
+    if success then
+        -- 称号计数：掠夺成功
+        state.stats = state.stats or {}
+        state.stats.plunder_successes = (state.stats.plunder_successes or 0) + 1
+        local loot = math.random(cfg.loot_min, cfg.loot_max)
+        -- 通胀调整
+        local inflation = GameState.GetInflationFactor(state)
+        loot = math.floor(loot * inflation)
+        -- 科技加成：掠夺收益倍率
+        local lootMult = state.plunder_loot_mult_bonus or 0
+        if lootMult > 0 then
+            loot = math.floor(loot * (1 + lootMult))
+        end
+        state.cash = state.cash + loot
+        local msg = string.format("⚔ 劫掠商队成功！缴获 %d 克朗（成功率 %d%%，声誉 %d）",
+            loot, math.floor(rate * 100), state.reputation)
+        GameState.AddLog(state, msg)
+        return true, msg
+    else
+        -- 失败：损失护卫
+        local lost = math.min(cfg.fail_guard_loss, state.military.guards)
+        state.military.guards = math.max(0, state.military.guards - lost)
+        Equipment.OnGuardsLost(state, lost)
+        local msg = string.format("💥 劫掠商队失败，折损 %d 名护卫（成功率 %d%%，声誉 %d）",
+            lost, math.floor(rate * 100), state.reputation)
+        GameState.AddLog(state, msg)
+        return false, msg
+    end
+end
+
+--- 夺取矿脉
+---@param state table
+---@return boolean success
+---@return string msg
+function Combat.SeizeVein(state)
+    local cfg = BP.seize_vein
+    local success, rate = Combat.PlunderCheck(state, "seize_vein")
+    -- 声誉代价
+    state.reputation = math.max(BR.min, (state.reputation or 0) + cfg.rep_cost)
+    state.plunder_cooldowns = state.plunder_cooldowns or {}
+    state.plunder_cooldowns.seize_vein = cfg.cooldown
+    -- 科技加成：冷却缩减
+    local cdReduction = state.plunder_cooldown_reduction or 0
+    if cdReduction > 0 then
+        state.plunder_cooldowns.seize_vein = math.max(1, state.plunder_cooldowns.seize_vein - cdReduction)
+    end
+
+    if success then
+        -- 称号计数：掠夺成功
+        state.stats = state.stats or {}
+        state.stats.plunder_successes = (state.stats.plunder_successes or 0) + 1
+        state.has_seized_veins = true
+        state.seized_veins = state.seized_veins or {}
+        table.insert(state.seized_veins, {
+            remaining = cfg.vein_duration,
+            gold_per_turn = cfg.vein_gold_per_turn,
+        })
+        local msg = string.format("⛏ 夺取矿脉成功！获得临时矿脉（%d季，每季产%d克朗，成功率%d%%，声誉%d）",
+            cfg.vein_duration, cfg.vein_gold_per_turn, math.floor(rate * 100), state.reputation)
+        GameState.AddLog(state, msg)
+        return true, msg
+    else
+        -- 失败：声誉额外暴跌
+        state.reputation = math.max(BR.min, state.reputation + cfg.fail_rep_extra)
+        local msg = string.format("💥 夺取矿脉失败，声誉暴跌（成功率 %d%%，声誉 %d）",
+            math.floor(rate * 100), state.reputation)
+        GameState.AddLog(state, msg)
+        return false, msg
+    end
+end
+
+--- 勒索外资
+---@param state table
+---@return boolean success
+---@return string msg
+function Combat.ExtortForeign(state)
+    local cfg = BP.extort_foreign
+    local success, rate = Combat.PlunderCheck(state, "extort_foreign")
+    -- 声誉代价
+    state.reputation = math.max(BR.min, (state.reputation or 0) + cfg.rep_cost)
+    state.plunder_cooldowns = state.plunder_cooldowns or {}
+    state.plunder_cooldowns.extort_foreign = cfg.cooldown
+    -- 科技加成：冷却缩减
+    local cdReduction = state.plunder_cooldown_reduction or 0
+    if cdReduction > 0 then
+        state.plunder_cooldowns.extort_foreign = math.max(1, state.plunder_cooldowns.extort_foreign - cdReduction)
+    end
+
+    if success then
+        -- 称号计数：掠夺成功
+        state.stats = state.stats or {}
+        state.stats.plunder_successes = (state.stats.plunder_successes or 0) + 1
+        local loot = math.random(cfg.loot_min, cfg.loot_max)
+        local inflation = GameState.GetInflationFactor(state)
+        loot = math.floor(loot * inflation)
+        -- 科技加成：掠夺收益倍率
+        local lootMult = state.plunder_loot_mult_bonus or 0
+        if lootMult > 0 then
+            loot = math.floor(loot * (1 + lootMult))
+        end
+        state.cash = state.cash + loot
+        local msg = string.format("💰 勒索外资成功！获得 %d 克朗（成功率 %d%%，声誉 %d）",
+            loot, math.floor(rate * 100), state.reputation)
+        GameState.AddLog(state, msg)
+        return true, msg
+    else
+        -- 失败：外资反击加速
+        for _, faction in ipairs(state.ai_factions) do
+            if faction.type == "foreign_capital" and not faction.defeated then
+                faction.attitude = math.max(-100, faction.attitude - cfg.fail_aggression_boost)
+            end
+        end
+        local msg = string.format("💥 勒索外资失败，外资加速反击（成功率 %d%%，声誉 %d）",
+            math.floor(rate * 100), state.reputation)
+        GameState.AddLog(state, msg)
+        return false, msg
+    end
+end
+
+-- ============================================================================
 -- AI 行动：每季度调用，AI 可能主动进攻玩家
 -- ============================================================================
 ---@param state table
@@ -206,7 +366,16 @@ function Combat.ResolveAIActions(state)
         if not faction.pact_remaining or faction.pact_remaining <= 0 then
             local aiConfig = Balance.AI[faction.type] or {}
             local chance = BC.ai_attack_chance * (1 + (aiConfig.aggression or 0))
-            if faction.attitude <= BC.ai_attack_threshold
+            -- 声誉系统：声誉差时 AI 更积极进攻
+            local repTier = GameState.GetReputationTier(state)
+            local repAttackBonus = BR.ai_attack_bonus[repTier] or 0
+            chance = chance + repAttackBonus
+            -- 声誉 < -30 时降低攻击阈值（更容易触发）
+            local effectiveThreshold = BC.ai_attack_threshold
+            if (state.reputation or 0) < BR.thresholds.notorious then
+                effectiveThreshold = effectiveThreshold + 10  -- 阈值从 -20 升至 -10（更容易满足）
+            end
+            if faction.attitude <= effectiveThreshold
                 and faction.power >= BC.ai_attack_power_req
                 and math.random() < math.min(0.85, chance) then
                 local result = Combat.Resolve(state, faction, true)
@@ -233,6 +402,9 @@ function Combat.PlayerAttack(state, factionId)
     if not target then return false, "目标不存在" end
     if target.defeated then return false, "该势力已被击败" end
     if target.collapsed then return false, "该势力已瘫痪，无法发起进攻" end
+    -- 称号计数：主动攻击
+    state.stats = state.stats or {}
+    state.stats.attacks_initiated = (state.stats.attacks_initiated or 0) + 1
     local result = Combat.Resolve(state, target, false)
     local log = Combat.ApplyResult(state, target, result)
     return true, log

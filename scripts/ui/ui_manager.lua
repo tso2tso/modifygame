@@ -442,8 +442,8 @@ function UIManager._OnQuickAction(actionId)
     -- 功能型弹窗（不扣 AP，由具体操作扣）
     if actionId == "technology" then
         ActionModals.ShowTechnology(stateRef_, accent)
-    elseif actionId == "intelligence" then
-        ActionModals.ShowIntelligence(stateRef_, accent)
+    elseif actionId == "plunder" then
+        ActionModals.ShowPlunder(stateRef_, accent)
     elseif actionId == "diplomacy" then
         ActionModals.ShowDiplomacy(stateRef_, accent)
     elseif actionId == "trade" then
@@ -489,6 +489,7 @@ function UIManager._OpenSettings()
         closeOnEscape = true,
         showCloseButton = false,
         onClose = function(self)
+            Config.ConsumeTap()
             settingsDrawer_ = nil
             self:Destroy()
         end,
@@ -656,6 +657,193 @@ end
 
 function UIManager.ShowVictoryPrompt(state)
     EndingModal.ShowVictoryPrompt(state or stateRef_)
+end
+
+-- ============================================================================
+-- 新闻快报弹窗（market_intel 事件专用）
+-- 回合结束后弹出，展示市场情报，根据顾问等级分层显示信息
+-- ============================================================================
+
+---@type table|nil 当前新闻快报弹窗实例
+local intelPopup_ = nil
+
+--- 展示市场情报新闻快报
+---@param state table 游戏状态
+---@param intelMsgs table[] market_intel 消息数组
+function UIManager.ShowMarketIntelPopup(state, intelMsgs)
+    if not intelMsgs or #intelMsgs == 0 then return end
+    if intelPopup_ then
+        intelPopup_:Close()
+        intelPopup_ = nil
+    end
+
+    local cards = {}
+    for i, msg in ipairs(intelMsgs) do
+        local cardChildren = {}
+
+        -- 标题行
+        table.insert(cardChildren, UI.Panel {
+            width = "100%",
+            flexDirection = "row",
+            alignItems = "center",
+            gap = 6,
+            children = {
+                UI.Label {
+                    text = msg.icon or "📰",
+                    fontSize = 20,
+                    pointerEvents = "none",
+                },
+                UI.Label {
+                    text = msg.title or "市场快讯",
+                    fontSize = F.body,
+                    fontWeight = "bold",
+                    fontColor = { 220, 200, 140, 255 },
+                    flexShrink = 1,
+                    pointerEvents = "none",
+                },
+            },
+        })
+
+        -- 公开消息（所有人可见）
+        if msg.public then
+            table.insert(cardChildren, UI.Panel {
+                width = "100%",
+                padding = 8,
+                backgroundColor = { 50, 55, 65, 255 },
+                borderRadius = S.radius_btn,
+                children = {
+                    UI.Label {
+                        text = "📢 " .. msg.public,
+                        fontSize = F.body_minor,
+                        fontColor = { 200, 195, 180, 255 },
+                        whiteSpace = "normal",
+                        pointerEvents = "none",
+                    },
+                },
+            })
+        end
+
+        -- 顾问提示（普通顾问可见）
+        if msg.hint then
+            table.insert(cardChildren, UI.Panel {
+                width = "100%",
+                padding = 8,
+                backgroundColor = { 40, 55, 75, 255 },
+                borderRadius = S.radius_btn,
+                borderLeftWidth = 2,
+                borderLeftColor = { 100, 160, 220, 255 },
+                children = {
+                    UI.Label {
+                        text = "🔍 顾问提示：" .. msg.hint,
+                        fontSize = F.body_minor,
+                        fontColor = { 160, 200, 255, 255 },
+                        whiteSpace = "normal",
+                        pointerEvents = "none",
+                    },
+                },
+            })
+        end
+
+        -- 精确情报（满配顾问可见）
+        if msg.intel then
+            table.insert(cardChildren, UI.Panel {
+                width = "100%",
+                padding = 8,
+                backgroundColor = { 50, 40, 25, 255 },
+                borderRadius = S.radius_btn,
+                borderLeftWidth = 2,
+                borderLeftColor = C.accent_gold,
+                children = {
+                    UI.Label {
+                        text = "⭐ 内部情报：" .. msg.intel,
+                        fontSize = F.body_minor,
+                        fontColor = C.accent_gold,
+                        whiteSpace = "normal",
+                        pointerEvents = "none",
+                    },
+                },
+            })
+        end
+
+        -- 顾问等级标签
+        local levelText, levelColor
+        if msg.advisor_level == "excellent" then
+            levelText = "情报等级：精确"
+            levelColor = C.accent_gold
+        elseif msg.advisor_level == "normal" then
+            levelText = "情报等级：模糊"
+            levelColor = { 100, 160, 220, 255 }
+        else
+            levelText = "情报等级：公开（无顾问）"
+            levelColor = C.text_muted
+        end
+        table.insert(cardChildren, UI.Label {
+            text = levelText,
+            fontSize = F.label,
+            fontColor = levelColor,
+            textAlign = "right",
+            pointerEvents = "none",
+        })
+
+        -- 每条情报的卡片
+        table.insert(cards, UI.Panel {
+            width = "100%",
+            padding = 10,
+            backgroundColor = { 35, 38, 48, 255 },
+            borderRadius = S.radius_card,
+            borderWidth = 1,
+            borderColor = { 70, 65, 50, 200 },
+            flexDirection = "column",
+            gap = 6,
+            children = cardChildren,
+        })
+    end
+
+    -- 底部"知道了"按钮
+    table.insert(cards, UI.Button {
+        text = "知道了",
+        variant = "primary",
+        width = "100%",
+        height = 40,
+        onClick = function()
+            if intelPopup_ then
+                intelPopup_:Close()
+                intelPopup_ = nil
+            end
+        end,
+    })
+
+    intelPopup_ = UI.Modal {
+        title = "📰 新闻快报",
+        size = "md",
+        closeOnOverlay = true,
+        closeOnEscape = true,
+        showCloseButton = true,
+        onClose = function(self)
+            Config.ConsumeTap()
+            intelPopup_ = nil
+            self:Destroy()
+        end,
+    }
+    local content = UI.ScrollView {
+        width = "100%",
+        maxHeight = 420,
+        flexShrink = 1,
+        bounces = false,
+        children = {
+            UI.Panel {
+                width = "100%",
+                flexDirection = "column",
+                gap = 8,
+                children = cards,
+            },
+        },
+    }
+    intelPopup_:AddContent(content)
+    if uiRoot_ then
+        uiRoot_:AddChild(intelPopup_)
+    end
+    intelPopup_:Open()
 end
 
 return UIManager

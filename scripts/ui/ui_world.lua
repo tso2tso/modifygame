@@ -527,10 +527,15 @@ function WorldPage._CreateNodeDrawer(state, region, tile)
         local infCost = Balance.INFLUENCE.cost_infiltrate
         local totalInfluence = GameState.CalcTotalInfluence(state)
         local infiltrateAP = 2  -- TODO: 提取到 Balance 配置（当前硬编码）
-        local canInfiltrate = (state.ap.current + (state.ap.temp or 0)) >= infiltrateAP
+        local alreadyFull = (region.control or 0) >= 100
+        local canInfiltrate = not alreadyFull
+            and (state.ap.current + (state.ap.temp or 0)) >= infiltrateAP
             and totalInfluence >= infCost
+        local btnText = alreadyFull
+            and string.format("%s 已完全控制", region.name)
+            or string.format("渗透%s（%dAP+%d影响力）", region.name, infiltrateAP, infCost)
         table.insert(actionChildren, UI.Button {
-            text = string.format("政治渗透（%dAP+%d影响力）", infiltrateAP, infCost),
+            text = btnText,
             fontSize = F.label,
             fontColor = canInfiltrate and C.text_primary or C.text_muted,
             backgroundColor = canInfiltrate and C.paper_mid or C.bg_elevated,
@@ -1960,6 +1965,12 @@ function WorldPage._BuildReportTab(state)
     -- 1. 本季结算摘要
     table.insert(widgets, WorldPage._CreateSeasonSummary(state))
 
+    -- 1.5. 称号卡片（有称号时才显示）
+    local titlesCard = WorldPage._CreateTitlesCard(state)
+    if titlesCard then
+        table.insert(widgets, titlesCard)
+    end
+
     -- 2. 全局指标变化
     table.insert(widgets, WorldPage._CreateGlobalIndicators(state))
 
@@ -1973,6 +1984,143 @@ function WorldPage._BuildReportTab(state)
         paddingTop = S.card_gap,
         children = widgets,
     })
+end
+
+--- 称号卡片：展示已获得称号 + 各类别进度
+function WorldPage._CreateTitlesCard(state)
+    local TitlesData = require("data.titles_data")
+    local Titles = require("systems.titles")
+
+    local unlockedCount = Titles.UnlockedCount(state)
+    local totalCount = #TitlesData.TITLES
+
+    -- 没有称号且没有新称号提示时不显示卡片
+    local hasNew = state.titles_new and #state.titles_new > 0
+    if unlockedCount == 0 and not hasNew then return nil end
+
+    local children = {}
+
+    -- 标题行
+    table.insert(children, UI.Panel {
+        flexDirection = "row",
+        alignItems = "center",
+        gap = 8,
+        children = {
+            UI.Label { text = "🏅", fontSize = S.icon_size },
+            UI.Label {
+                text = string.format("称号殿堂 (%d/%d)", unlockedCount, totalCount),
+                fontSize = F.card_title,
+                fontWeight = "bold",
+                fontColor = C.accent_gold,
+            },
+        },
+    })
+    table.insert(children, UI.Divider { color = C.divider })
+
+    -- 新解锁提示
+    if hasNew then
+        for _, tid in ipairs(state.titles_new) do
+            local t = TitlesData.GetById(tid)
+            if t then
+                table.insert(children, UI.Panel {
+                    width = "100%",
+                    backgroundColor = "#3a2a00",
+                    borderRadius = 4,
+                    padding = 6,
+                    flexDirection = "row",
+                    alignItems = "center",
+                    gap = 6,
+                    children = {
+                        UI.Label { text = "✨", fontSize = F.body },
+                        UI.Label {
+                            text = string.format("新称号「%s」— %s", t.name, t.desc),
+                            fontSize = F.body,
+                            fontColor = "#FFD700",
+                        },
+                    },
+                })
+            end
+        end
+        -- 清除新称号提示（已展示）
+        state.titles_new = {}
+    end
+
+    -- 各类别进度
+    for _, cat in ipairs(TitlesData.CATEGORIES) do
+        local catTitles = TitlesData.GetByCategory(cat.id)
+        local unlocked = 0
+        local unlockedNames = {}
+        for _, t in ipairs(catTitles) do
+            if state.titles_unlocked and state.titles_unlocked[t.id] then
+                unlocked = unlocked + 1
+                table.insert(unlockedNames, t.name)
+            end
+        end
+        if unlocked > 0 then
+            local namesText = table.concat(unlockedNames, "  ")
+            table.insert(children, UI.Panel {
+                width = "100%",
+                flexDirection = "column",
+                gap = 2,
+                children = {
+                    UI.Panel {
+                        flexDirection = "row",
+                        alignItems = "center",
+                        gap = 4,
+                        children = {
+                            UI.Label {
+                                text = (cat.icon or "•") .. " " .. cat.label,
+                                fontSize = F.small,
+                                fontColor = C.text_secondary,
+                            },
+                            UI.Label {
+                                text = string.format("(%d/%d)", unlocked, #catTitles),
+                                fontSize = F.small,
+                                fontColor = C.text_dim,
+                            },
+                        },
+                    },
+                    UI.Label {
+                        text = namesText,
+                        fontSize = F.small,
+                        fontColor = C.accent_gold,
+                        paddingLeft = 8,
+                    },
+                },
+            })
+        else
+            -- 未解锁：仅显示类别进度
+            table.insert(children, UI.Panel {
+                flexDirection = "row",
+                alignItems = "center",
+                gap = 4,
+                children = {
+                    UI.Label {
+                        text = (cat.icon or "•") .. " " .. cat.label,
+                        fontSize = F.small,
+                        fontColor = C.text_dim,
+                    },
+                    UI.Label {
+                        text = string.format("(0/%d)", #catTitles),
+                        fontSize = F.small,
+                        fontColor = C.text_dim,
+                    },
+                },
+            })
+        end
+    end
+
+    return UI.Panel {
+        width = "100%",
+        backgroundColor = C.paper_dark,
+        borderRadius = S.radius_card,
+        borderWidth = 1,
+        borderColor = C.border_gold,
+        padding = S.card_padding,
+        flexDirection = "column",
+        gap = 6,
+        children = children,
+    }
 end
 
 --- 本季结算摘要
@@ -2242,7 +2390,8 @@ function WorldPage._ControlBar(name, pct, color)
                 text = name,
                 fontSize = F.label,
                 fontColor = C.text_secondary,
-                width = 52,
+                width = 72,
+                flexShrink = 0,
             },
             UI.ProgressBar {
                 value = pct / 100,
@@ -2253,10 +2402,11 @@ function WorldPage._ControlBar(name, pct, color)
                 fillColor = { color[1], color[2], color[3], 255 },
             },
             UI.Label {
-                text = pct .. "%",
+                text = string.format("%02d%%", pct),
                 fontSize = F.label,
                 fontColor = { color[1], color[2], color[3], 255 },
-                width = 32,
+                width = 40,
+                flexShrink = 0,
                 textAlign = "right",
             },
         },

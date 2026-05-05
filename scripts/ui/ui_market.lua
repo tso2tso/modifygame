@@ -45,6 +45,7 @@ local SECTOR_NAMES = {
     military   = "军工",
     finance    = "金融",
     trade      = "贸易",
+    media      = "媒体",
 }
 
 --- 创建市场页内容
@@ -1114,6 +1115,30 @@ function MarketPage._PortfolioCard(state, val, pnl, pnlColor, accent)
         })
     end
 
+    -- 做空仓位
+    local shortsList = {}
+    local shortCnt = 0
+    if state.portfolio and state.portfolio.short_positions then
+        for stockId, sp in pairs(state.portfolio.short_positions) do
+            if sp.shares and sp.shares > 0 then
+                shortCnt = shortCnt + 1
+                local stock = StockEngine.Find(state, stockId)
+                if stock then
+                    local floatPnl = (sp.entry_price - stock.price) * sp.shares
+                    local pnlSign = floatPnl >= 0 and "+" or ""
+                    local spColor = floatPnl >= 0 and C.accent_green or C.accent_red
+                    table.insert(shortsList, UI.Label {
+                        text = string.format("· %s 空×%d 入%.2f 浮盈%s%.0f 第%d季",
+                            stock.name, sp.shares, sp.entry_price,
+                            pnlSign, floatPnl, sp.seasons_held or 0),
+                        fontSize = F.body_minor,
+                        fontColor = spColor,
+                    })
+                end
+            end
+        end
+    end
+
     local children = {
         UI.Panel {
             width = "100%",
@@ -1138,6 +1163,35 @@ function MarketPage._PortfolioCard(state, val, pnl, pnlColor, accent)
         },
     }
     for _, w in ipairs(holdingsList) do table.insert(children, w) end
+
+    -- 做空仓位区域
+    if shortCnt > 0 then
+        table.insert(children, UI.Divider { color = C.divider })
+        local shortVal = StockEngine.ShortPositionValue(state)
+        local shortPnlColor = (shortVal.total_pnl or 0) >= 0 and C.accent_green or C.accent_red
+        table.insert(children, UI.Panel {
+            width = "100%",
+            flexDirection = "row",
+            alignItems = "center",
+            justifyContent = "space-between",
+            children = {
+                UI.Label {
+                    text = "空头仓位",
+                    fontSize = F.body,
+                    fontWeight = "bold",
+                    fontColor = C.text_primary,
+                },
+                UI.Label {
+                    text = string.format("保证金 %.0f  浮盈 %+.0f",
+                        shortVal.total_margin or 0, shortVal.total_pnl or 0),
+                    fontSize = F.body_minor,
+                    fontWeight = "bold",
+                    fontColor = shortPnlColor,
+                },
+            },
+        })
+        for _, w in ipairs(shortsList) do table.insert(children, w) end
+    end
 
     return UI.Panel {
         width = "100%",
@@ -1403,6 +1457,7 @@ function MarketPage._OpenTradeModal(state, stock, accent)
         closeOnEscape = true,
         showCloseButton = true,
         onClose = function(self)
+            Config.ConsumeTap()
             UI.ClearFocus()                        -- 清焦点 → TextField:OnBlur
             input:SetScreenKeyboardVisible(false)  -- 保底：确保键盘一定关闭
             modalCloseTime_ = time:GetElapsedTime() -- 记录关闭时刻，防穿透
@@ -1445,15 +1500,47 @@ function MarketPage._OpenTradeModal(state, stock, accent)
                 fontSize = F.body_minor,
                 fontColor = C.text_secondary,
             },
-            -- 持仓
-            UI.Label {
-                text = string.format("当前持仓：%d 股  均价 %.2f",
-                    holdingShares,
-                    (holding and holding.avg_cost) or 0),
-                fontSize = F.body_minor,
-                fontColor = C.text_secondary,
+            -- 持仓 + 上限
+            UI.Panel {
+                flexDirection = "row",
+                justifyContent = "space-between",
+                alignItems = "center",
+                children = {
+                    UI.Label {
+                        text = string.format("当前持仓：%d 股  均价 %.2f",
+                            holdingShares,
+                            (holding and holding.avg_cost) or 0),
+                        fontSize = F.body_minor,
+                        fontColor = C.text_secondary,
+                    },
+                    UI.Label {
+                        text = string.format("上限 %d", StockEngine.GetMaxShares(stock)),
+                        fontSize = F.label,
+                        fontColor = holdingShares >= StockEngine.GetMaxShares(stock)
+                            and C.accent_red or C.text_muted,
+                    },
+                },
             },
             UI.Divider { color = C.divider },
+            -- M2: 操盘方向锁提示（仅影响操盘，不影响普通买卖）
+            (function()
+                local noPump = StockEngine.CheckDirectionLock(state, stock.id, "no_pump")
+                local noDump = StockEngine.CheckDirectionLock(state, stock.id, "no_dump")
+                if noPump > 0 or noDump > 0 then
+                    local parts = {}
+                    if noPump > 0 then table.insert(parts, string.format("禁止做多操盘（%d季）", noPump)) end
+                    if noDump > 0 then table.insert(parts, string.format("禁止做空操盘（%d季）", noDump)) end
+                    return UI.Label {
+                        text = "🔒 " .. table.concat(parts, "  "),
+                        fontSize = F.label,
+                        fontColor = C.accent_red,
+                        textAlign = "center",
+                        width = "100%",
+                        marginBottom = 4,
+                    }
+                end
+                return UI.Panel { width = 0, height = 0 }
+            end)(),
             -- 数量选择器
             UI.Panel {
                 flexDirection = "row",
@@ -1487,7 +1574,15 @@ function MarketPage._OpenTradeModal(state, stock, accent)
                 gap = 8,
                 children = {
                     MarketPage._ActionBtn("🔥 梭哈", C.accent_gold, function()
-                        local maxQty = math.floor((state.cash or 0) / stock.price)
+                        local buyable = StockEngine.GetBuyableShares(state, stock.id)
+                        if buyable <= 0 then
+                            UI.Toast.Show(string.format("已达持仓上限（%d 股）",
+                                StockEngine.GetMaxShares(stock)),
+                                { variant = "warning", duration = 1.5 })
+                            return
+                        end
+                        local cashMax = math.floor((state.cash or 0) / stock.price)
+                        local maxQty = math.min(cashMax, buyable)
                         if maxQty >= 1 then
                             MarketPage._OnBuy(state, stock.id, maxQty)
                         else
@@ -1502,6 +1597,8 @@ function MarketPage._OpenTradeModal(state, stock, accent)
                         or UI.Panel { width = 0, height = 0 },
                 },
             },
+            -- 做空/平仓（需 b7_short_selling 科技）
+            MarketPage._ShortSection(state, stock, accent),
         },
     }
     tradeModal_:AddContent(content)
@@ -1574,6 +1671,153 @@ function MarketPage._OnSell(state, stockId, qty)
         if onStateChanged_ then onStateChanged_() end
     else
         UI.Toast.Show(msg or "卖出失败", { variant = "error", duration = 1.5 })
+    end
+end
+
+-- ============================================================================
+-- 做空/平仓区域（交易弹窗内）
+-- ============================================================================
+function MarketPage._ShortSection(state, stock, accent)
+    local hasTech = state.tech and state.tech.researched
+        and state.tech.researched["b7_short_selling"]
+    if not hasTech then
+        return UI.Panel { width = 0, height = 0 }
+    end
+
+    local sp = state.portfolio and state.portfolio.short_positions
+        and state.portfolio.short_positions[stock.id]
+    local shortShares = (sp and sp.shares) or 0
+    local maxShort = StockEngine.GetMaxShortShares(state, stock.id)
+    local canShortMore = shortShares < maxShort
+
+    local children = {
+        UI.Divider { color = C.divider },
+        UI.Label {
+            text = "📉 做空交易",
+            fontSize = F.body,
+            fontWeight = "bold",
+            fontColor = C.text_primary,
+        },
+    }
+
+    -- 当前空头仓位信息
+    if shortShares > 0 then
+        local floatPnl = (sp.entry_price - stock.price) * sp.shares
+        local pnlColor = floatPnl >= 0 and C.accent_green or C.accent_red
+        table.insert(children, UI.Panel {
+            width = "100%",
+            flexDirection = "row",
+            justifyContent = "space-between",
+            alignItems = "center",
+            children = {
+                UI.Label {
+                    text = string.format("空仓 %d股 入价%.2f", shortShares, sp.entry_price),
+                    fontSize = F.body_minor,
+                    fontColor = C.text_secondary,
+                },
+                UI.Label {
+                    text = string.format("浮盈 %+.0f  第%d季", floatPnl, sp.seasons_held or 0),
+                    fontSize = F.body_minor,
+                    fontWeight = "bold",
+                    fontColor = pnlColor,
+                },
+            },
+        })
+
+        -- 平仓按钮行
+        table.insert(children, UI.Panel {
+            flexDirection = "row",
+            gap = 8,
+            children = {
+                MarketPage._ActionBtn("平仓一半", C.accent_amber, function()
+                    local half = math.max(1, math.floor(shortShares / 2))
+                    MarketPage._OnCloseShort(state, stock.id, half)
+                end),
+                MarketPage._ActionBtn("全部平仓", C.accent_red, function()
+                    MarketPage._OnCloseShort(state, stock.id, shortShares)
+                end),
+            },
+        })
+    end
+
+    -- 开空按钮
+    if canShortMore then
+        local params = StockEngine.GetShortParams(state)
+        local availShort = maxShort - shortShares
+        local marginNeeded = math.floor(stock.price * availShort * params.margin_ratio)
+        table.insert(children, UI.Panel {
+            width = "100%",
+            flexDirection = "row",
+            justifyContent = "space-between",
+            alignItems = "center",
+            children = {
+                UI.Label {
+                    text = string.format("可空 %d股  保证金 %s",
+                        availShort, Config.FormatNumber(marginNeeded)),
+                    fontSize = F.label,
+                    fontColor = C.text_muted,
+                },
+                UI.Label {
+                    text = string.format("利率 %.0f%%/季", params.interest * 100),
+                    fontSize = F.label,
+                    fontColor = C.text_muted,
+                },
+            },
+        })
+        table.insert(children, UI.Panel {
+            flexDirection = "row",
+            gap = 8,
+            children = {
+                MarketPage._ActionBtn("做空 ×" .. math.min(100, availShort),
+                    { 120, 80, 180, 255 }, function()
+                    MarketPage._OnOpenShort(state, stock.id,
+                        math.min(100, availShort))
+                end),
+                MarketPage._ActionBtn("做空全部 ×" .. availShort,
+                    { 100, 60, 160, 255 }, function()
+                    MarketPage._OnOpenShort(state, stock.id, availShort)
+                end),
+            },
+        })
+    else
+        table.insert(children, UI.Label {
+            text = shortShares >= maxShort
+                and string.format("已达做空上限（%d 股）", maxShort)
+                or "暂无可用做空额度",
+            fontSize = F.label,
+            fontColor = C.text_muted,
+        })
+    end
+
+    return UI.Panel {
+        width = "100%",
+        flexDirection = "column",
+        gap = 6,
+        children = children,
+    }
+end
+
+function MarketPage._OnOpenShort(state, stockId, qty)
+    local ok, msg = StockEngine.OpenShort(state, stockId, qty)
+    if ok then
+        GameState.AddLog(state, "[做空] " .. msg)
+        UI.Toast.Show(msg, { variant = "success", duration = 2 })
+        if tradeModal_ then tradeModal_:Close() end
+        if onStateChanged_ then onStateChanged_() end
+    else
+        UI.Toast.Show(msg or "做空失败", { variant = "error", duration = 2 })
+    end
+end
+
+function MarketPage._OnCloseShort(state, stockId, qty)
+    local ok, msg = StockEngine.CloseShort(state, stockId, qty)
+    if ok then
+        GameState.AddLog(state, "[平仓] " .. msg)
+        UI.Toast.Show(msg, { variant = "success", duration = 2 })
+        if tradeModal_ then tradeModal_:Close() end
+        if onStateChanged_ then onStateChanged_() end
+    else
+        UI.Toast.Show(msg or "平仓失败", { variant = "error", duration = 2 })
     end
 end
 

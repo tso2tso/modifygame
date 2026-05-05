@@ -108,7 +108,7 @@ max_ap = base_ap (6)
 |------|--------|------|
 | 现金 (cash) | 1,000 | |
 | 黄金 (gold) | 5 | |
-| 白银 (silver) | 0 | |
+| 铜 (copper) | 0 | |
 | 煤炭 (coal) | 0 | |
 | 工人 (workers) | 10 | |
 | 护卫 (guards) | 5 | |
@@ -144,7 +144,7 @@ max_ap = base_ap (6)
 | 参数 | 值 | 说明 |
 |------|-----|------|
 | 黄金售价 | 50 / 单位 | 受通胀乘数影响 |
-| 白银售价 | 15 / 单位 | 受通胀乘数影响 |
+| 铜售价 | 8 / 单位 | 受通胀乘数影响 |
 | 煤炭售价 | 8 / 单位 | 工业区 |
 | 矿山最大等级 | 5 | — |
 | 升级基础费用 | 200 × 当前等级 | 受资产价格因子 (`AssetPriceFactor`) 影响 |
@@ -173,13 +173,13 @@ max_ap = base_ap (6)
 
 > 产金受每座矿山独立的 `reserve` 储量限制，开采量 = min(计算产出, 剩余储量)。开采后储量减少。
 
-### 产银公式
+### 产铜公式
 
 ```
-单矿产银 = floor(base_silver_output × (1 + (mine.level - 1) × 0.20))
+单矿产铜 = floor(base_copper_output × (1 + (mine.level - 1) × 0.20))
 ```
 
-> 白银消耗 `silver_reserve` 储量。
+> 铜消耗 `copper_reserve` 储量。
 
 ### 煤炭采集（工业区）
 
@@ -219,7 +219,7 @@ max_ap = base_ap (6)
 |------|-----|
 | 等级 | 1 |
 | 黄金储量 | 100-200（随机） |
-| 白银储量 | 200-400（随机） |
+| 铜储量 | 200-400（随机） |
 | 基础产出 | 2 |
 
 ### 矿山迁移
@@ -297,7 +297,7 @@ max_ap = base_ap (6)
 | 来源 | 计算方式 |
 |------|----------|
 | 黄金出售收入 | 仅在 `gold_auto_sell = true` 时：保留 10%（四舍五入），出售剩余。价格 = `gold_price × inflation × (1 + gold_price_bonus) × (1 + gold_price_mod)` |
-| 白银出售收入 | 全量出售（消耗 silver_reserve）：`silver × silver_price(15) × inflation × (1 + silver_price_mod)` |
+| 铜出售收入 | 全量出售（消耗 copper_reserve）：`copper × copper_price(8) × inflation × (1 + copper_price_mod)` |
 | 煤炭出售收入 | 工业区每季采煤并全量出售：`coal × coal_price(8) × inflation × (1 + coal_price_mod)` |
 | 地区被动收入 | 见下方"地区控制度被动收入" |
 | 金融被动收入 | 科技"金融网络"解锁后：`finance_network × inflation` |
@@ -407,7 +407,7 @@ LaborCostFactor = inflation_factor × (1 + worker_cost_multiplier_mod)
 
 ### 通胀影响范围
 
-- 黄金/白银/煤炭售价 × inflation
+- 黄金/铜/煤炭售价 × inflation
 - 工人工资 × LaborCostFactor
 - 护卫工资 × inflation
 - 补给费用 × inflation
@@ -433,11 +433,11 @@ LaborCostFactor = inflation_factor × (1 + worker_cost_multiplier_mod)
 
 | 资产类型 | 抵押率 |
 |----------|--------|
-| 实体资产（现金 + 黄金 + 白银 + 煤炭 + 矿山价值） | 80% (`real_asset_ratio`) |
+| 实体资产（现金 + 黄金 + 铜 + 煤炭 + 矿山价值） | 80% (`real_asset_ratio`) |
 | 股票市值 | 25% (`stock_asset_ratio`) |
 
 ```
-实体资产 = cash + gold × gold_price + silver × silver_price + coal × coal_price + Σ(mine.level × 200)
+实体资产 = cash + gold × gold_price + copper × copper_price + coal × coal_price + Σ(mine.level × 200)
 股票市值 = Σ(stock.shares × stock.price) for all stocks
 抵押价值 = 实体资产 × 0.80 + 股票市值 × 0.25
 ```
@@ -522,6 +522,7 @@ effective_mu = stock.mu + Σ(event_mod.delta_mu for all active mods)
 | military_industry | 军需工业集团 | 22.10 | 0.000 | 0.20 | 军工 |
 | austro_bank_trust | 奥匈银行信托 | 31.40 | +0.014 | 0.09 | 金融 |
 | oriental_trading | 东方贸易商行 | 9.75 | +0.011 | 0.15 | 贸易 |
+| balkan_press | 巴尔干新闻社 | 6.80 | +0.004 | 0.13 | 媒体 |
 
 ### 价格约束
 
@@ -555,7 +556,7 @@ effective_mu = stock.mu + Σ(event_mod.delta_mu for all active mods)
 | 奖励研发点数 | `bonus_points` 可加速当前研发 | |
 | 研发速度加成 | `research_speed_bonus` 科技效果 | |
 
-### 科技树（41 项科技，4 分支，8 个分叉点）
+### 科技树（56 项科技，4 分支 + 扩展，8 个分叉点）
 
 > 分叉科技使用 `excludes` 字段标记互斥。`requires` 字段支持管道语法 `"a|b"` 表示"需要 a 或 b"。
 
@@ -708,7 +709,7 @@ effective_mu = stock.mu + Σ(event_mod.delta_mu for all active mods)
 | 属性 | 矿区 | 工业区 | 首都 |
 |------|------|--------|------|
 | 黄金储量 (gold_reserve) | 500 | 0 | 0 |
-| 白银储量 (silver_reserve) | 1,200 | 0 | 0 |
+| 铜储量 (copper_reserve) | 1,200 | 0 | 0 |
 | 煤炭储量 (coal_reserve) | 0 | 2,500 | 0 |
 | 文化值 | 0 | 5 | 20 |
 
@@ -970,7 +971,7 @@ FactionPower = faction.power × base_faction_power(1.0) × (1 + presence / 200)
 | 类别 | 修正器 target |
 |------|--------------|
 | 经济 | `income_mod`, `tax_reduction`, `shadow_income`, `trade_income`, `finance_network` |
-| 资产 | `asset_price_mod`, `gold_price_mod`, `silver_price_mod`, `coal_price_mod` |
+| 资产 | `asset_price_mod`, `gold_price_mod`, `copper_price_mod`, `coal_price_mod` |
 | 劳动力 | `worker_cost_multiplier`, `hire_cost_multiplier`, `worker_efficiency_bonus` |
 | 矿业 | `mine_output`, `mine_output_base_bonus`, `mine_output_mult_bonus` |
 | 军事 | `guard_power_bonus`, `morale_bonus`, `supply_discount` |
@@ -1919,10 +1920,93 @@ AI dominance 有额外加成来自 `totalPresence/2`（后期约 95/2 = 47）和
 | **胜利系统细化** | 新增 `GetVictoryStanding()` 相对评分、AI 胜利点同步、快照验证函数 |
 | **回合流程补全** | 从 9 阶段 → **15+ 阶段**，新增 Phase 4.5（影响力衰减）、6.7（大国博弈）、6.8（分支事件）、8.5（勘探进度） |
 | **移除设计问题追踪章节** | 原 §20 的问题已全部修复并整合到各系统章节中 |
-| **修正数值差异** | 白银售价 10→15，煤炭售价 5→8，招聘费 15→30，地区储量多处更新 |
+| **修正数值差异** | 铜售价改为 8（原白银已更名为铜），煤炭售价 5→8，招聘费 15→30，地区储量多处更新 |
 
 ---
 
-*文档版本：v0.5.1*  
-*更新时间：2026-05-01*  
+## 九、称号系统
+
+### 概述
+
+| 参数 | 值 |
+|------|-----|
+| 称号总数 | 18 |
+| 类别数 | 5 |
+| 检查时机 | 每回合结算 Phase 8.9 |
+| 是否可失去 | 否 |
+
+### 称号解锁条件完整表
+
+#### 军事类 ⚔️（4个）
+
+| ID | 名称 | 条件字段 | 阈值 | 难度 |
+|----|------|---------|------|------|
+| `first_blood` | 初战告捷 | `state.battle_wins_total` | ≥ 1 | 入门 |
+| `warmonger` | 战争狂人 | `stats.attacks_initiated` | ≥ 30 | 后期 |
+| `ever_victorious` | 常胜将军 | `state.battle_wins_total` | ≥ 25 | 后期 |
+| `iron_wall` | 铁壁防线 | `military.guards` + `military.equipment` | guards ≥ 40 且 equipment = 5 | 后期 |
+
+#### 掠夺类 🏴（3个）
+
+| ID | 名称 | 条件字段 | 阈值 | 难度 |
+|----|------|---------|------|------|
+| `bandit_baron` | 劫匪男爵 | `stats.plunder_successes` | ≥ 3 | 入门 |
+| `balkan_wolf` | 巴尔干之狼 | `stats.plunder_successes` | ≥ 15 | 后期 |
+| `infamous` | 臭名昭著 | `state.reputation` | ≤ -80 | 后期 |
+
+#### 经济类 💰（4个）
+
+| ID | 名称 | 条件字段 | 阈值 | 难度 |
+|----|------|---------|------|------|
+| `mining_star` | 矿业新星 | `#state.mines` | ≥ 3 | 入门 |
+| `financial_titan` | 金融巨鳄 | `state.cash` | ≥ 30,000 | 后期 |
+| `debt_emperor` | 债务帝王 | `#state.loans` + `state.bankrupt` | loans ≥ 5 且非破产 | 中后期 |
+| `inflation_survivor` | 通胀幸存者 | `state.inflation_factor` + `state.cash` | factor ≥ 2.0 且 cash ≥ 5,000 | 后期 |
+
+#### 证券类 📈（4个）
+
+| ID | 名称 | 条件字段 | 阈值 | 难度 |
+|----|------|---------|------|------|
+| `stock_debut` | 初入股海 | `stats.trades_completed` | ≥ 5 | 入门 |
+| `invisible_hand` | 有形大手 | `stats.manipulation_successes` | ≥ 15 | 后期 |
+| `master_trader` | 操盘圣手 | `stats.trades_completed` | ≥ 60 | 后期 |
+| `short_hunter` | 空头猎人 | `stats.short_profit_total` | ≥ 10,000 | 后期 |
+
+#### 综合类 🏛️（3个）
+
+| ID | 名称 | 条件字段 | 阈值 | 难度 |
+|----|------|---------|------|------|
+| `tech_pioneer` | 科技先驱 | `state.tech.researched`（pairs 计数） | ≥ 10 | 中期 |
+| `family_prosperity` | 家族兴旺 | `state.family.members` | ≥ 6 且全部 active+在岗 | 后期 |
+| `witness_of_ages` | 时代见证者 | `state.turn_count` | ≥ 60 | 中期 |
+
+### 统计计数器（state.stats）
+
+| 字段 | 类型 | 初始值 | 累加触发点 |
+|------|------|--------|-----------|
+| `attacks_initiated` | int | 0 | `combat.lua` PlayerAttack 每次 +1 |
+| `plunder_successes` | int | 0 | `combat.lua` RaidCaravan/SeizeVein/ExtortForeign 成功时 +1 |
+| `manipulation_successes` | int | 0 | `stock_engine.lua` MarketPump/MarketDump/CoordinatedOp 成功时 +1 |
+| `trades_completed` | int | 0 | `stock_engine.lua` Buy/Sell 成功时 +1 |
+| `short_profit_total` | number | 0 | `stock_engine.lua` CloseShort 盈利时 +netPnl |
+
+### 可达性分析
+
+| 称号 | 最早可达时间 | 说明 |
+|------|-------------|------|
+| 初战告捷 | 第 1 章 | 被动战斗胜利即可 |
+| 初入股海 | 第 2 章 | 需先研发股票科技 |
+| 时代见证者 | 1919 Q1（第 60 回合） | 正常存活即可 |
+| 劫匪男爵 | 第 2-3 章 | 解锁掠夺后 3 次成功 |
+| 矿业新星 | 第 2-3 章 | 需 2 次成功勘探 |
+| 科技先驱 | 第 3 章 | 10 项科技约需 30+ 回合投入 |
+| 金融巨鳄 | 第 3-4 章 | 取决于经营效率 |
+| 操盘圣手 | 第 4-5 章 | 60 笔交易需长期活跃 |
+| 铁壁防线 | 第 4-5 章 | 装备 Lv5 需完整军事科技树 |
+| 家族兴旺 | 第 4-5 章 | 6 人且全在岗需精心管理 |
+
+---
+
+*文档版本：v0.5.2*  
+*更新时间：2026-05-05*  
 *数据来源：`scripts/data/balance.lua`、`scripts/systems/*.lua`、`scripts/data/*.lua`、`scripts/game_state.lua`*

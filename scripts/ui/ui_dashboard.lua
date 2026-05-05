@@ -137,10 +137,11 @@ end
 -- ============================================================================
 
 local MSG_TYPE_STYLE = {
-    combat_win  = { icon = "⚔",  bg = { 45, 100, 55, 255 },  fg = { 180, 255, 180, 255 } },
-    combat_lose = { icon = "💥", bg = { 120, 35, 35, 255 },  fg = { 255, 200, 200, 255 } },
-    ai_move     = { icon = "📢", bg = { 60, 55, 45, 255 },   fg = { 200, 195, 175, 255 } },
-    warning     = { icon = "⚠",  bg = { 110, 85, 30, 255 },  fg = { 255, 230, 160, 255 } },
+    combat_win    = { icon = "⚔",  bg = { 45, 100, 55, 255 },  fg = { 180, 255, 180, 255 } },
+    combat_lose   = { icon = "💥", bg = { 120, 35, 35, 255 },  fg = { 255, 200, 200, 255 } },
+    ai_move       = { icon = "📢", bg = { 60, 55, 45, 255 },   fg = { 200, 195, 175, 255 } },
+    warning       = { icon = "⚠",  bg = { 110, 85, 30, 255 },  fg = { 255, 230, 160, 255 } },
+    market_intel  = { icon = "📰", bg = { 40, 55, 80, 255 },   fg = { 180, 210, 255, 255 } },
 }
 
 function Dashboard._SectionHeader(title, badgeText, badgeColor)
@@ -308,7 +309,7 @@ function Dashboard._TurnMessagesSection(state, era)
                     pointerEvents = "none",
                 },
                 UI.Label {
-                    text = msg.text or "",
+                    text = msg.text or msg.title or "",
                     fontSize = F.body_minor,
                     fontColor = style.fg,
                     flexShrink = 1, flexGrow = 1,

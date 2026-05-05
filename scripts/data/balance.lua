@@ -303,6 +303,7 @@ Balance.STOCKS = {
         mu     = 0.005,     -- 调低：均值回归后只需微正漂移
         sigma  = 0.10,      -- 中等波动
         sector = "mining",
+        max_shares = 20000,      -- 矿业：总股本 2 万
         rating = "buy",
         -- 公允价值锚定参数（Fair Value Anchored Model）
         base_value      = 12.50,  -- 1904年初始公允价值（= 初始价格）
@@ -340,6 +341,7 @@ Balance.STOCKS = {
         mu     = 0.000,     -- 平时不涨；战时事件会暴涨
         sigma  = 0.15,      -- 高波动（军工敏感）
         sector = "military",
+        max_shares = 20000,      -- 军工：总股本 2 万
         rating = "hold",
         base_value      = 22.10,
         inflation_alpha = 0.85,   -- 军工定价独立于通胀，靠订单驱动
@@ -369,6 +371,28 @@ Balance.STOCKS = {
         inflation_alpha = 0.95,
         theta           = 0.12,
     },
+    {
+        id     = "balkan_press",
+        name   = "巴尔干新闻社",
+        price  = 6.80,
+        mu     = 0.004,     -- 小幅正漂移（文化资产温和增长）
+        sigma  = 0.13,      -- 较高波动（受舆论/事件影响大）
+        sector = "media",
+        max_shares = 50000,
+        rating = "hold",
+        base_value      = 6.80,
+        inflation_alpha = 0.80,   -- 中低通胀敏感度
+        theta           = 0.10,   -- 慢均值回归（给操控空间）
+    },
+}
+-- 每支股票的最大持仓（防止雪球效应）
+-- 矿业/军工 = 20000，其余 = 50000（各股票可在 STOCKS 表中用 max_shares 覆盖）
+Balance.STOCK_MAX_SHARES = 50000
+-- 持股级别按百分比计算（相对于该股票 max_shares）
+Balance.STOCK_LEVEL_PCT = {
+    control   = 0.60,   -- ≥60% → 控股
+    influence = 0.30,   -- ≥30% → 重要持股
+    stake     = 0.10,   -- ≥10% → 战略持股
 }
 
 -- ============================================================================
@@ -606,6 +630,172 @@ Balance.COPPER = {
     },
     maintenance_reduction_per_10 = 0.05,  -- 每持有10铜 → 装备维护费 -5%
     maintenance_reduction_cap    = 0.25,  -- 维护费减免上限 25%
+}
+
+-- ============================================================================
+-- 掠夺行动（武力掠夺发展路线）
+-- ============================================================================
+Balance.PLUNDER = {
+    raid_caravan = {
+        ap = 1, cash = 80, cooldown = 1, difficulty = 8,
+        loot_min = 250, loot_max = 550, rep_cost = -5,
+        fail_guard_loss = 1,
+    },
+    seize_vein = {
+        ap = 2, cash = 120, cooldown = 3, difficulty = 14,
+        vein_duration = 4, vein_gold_per_turn = 150, rep_cost = -15,
+        fail_rep_extra = -10,
+    },
+    extort_foreign = {
+        ap = 2, cash = 150, cooldown = 2, difficulty = 18,
+        loot_min = 400, loot_max = 800, rep_cost = -10,
+        fail_aggression_boost = 15,
+    },
+    success_floor = 0.15,
+    success_ceil  = 0.90,
+}
+
+-- ============================================================================
+-- 声誉系统（掠夺行动的核心平衡机制）
+-- 范围 -100 ~ 0，初始 0；越低代价越大
+-- ============================================================================
+Balance.REPUTATION = {
+    initial           = 0,
+    min               = -100,
+    max               = 0,
+    recovery_per_turn = 2,    -- 每季自然恢复 +2（不超过 0）
+    thresholds = {
+        suspicious   = -10,   -- 可疑
+        notorious    = -30,   -- 恶名
+        infamous     = -50,   -- 臭名昭著
+        public_enemy = -80,   -- 公敌
+    },
+    -- 各等级交易溢价（索引 1~5 对应清白→公敌）
+    trade_penalty    = { 0, 0.05, 0.15, 0.25, 0.40 },
+    -- AI 攻击概率加成
+    ai_attack_bonus  = { 0, 0, 0, 0.20, 0.50 },
+    -- 公敌级别每季地区控制力衰减
+    control_decay    = { 0, 0, 0, 0, 2 },
+}
+
+-- ============================================================================
+-- 做空机制
+-- ============================================================================
+Balance.SHORT_SELLING = {
+    max_short_pct   = 0.30,    -- 最大做空股数 = max_shares × 30%
+    margin_ratio    = 0.50,    -- 保证金比例（冻结市值 × 50%）
+    interest_rate   = 0.05,    -- 每季利息 5%（按当前市值）
+    force_close_pct = 0.80,    -- 亏损 >= 保证金 × 80% 时强制平仓
+    max_duration    = 8,       -- 最大持仓期（季度）
+    -- 科技/顾问加成后的数值
+    diplomat_interest       = 0.04,  -- diplomat bonus >= 0.5 → 利息降至 4%
+    radio_max_pct           = 0.40,  -- d5_radio 已研究 → 最大做空提至 40%
+    wartime_media_force_close = 0.90,-- d7_wartime_media 已研究 → 强平线放宽至 90%
+    -- M3: 做空利息折扣从新闻社转移到银行信托（解耦新闻社操盘+做空自耦合）
+    bank_influence_interest = 0.04,  -- 银行信托 >= influence → 利息降至 4%
+    bank_control_interest   = 0.03,  -- 银行信托 >= control → 利息降至 3%
+}
+
+-- ============================================================================
+-- 方向互斥（M2: 操盘方向锁，Pump/Dump 互斥，不影响普通买卖）
+-- ============================================================================
+Balance.DIRECTION_LOCK = {
+    after_pump = 3,  -- Pump 成功后，3 季内不能对该股 Dump
+    after_dump = 3,  -- Dump 成功后，3 季内不能对该股 Pump
+}
+
+-- ============================================================================
+-- 媒体公信力（M1: 操盘的消耗性资源，防止无限制操盘）
+-- ============================================================================
+Balance.CREDIBILITY = {
+    initial          = 60,
+    max              = 100,
+    -- 操盘消耗（成功/失败都消耗，失败消耗更多）
+    cost_pump        = 15,   -- Pump 成功消耗
+    cost_dump        = 20,   -- Dump 成功消耗
+    cost_coordinated = 30,   -- 联合操盘成功消耗
+    cost_fail_mult   = 1.5,  -- 失败时消耗 ×1.5
+    -- 对成功率的影响
+    -- 实际成功率 = base_success × credibilityMultiplier
+    -- credibilityMult = multiplier_floor + (1 - multiplier_floor) × (credibility / max)
+    -- cred=100 → ×1.0, cred=50 → ×0.75, cred=0 → ×0.5
+    multiplier_floor = 0.5,  -- 最低乘数（公信力=0 时）
+    -- 自然恢复
+    recovery_per_season = 5,  -- 每季恢复 5 点
+    -- 新闻社持股加成恢复（新闻社的新角色：加速恢复而非直接增益）
+    press_control_recovery_bonus = 3,   -- 控股额外 +3/季
+    press_influence_recovery_bonus = 1, -- 重要持股额外 +1/季
+}
+
+-- ============================================================================
+-- 庄家操盘（市场操纵）
+-- ============================================================================
+Balance.MARKET_MANIPULATION = {
+    pump = {
+        ap           = 1,
+        cost_ratio   = 0.15,    -- 目标股票当前市值 × 15% 的现金
+        min_cash     = 40000,   -- 最低资金门槛
+        base_success = 0.70,    -- 基础成功率 70%
+        cooldown     = 2,       -- 冷却 2 季
+        delta_mu     = 0.15,    -- 成功时 delta_mu
+        duration     = 2,       -- 持续 2 季
+        fail_loss    = 0.50,    -- 失败时资金损失 50%
+        -- 前置：d3_newspaper + 新闻社 >= stake
+    },
+    dump = {
+        ap           = 1,
+        cost_ratio   = 0.20,    -- 目标股票当前市值 × 20% 的现金
+        min_cash     = 60000,   -- 最低资金门槛
+        base_success = 0.60,    -- 基础成功率 60%
+        cooldown     = 3,       -- 冷却 3 季
+        delta_mu     = -0.18,   -- 成功时 delta_mu
+        duration     = 2,       -- 持续 2 季
+        rebound_mu   = 0.06,    -- 成功后反弹 +0.06
+        rebound_dur  = 1,       -- 反弹持续 1 季
+        fail_loss    = 0.60,    -- 失败时资金损失 60%
+        fail_rebound_mu  = 0.08,-- 失败时目标股反向上涨
+        fail_rebound_dur = 1,   -- 失败反弹持续 1 季
+        -- 前置：d5_radio + 新闻社 >= influence
+    },
+    coordinated = {
+        ap           = 2,
+        fixed_cost   = 100000,  -- 固定 100000 现金
+        base_success = 0.50,    -- 基础成功率 50%
+        cooldown     = 5,       -- 冷却 5 季
+        pump_mu      = 0.20,    -- 做多目标 delta_mu
+        dump_mu      = -0.15,   -- 做空目标 delta_mu
+        duration     = 2,       -- 持续 2 季
+        fail_loss    = 0.70,    -- 失败时资金损失 70%
+        fail_rep     = -5,      -- 失败时声誉 -5
+        -- 前置：d7_wartime_media + 新闻社 >= control + 文化顾问 bonus >= 0.8
+    },
+    -- 外交总监在任时资金投入折扣
+    diplomat_discount = {
+        pump = 0.10,            -- 做多操盘资金降低 10%
+        dump = 0.15,            -- 做空操盘资金降低 15%
+    },
+}
+
+-- ============================================================================
+-- M4: AI 对手盘（外资反向交易）
+-- ============================================================================
+Balance.AI_COUNTERPARTY = {
+    min_foreign_cash   = 3000,      -- 外资现金低于此值不触发
+    react_chance = {
+        pump        = 0.30,         -- Pump 后 30% 基础反制概率
+        dump        = 0.25,         -- Dump 后 25%
+        coordinated = 0.45,         -- 联合操盘后 45%
+    },
+    counter_mu = {
+        pump = -0.06,               -- 抵消做多约 30-40%
+        dump =  0.05,               -- 抵消做空约 30%
+    },
+    counter_duration    = 2,        -- 反向 delta_mu 持续 2 季
+    cash_scale_base     = 5000,     -- 外资现金 >= 此值达到基础概率
+    cash_scale_max      = 15000,    -- 外资现金 >= 此值概率 x1.5
+    counter_cost_ratio  = 0.05,     -- 反制消耗外资现金比例
+    -- 与公信力联动: 实际概率 = base × cashScale × (2.0 - credMult)
+    -- cred=100 → ×1.0（不加成），cred=0 → ×1.5（AI更容易识破）
 }
 
 return Balance

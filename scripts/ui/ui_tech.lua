@@ -42,23 +42,47 @@ local EFFECT_LABELS = {
     hire_cost_reduction = function(v) return string.format("雇佣成本 %d%%", math.floor(v * 100)) end,
     mine_slots          = function(v) return string.format("矿山槽位 +%d", v) end,
     prospect_success    = function(v) return string.format("探矿成功率 +%d%%", math.floor(v * 100)) end,
+    plunder_loot_mult   = function(v) return string.format("掠夺收益 +%d%%", math.floor(v * 100)) end,
+    rep_recovery_bonus  = function(v) return string.format("声誉恢复 +%d/季", v) end,
+    plunder_cooldown_reduction = function(v) return string.format("掠夺冷却 -%d 季", v) end,
 }
 
 -- ============================================================================
 -- 工具函数
 -- ============================================================================
 
+--- 解析 requires 为扁平的 id 列表（用于依赖连线等场景）
 local function getAllRequires(requires)
     if not requires then return {} end
     local list = {}
-    for part in requires:gmatch("[^|]+") do
-        table.insert(list, part)
+    -- 先按逗号拆 AND，再按管道拆 OR，收集所有 id
+    for andPart in requires:gmatch("[^,]+") do
+        for orPart in andPart:gmatch("[^|]+") do
+            table.insert(list, orPart)
+        end
     end
     return list
 end
 
+--- 检查前置科技是否满足（镜像 tech.lua checkRequires 逻辑）
 local function checkReqMet(requires, researched)
     if not requires then return true end
+    -- AND: "a,b" → 每个子项都要满足
+    if requires:find(",") then
+        for andPart in requires:gmatch("[^,]+") do
+            local subOk = false
+            if andPart:find("|") then
+                for orPart in andPart:gmatch("[^|]+") do
+                    if researched[orPart] then subOk = true; break end
+                end
+            else
+                subOk = researched[andPart] == true
+            end
+            if not subOk then return false end
+        end
+        return true
+    end
+    -- OR: "a|b" → 任一满足
     if requires:find("|") then
         for part in requires:gmatch("[^|]+") do
             if researched[part] then return true end
@@ -222,14 +246,14 @@ local function createTabButton(lane, isActive, onSelect)
         flexShrink = 1,
         flexBasis = 0,
         minWidth = 70,
-        padding = 8,
+        padding = 6,
         backgroundColor = bgColor,
         borderRadius = S.radius_card,
         borderWidth = isActive and 1.5 or 1,
         borderColor = borderColor,
         flexDirection = "column",
         alignItems = "center",
-        gap = 3,
+        gap = 2,
         pointerEvents = "auto",
         onPointerUp = Config.TapGuard(function()
             AudioManager.PlayUI("ui_click")
@@ -270,11 +294,11 @@ end
 
 -- ============================================================================
 -- UI 组件：科技节点（二级目录中的一个节点）
+-- 改动2: 折叠态改为单行紧凑布局，减少 padding
 -- ============================================================================
 
 local function createTechNode(state, tech, laneAccent, isExpanded, onExpand, onStartResearch)
     local st = getTechState(state, tech)
-    local isExcludePair = tech.excludes ~= nil
 
     -- 节点左边的状态指示条颜色
     local indicatorColor = st.isDone and C.accent_green
@@ -291,6 +315,16 @@ local function createTechNode(state, tech, laneAccent, isExpanded, onExpand, onS
     -- 构建效果列表（仅展开时显示）
     local expandedContent = {}
     if isExpanded then
+        -- effect_desc 简要效果说明（仅展开时显示）
+        if tech.effect_desc and tech.effect_desc ~= "" then
+            table.insert(expandedContent, UI.Label {
+                text = tech.effect_desc,
+                fontSize = F.body_minor,
+                fontColor = C.text_secondary,
+                pointerEvents = "none",
+            })
+        end
+
         -- 描述
         table.insert(expandedContent, UI.Label {
             text = tech.desc,
@@ -361,21 +395,50 @@ local function createTechNode(state, tech, laneAccent, isExpanded, onExpand, onS
             },
         })
 
-        -- 前置科技
+        -- 前置科技（支持 AND/OR 显示）
         if tech.requires then
-            local parts = getAllRequires(tech.requires)
-            local reqParts = {}
-            for _, pid in ipairs(parts) do
-                local req = TechData.GetById(pid)
-                if req then
-                    local reqDone = state.tech and state.tech.researched
-                        and state.tech.researched[req.id]
-                    table.insert(reqParts, req.name .. (reqDone and " ✓" or " ✗"))
+            local displayStr
+            if tech.requires:find(",") then
+                -- AND 语法："a1|a2,b1" → "(科技A1 或 科技A2) 且 科技B1"
+                local andGroups = {}
+                for andPart in tech.requires:gmatch("[^,]+") do
+                    if andPart:find("|") then
+                        local orParts = {}
+                        for orId in andPart:gmatch("[^|]+") do
+                            local req = TechData.GetById(orId)
+                            if req then
+                                local reqDone = state.tech and state.tech.researched
+                                    and state.tech.researched[req.id]
+                                table.insert(orParts, req.name .. (reqDone and " ✓" or " ✗"))
+                            end
+                        end
+                        table.insert(andGroups, "(" .. table.concat(orParts, " 或 ") .. ")")
+                    else
+                        local req = TechData.GetById(andPart)
+                        if req then
+                            local reqDone = state.tech and state.tech.researched
+                                and state.tech.researched[req.id]
+                            table.insert(andGroups, req.name .. (reqDone and " ✓" or " ✗"))
+                        end
+                    end
                 end
+                displayStr = table.concat(andGroups, " 且 ")
+            else
+                local parts = getAllRequires(tech.requires)
+                local reqParts = {}
+                for _, pid in ipairs(parts) do
+                    local req = TechData.GetById(pid)
+                    if req then
+                        local reqDone = state.tech and state.tech.researched
+                            and state.tech.researched[req.id]
+                        table.insert(reqParts, req.name .. (reqDone and " ✓" or " ✗"))
+                    end
+                end
+                local hasPipe = #parts > 1
+                displayStr = table.concat(reqParts, hasPipe and " 或 " or " → ")
             end
-            local hasPipe = #parts > 1
             table.insert(expandedContent, UI.Label {
-                text = "前置：" .. table.concat(reqParts, hasPipe and " 或 " or " → "),
+                text = "前置：" .. displayStr,
                 fontSize = F.label,
                 fontColor = C.text_secondary,
             })
@@ -428,9 +491,9 @@ local function createTechNode(state, tech, laneAccent, isExpanded, onExpand, onS
         end
     end
 
-    -- 节点主体
+    -- 节点主体：折叠态为紧凑单行，展开态保留详情
     local nodeChildren = {
-        -- 标题行（始终可见）
+        -- 标题行（始终可见）—— 紧凑单行：icon + 名称 | 状态标签
         UI.Panel {
             width = "100%",
             flexDirection = "row",
@@ -446,27 +509,16 @@ local function createTechNode(state, tech, laneAccent, isExpanded, onExpand, onS
                     children = {
                         UI.Label {
                             text = tech.icon,
-                            fontSize = F.subtitle,
+                            fontSize = isExpanded and F.subtitle or F.body,
                             pointerEvents = "none",
                         },
-                        UI.Panel {
-                            flexDirection = "column",
+                        UI.Label {
+                            text = tech.name,
+                            fontSize = F.body,
+                            fontWeight = (st.canStart or isExpanded) and "bold" or "medium",
+                            fontColor = (st.reqMet or st.isDone) and C.text_primary or C.text_muted,
                             flexShrink = 1,
-                            children = {
-                                UI.Label {
-                                    text = tech.name,
-                                    fontSize = F.body,
-                                    fontWeight = (st.canStart or isExpanded) and "bold" or "medium",
-                                    fontColor = (st.reqMet or st.isDone) and C.text_primary or C.text_muted,
-                                    pointerEvents = "none",
-                                },
-                                UI.Label {
-                                    text = tech.effect_desc or "",
-                                    fontSize = F.label,
-                                    fontColor = C.text_muted,
-                                    pointerEvents = "none",
-                                },
-                            },
+                            pointerEvents = "none",
                         },
                     },
                 },
@@ -506,7 +558,8 @@ local function createTechNode(state, tech, laneAccent, isExpanded, onExpand, onS
 
     return UI.Panel {
         width = "100%",
-        padding = 10,
+        paddingVertical = isExpanded and 8 or 6,
+        paddingHorizontal = isExpanded and 10 or 8,
         backgroundColor = nodeBg,
         borderRadius = S.radius_card,
         borderLeftWidth = 3,
@@ -523,24 +576,9 @@ local function createTechNode(state, tech, laneAccent, isExpanded, onExpand, onS
     }
 end
 
---- 箭头连接符
-local function createArrowConnector()
-    return UI.Panel {
-        width = "100%",
-        alignItems = "center",
-        paddingVertical = 1,
-        children = {
-            UI.Label {
-                text = "↓",
-                fontSize = F.body_minor,
-                fontColor = { 80, 80, 95, 255 },
-            },
-        },
-    }
-end
-
 -- ============================================================================
 -- UI 组件：分叉组（两个互斥选项的可视化容器）
+-- 改动3: 紧凑分叉组 —— 薄分隔条替代 VS 圆形
 -- ============================================================================
 
 local function createForkGroup(state, techA, techB, accent, expandedId, onExpand, onStartResearch)
@@ -549,14 +587,14 @@ local function createForkGroup(state, techA, techB, accent, expandedId, onExpand
     local forkColor = { 200, 170, 80, 255 }
 
     -- 确定分叉状态 → 头部文案
-    local headerText = "⚠ 二选一 · 研发后不可更改"
+    local headerText = "⚠ 二选一 · 不可更改"
     local headerTextColor = forkColor
     local resolved = stA.isDone or stB.isDone
     if stA.isDone then
-        headerText = "✓ 已选择：" .. techA.icon .. " " .. techA.name
+        headerText = "✓ 已选：" .. techA.icon .. " " .. techA.name
         headerTextColor = C.accent_green
     elseif stB.isDone then
-        headerText = "✓ 已选择：" .. techB.icon .. " " .. techB.name
+        headerText = "✓ 已选：" .. techB.icon .. " " .. techB.name
         headerTextColor = C.accent_green
     end
 
@@ -577,16 +615,16 @@ local function createForkGroup(state, techA, techB, accent, expandedId, onExpand
         and { C.accent_green[1], C.accent_green[2], C.accent_green[3], 30 }
         or  { forkColor[1], forkColor[2], forkColor[3], 30 }
 
-    -- 路线标签生成器
+    -- 路线标签生成器（紧凑版）
     local function routeBadge(letter, st)
         local badgeBg = st.isDone and C.accent_green
             or st.isExcluded and C.accent_red
             or accent
-        local hint = st.isDone and "已选择" or (st.isExcluded and "已排除" or "")
+        local hint = st.isDone and "已选" or (st.isExcluded and "已排除" or "")
         local hintColor = st.isDone and C.accent_green or C.accent_red
         local badgeChildren = {
             UI.Panel {
-                paddingHorizontal = 6, paddingVertical = 1,
+                paddingHorizontal = 5, paddingVertical = 1,
                 borderRadius = S.radius_badge,
                 backgroundColor = badgeBg,
                 children = {
@@ -608,31 +646,30 @@ local function createForkGroup(state, techA, techB, accent, expandedId, onExpand
             })
         end
         return UI.Panel {
-            flexDirection = "row", alignItems = "center", gap = 4, marginBottom = 4,
+            flexDirection = "row", alignItems = "center", gap = 4, marginBottom = 2,
             children = badgeChildren,
         }
     end
 
     return UI.Panel {
         width = "100%",
-        borderWidth = 1.5,
+        borderWidth = 1,
         borderColor = borderCol,
         borderRadius = S.radius_card + 2,
         backgroundColor = { forkColor[1], forkColor[2], forkColor[3], 10 },
         flexDirection = "column",
         children = {
-            -- ── 头部横幅 ──
+            -- ── 头部横幅（紧凑） ──
             UI.Panel {
                 width = "100%",
-                paddingVertical = 6, paddingHorizontal = 10,
+                paddingVertical = 3, paddingHorizontal = 8,
                 backgroundColor = headerBg,
                 flexDirection = "row",
                 alignItems = "center", justifyContent = "center",
-                gap = 6,
                 children = {
                     UI.Label {
                         text = headerText,
-                        fontSize = F.body_minor, fontWeight = "bold",
+                        fontSize = F.label, fontWeight = "bold",
                         fontColor = headerTextColor,
                         pointerEvents = "none",
                     },
@@ -641,33 +678,26 @@ local function createForkGroup(state, techA, techB, accent, expandedId, onExpand
             -- ── 选项主体 ──
             UI.Panel {
                 width = "100%",
-                padding = 8,
+                padding = 5,
                 flexDirection = "column",
                 gap = 0,
                 children = {
                     routeBadge("A", stA),
                     wrapA,
-                    -- VS 分隔
+                    -- 薄分隔条替代 VS 圆形
                     UI.Panel {
                         width = "100%",
                         flexDirection = "row",
-                        alignItems = "center", gap = 8,
-                        paddingVertical = 6,
+                        alignItems = "center", gap = 6,
+                        paddingVertical = 3,
                         children = {
                             UI.Panel { flexGrow = 1, height = 1,
                                 backgroundColor = { forkColor[1], forkColor[2], forkColor[3], 50 } },
-                            UI.Panel {
-                                width = 28, height = 28, borderRadius = 14,
-                                backgroundColor = { forkColor[1], forkColor[2], forkColor[3], 40 },
-                                justifyContent = "center", alignItems = "center",
-                                children = {
-                                    UI.Label {
-                                        text = "VS",
-                                        fontSize = 10, fontWeight = "bold",
-                                        fontColor = forkColor,
-                                        pointerEvents = "none",
-                                    },
-                                },
+                            UI.Label {
+                                text = "或",
+                                fontSize = 10, fontWeight = "bold",
+                                fontColor = { forkColor[1], forkColor[2], forkColor[3], 180 },
+                                pointerEvents = "none",
                             },
                             UI.Panel { flexGrow = 1, height = 1,
                                 backgroundColor = { forkColor[1], forkColor[2], forkColor[3], 50 } },
@@ -683,6 +713,7 @@ end
 
 -- ============================================================================
 -- 构建一条线的科技树（二级目录）
+-- 改动4: 移除箭头连接符，用 gap 自然间距
 -- ============================================================================
 
 local function buildLaneTree(state, laneId, accent, expandedId, onExpand, onStartResearch)
@@ -697,19 +728,11 @@ local function buildLaneTree(state, laneId, accent, expandedId, onExpand, onStar
 
         -- 检查是否是分叉对（当前和下一个互斥）
         if nextTech and tech.excludes == nextTech.id then
-            -- 分叉组：两个互斥选项包裹在可视化容器中
-            if #children > 0 then
-                table.insert(children, createArrowConnector())
-            end
             table.insert(children, createForkGroup(
                 state, tech, nextTech, accent, expandedId, onExpand, onStartResearch
             ))
             i = i + 2
         else
-            -- 普通线性节点
-            if #children > 0 then
-                table.insert(children, createArrowConnector())
-            end
             table.insert(children, createTechNode(
                 state, tech, accent, expandedId == tech.id, onExpand, onStartResearch
             ))
@@ -720,7 +743,7 @@ local function buildLaneTree(state, laneId, accent, expandedId, onExpand, onStar
     return UI.Panel {
         width = "100%",
         flexDirection = "column",
-        gap = 4,
+        gap = 3,
         children = children,
     }
 end
@@ -736,11 +759,13 @@ local function createResearchStatusBar(state, accent)
     if not inProgress or not tech then
         return UI.Panel {
             width = "100%",
-            padding = 10,
+            paddingVertical = 6,
+            paddingHorizontal = 10,
             backgroundColor = C.paper_dark,
             borderRadius = S.radius_card,
-            flexDirection = "column",
-            gap = 3,
+            flexDirection = "row",
+            alignItems = "center",
+            justifyContent = "space-between",
             children = {
                 UI.Label {
                     text = "当前无研发项目",
@@ -770,13 +795,14 @@ local function createResearchStatusBar(state, accent)
 
     return UI.Panel {
         width = "100%",
-        padding = 10,
+        paddingVertical = 6,
+        paddingHorizontal = 10,
         backgroundColor = C.paper_dark,
         borderRadius = S.radius_card,
         borderLeftWidth = 3,
         borderLeftColor = laneAccent,
         flexDirection = "column",
-        gap = 5,
+        gap = 4,
         children = {
             UI.Panel {
                 width = "100%",
@@ -800,7 +826,7 @@ local function createResearchStatusBar(state, accent)
             UI.ProgressBar {
                 value = progress,
                 width = "100%",
-                height = 6,
+                height = 5,
                 borderRadius = 3,
                 trackColor = C.bg_surface,
                 fillColor = laneAccent,
@@ -811,6 +837,8 @@ end
 
 -- ============================================================================
 -- 主构建函数：组合 Tab + 科技树
+-- 改动1: 将状态栏/图例/Tab移出ScrollView
+-- 改动5: 增大ScrollView高度
 -- ============================================================================
 
 local function rebuildTreeContent(state, onChanged)
@@ -897,33 +925,15 @@ local function rebuildTabBar(state, onChanged)
 end
 
 local function buildTechModalContent(state, accent, onChanged)
-    -- 顶部：当前研发状态
+    -- 顶部：当前研发状态（固定在ScrollView外部）
     local statusBar = createResearchStatusBar(state, accent)
 
-    -- Tab 栏
-    tabBarRef_ = UI.Panel {
-        width = "100%",
-        flexDirection = "row",
-        gap = 6,
-    }
-
-    -- 科技树内容容器
-    treeContainerRef_ = UI.Panel {
-        width = "100%",
-        flexDirection = "column",
-        gap = 6,
-    }
-
-    -- 填充 Tab 和科技树
-    rebuildTabBar(state, onChanged)
-    rebuildTreeContent(state, onChanged)
-
-    -- 图例
+    -- 图例（紧凑单行，固定在ScrollView外部）
     local legend = UI.Panel {
         width = "100%",
         flexDirection = "row",
         justifyContent = "center",
-        gap = 12,
+        gap = 10,
         children = {
             UITech._LegendItem(C.accent_green, "已研发"),
             UITech._LegendItem(C.accent_gold, "可研发"),
@@ -932,31 +942,49 @@ local function buildTechModalContent(state, accent, onChanged)
         },
     }
 
-    -- 底部提示
-    local hint = UI.Label {
-        text = "点击科技展开详情，同时只能研发一项",
-        fontSize = F.label,
-        fontColor = C.text_muted,
-        textAlign = "center",
+    -- Tab 栏（固定在ScrollView外部）
+    tabBarRef_ = UI.Panel {
         width = "100%",
+        flexDirection = "row",
+        gap = 5,
     }
 
-    return UI.ScrollView {
+    -- 科技树内容容器（放在ScrollView内部）
+    treeContainerRef_ = UI.Panel {
         width = "100%",
-        maxHeight = 500,
+        flexDirection = "column",
+        gap = 4,
+    }
+
+    -- 填充 Tab 和科技树
+    rebuildTabBar(state, onChanged)
+    rebuildTreeContent(state, onChanged)
+
+    -- 组合：固定头部 + 可滚动科技树
+    return UI.Panel {
+        width = "100%",
+        flexDirection = "column",
+        gap = 6,
         flexShrink = 1,
-        bounces = false,
         children = {
-            UI.Panel {
+            statusBar,
+            legend,
+            tabBarRef_,
+            -- 科技树放在 ScrollView 中
+            UI.ScrollView {
                 width = "100%",
-                flexDirection = "column",
-                gap = 8,
+                maxHeight = 580,
+                flexShrink = 1,
+                bounces = false,
                 children = {
-                    statusBar,
-                    legend,
-                    tabBarRef_,
-                    treeContainerRef_,
-                    hint,
+                    UI.Panel {
+                        width = "100%",
+                        flexDirection = "column",
+                        gap = 4,
+                        children = {
+                            treeContainerRef_,
+                        },
+                    },
                 },
             },
         },
@@ -974,8 +1002,8 @@ function UITech._LegendItem(color, label)
         gap = 4,
         children = {
             UI.Panel {
-                width = 10, height = 10,
-                borderRadius = 3,
+                width = 8, height = 8,
+                borderRadius = 4,
                 backgroundColor = color,
             },
             UI.Label {
@@ -1027,6 +1055,7 @@ function UITech.Show(state, accent, uiRootNode, onChanged)
         closeOnEscape = true,
         showCloseButton = true,
         onClose = function(self)
+            Config.ConsumeTap()
             currentModal_ = nil
             tabBarRef_ = nil
             treeContainerRef_ = nil

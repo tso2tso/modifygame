@@ -184,6 +184,14 @@ function TurnEngine.EndTurn(state)
     -- ========================================
     StockEngine.ApplyOperationalDrift(state, report.economy)
     StockEngine.UpdateAll(state)
+    -- 做空仓位结算（利息、强平、到期）
+    StockEngine.TickShorts(state)
+    -- 操盘冷却推进
+    StockEngine.TickManipulationCooldowns(state)
+    -- M2: 方向互斥锁推进
+    StockEngine.TickDirectionLocks(state)
+    -- M1: 公信力每季恢复
+    StockEngine.TickCredibility(state)
 
     -- ========================================
     -- 阶段 1.6: 贷款利息结算 & 到期还本 & 破产检测
@@ -462,9 +470,25 @@ function TurnEngine.EndTurn(state)
     -- 检查本季事件并入队
     local triggeredEvents = Events.CheckEvents(state)
     if #triggeredEvents > 0 then
-        Events.Enqueue(state, triggeredEvents)
+        local normalEvents = {}
         for _, ev in ipairs(triggeredEvents) do
-            table.insert(report.events_triggered, ev.title)
+            if ev.type == "market_intel" then
+                -- market_intel 事件：自动应用效果，不入队（无选项）
+                local msg = Events.ApplyMarketIntel(state, ev)
+                if msg then
+                    state.turn_messages = state.turn_messages or {}
+                    table.insert(state.turn_messages, msg)
+                end
+                table.insert(report.events_triggered, ev.title)
+            else
+                table.insert(normalEvents, ev)
+            end
+        end
+        if #normalEvents > 0 then
+            Events.Enqueue(state, normalEvents)
+            for _, ev in ipairs(normalEvents) do
+                table.insert(report.events_triggered, ev.title)
+            end
         end
     end
 
@@ -585,6 +609,62 @@ function TurnEngine.EndTurn(state)
         state.regulation_pressure = math.max(0, (state.regulation_pressure or 0) - 1)
     end
     UpdateSpecialContentFlags(state, report)
+
+    -- ========================================
+    -- 阶段 4.6: 掠夺系统每季结算
+    -- ========================================
+    do
+        local BRep = Balance.REPUTATION
+
+        -- 1. 冷却计时器 tick（所有 cooldown > 0 的 -1）
+        state.plunder_cooldowns = state.plunder_cooldowns or {}
+        for key, cd in pairs(state.plunder_cooldowns) do
+            if cd > 0 then
+                state.plunder_cooldowns[key] = cd - 1
+            end
+        end
+
+        -- 2. 声誉自然恢复（+2 + 科技加成，不超过 0）
+        if (state.reputation or 0) < BRep.max then
+            local repRecovery = BRep.recovery_per_turn + (state.rep_recovery_bonus or 0)
+            state.reputation = math.min(BRep.max,
+                (state.reputation or 0) + repRecovery)
+        end
+
+        -- 3. 夺取矿脉到期检查 + 产出
+        state.seized_veins = state.seized_veins or {}
+        local keptVeins = {}
+        local veinIncome = 0
+        for _, vein in ipairs(state.seized_veins) do
+            -- 产出
+            local income = math.floor(vein.gold_per_turn * GameState.GetInflationFactor(state))
+            veinIncome = veinIncome + income
+            vein.remaining = vein.remaining - 1
+            if vein.remaining > 0 then
+                table.insert(keptVeins, vein)
+            end
+        end
+        state.seized_veins = keptVeins
+        if veinIncome > 0 then
+            state.cash = state.cash + veinIncome
+            local msg = string.format("⛏ 夺取矿脉产出 %d 克朗（剩余 %d 处）",
+                veinIncome, #keptVeins)
+            table.insert(report.ai_changes, msg)
+            GameState.AddLog(state, msg)
+        end
+
+        -- 4. 公敌级别：地区控制力衰减
+        local repTier = GameState.GetReputationTier(state)
+        local controlDecay = BRep.control_decay[repTier] or 0
+        if controlDecay > 0 then
+            for _, r in ipairs(state.regions) do
+                r.control = math.max(0, (r.control or 0) - controlDecay)
+            end
+            local msg = string.format("⚠ 公敌声誉导致所有地区控制力 -%d", controlDecay)
+            table.insert(report.warnings, msg)
+            GameState.AddLog(state, msg)
+        end
+    end
 
     -- ========================================
     -- 阶段 5: 武装士气衰减
@@ -1201,6 +1281,19 @@ function TurnEngine.EndTurn(state)
         local ForeignOps = require("systems.foreign_ops")
         ForeignOps.TickScout(state)
         ForeignOps.ValidateActive(state)
+    end
+
+    -- ========================================
+    -- 阶段 8.9: 称号检查
+    -- ========================================
+    do
+        local Titles = require("systems.titles")
+        local newTitles = Titles.Check(state)
+        if #newTitles > 0 then
+            for _, t in ipairs(newTitles) do
+                GameState.AddLog(state, string.format("🏅 获得称号「%s」", t.name))
+            end
+        end
     end
 
     -- ========================================

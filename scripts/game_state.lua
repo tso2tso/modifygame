@@ -88,6 +88,7 @@ function GameState.CreateNew()
         end)(),
         portfolio = {
             holdings = {},  -- { [stock_id] = { shares, avg_cost } }
+            short_positions = {},  -- { [stock_id] = { shares, entry_price, margin, seasons_held } }
         },
 
         -- ============================
@@ -277,6 +278,27 @@ function GameState.CreateNew()
         -- 格式: { id, target, value, remaining_turns }
 
         -- ============================
+        -- 掠夺系统（武力掠夺发展路线）
+        -- ============================
+        reputation = Balance.REPUTATION.initial,  -- 声誉 (-100 ~ 0)
+        plunder_cooldowns = {
+            raid_caravan   = 0,
+            seize_vein     = 0,
+            extort_foreign = 0,
+        },
+        manipulation_cooldowns = {
+            pump        = 0,
+            dump        = 0,
+            coordinated = 0,
+        },
+        -- M2: 方向互斥锁 { [stockId] = { no_buy = N, no_short = N } }
+        direction_locks = {},
+        -- M1: 媒体公信力（0~100，操盘消耗，自然恢复）
+        press_credibility = Balance.CREDIBILITY.initial,
+        has_seized_veins = false,  -- 是否曾成功夺取过矿脉（科技/事件触发条件）
+        seized_veins = {},  -- { { remaining = N, gold_per_turn = M } }
+
+        -- ============================
         -- 外国矿产操作
         -- ============================
         foreign_ops = {
@@ -312,6 +334,9 @@ function GameState.CreateNew()
         hire_cost_discount = 0,
         supply_reduction_bonus = 0,
         accident_rate_mod = 0,
+        plunder_loot_mult_bonus = 0,    -- 掠夺收益倍率加成（科技累积）
+        rep_recovery_bonus = 0,         -- 声誉恢复速度加成（科技累积）
+        plunder_cooldown_reduction = 0, -- 掠夺冷却缩减季度数（科技累积）
 
         -- ============================
         -- 全局状态标记
@@ -333,6 +358,19 @@ function GameState.CreateNew()
         turn_count = 0,
         total_income = 0,   -- 累计总收入
         total_expense = 0,  -- 累计总支出
+
+        -- ============================
+        -- 称号系统统计
+        -- ============================
+        stats = {
+            attacks_initiated     = 0,  -- 主动发起攻击次数
+            plunder_successes     = 0,  -- 掠夺成功次数
+            manipulation_successes = 0, -- 操纵股市成功次数
+            trades_completed      = 0,  -- 股票交易完成次数（买+卖）
+            short_profit_total    = 0,  -- 做空累计盈利
+        },
+        titles_unlocked = {},  -- { [title_id] = unlocked_turn }
+        titles_new      = {},  -- 本回合新解锁（回合末填充，展示后清空）
     }
 
     return state
@@ -1344,6 +1382,39 @@ function GameState.CalcLeverage(state)
     local collateralValue = GameState.CalcLoanCollateralValue(state)
     if collateralValue <= 0 then return 999 end
     return GameState.CalcTotalDebt(state) / collateralValue
+end
+
+-- ============================================================================
+-- 声誉系统（掠夺路线平衡机制）
+-- ============================================================================
+
+--- 获取声誉等级 (1=清白, 2=可疑, 3=恶名, 4=臭名昭著, 5=公敌)
+---@param state table
+---@return number tier 1-5
+function GameState.GetReputationTier(state)
+    local rep = state.reputation or 0
+    local t = Balance.REPUTATION.thresholds
+    if rep <= t.public_enemy then return 5 end
+    if rep <= t.infamous     then return 4 end
+    if rep <= t.notorious    then return 3 end
+    if rep <= t.suspicious   then return 2 end
+    return 1
+end
+
+--- 获取声誉等级的显示名称
+---@param tier number
+---@return string
+function GameState.GetReputationLabel(tier)
+    local labels = { "清白", "可疑", "恶名", "臭名昭著", "公敌" }
+    return labels[tier] or "未知"
+end
+
+--- 获取声誉导致的交易溢价比例
+---@param state table
+---@return number penalty 0~0.40
+function GameState.GetTradePenalty(state)
+    local tier = GameState.GetReputationTier(state)
+    return Balance.REPUTATION.trade_penalty[tier] or 0
 end
 
 return GameState

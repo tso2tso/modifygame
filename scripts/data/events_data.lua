@@ -2972,6 +2972,690 @@ function EventsData.GetRandomEventTemplates()
                 },
             },
         },
+
+        -- ================================================================
+        --               ↓↓↓ 掠夺主题事件（7 个） ↓↓↓
+        -- ================================================================
+
+        -- ================================================================
+        -- 矿脉争夺战
+        -- ================================================================
+        {
+            id = "vein_turf_war",
+            title = "矿脉争夺战",
+            priority = EventsData.PRIORITY.REGION,
+            icon = "⛏️",
+            trigger = {
+                requires_mine = true,
+                has_seized_veins = true,
+                min_year = 1910,
+                cooldown = 5,
+            },
+            chance = 0.10,
+            desc = "你强占的矿脉引来了地方势力的觊觎。一伙武装人员试图夺回矿脉控制权，必须做出应对。",
+            options = {
+                {
+                    text = "武力镇压",
+                    desc = "动用护卫队驱逐入侵者，代价是声誉进一步恶化",
+                    effects = {
+                        cash = -100,
+                        modifiers = {
+                            { target = "guard_power_bonus", value = 0.08, duration = 3 },
+                            { target = "reputation_penalty", value = -8, duration = 0 },
+                        },
+                    },
+                },
+                {
+                    text = "谈判分成",
+                    desc = "分出部分利益换取和平，矿产收入短期下降",
+                    effects = {
+                        modifiers = {
+                            { target = "mine_output_mult", value = -0.10, duration = 3 },
+                            { target = "reputation_penalty", value = 5, duration = 0 },
+                        },
+                    },
+                },
+            },
+        },
+
+        -- ================================================================
+        -- 赃物销赃渠道
+        -- ================================================================
+        {
+            id = "fence_network",
+            title = "赃物销赃渠道",
+            priority = EventsData.PRIORITY.MINOR,
+            icon = "🕶️",
+            trigger = {
+                min_reputation = -20,
+                min_year = 1912,
+                cooldown = 5,
+            },
+            chance = 0.09,
+            desc = "地下世界的掮客主动找上门来，提供了一条隐秘的赃物销赃渠道。合作能带来额外收入，但也会让你更深地陷入灰色地带。",
+            options = {
+                {
+                    text = "建立合作",
+                    desc = "获得一笔可观的额外收入，但腐败风险上升",
+                    effects = {
+                        cash = 300,
+                        modifiers = {
+                            { target = "corruption_risk", value = 12, duration = 4 },
+                            { target = "shadow_income", value = 50, duration = 3 },
+                        },
+                    },
+                },
+                {
+                    text = "断然拒绝",
+                    desc = "维护正当经营的名声，声誉略有恢复",
+                    effects = {
+                        modifiers = {
+                            { target = "legitimacy", value = 5, duration = 0 },
+                            { target = "reputation_penalty", value = 3, duration = 0 },
+                        },
+                    },
+                },
+            },
+        },
+
+        -- ================================================================
+        -- 护卫叛逃
+        -- ================================================================
+        {
+            id = "guard_desertion",
+            title = "护卫叛逃",
+            priority = EventsData.PRIORITY.REGION,
+            icon = "🏃",
+            trigger = {
+                min_guards = 8,
+                min_reputation = -30,
+                min_year = 1908,
+                cooldown = 5,
+            },
+            chance = 0.08,
+            desc = "你的一部分护卫对掠夺行为心生不满，携带武器集体叛逃。矿区防御力量骤降。",
+            options = {
+                {
+                    text = "高薪挽留剩余护卫",
+                    desc = "花大价钱稳住军心，防止进一步瓦解",
+                    effects = {
+                        cash = -250,
+                        modifiers = {
+                            { target = "guard_power_bonus", value = -0.10, duration = 2 },
+                            { target = "worker_morale", value = -5, duration = 0 },
+                        },
+                    },
+                },
+                {
+                    text = "招募新兵补充",
+                    desc = "重新招人训练，短期战力不足但长期可恢复",
+                    effects = {
+                        cash = -150,
+                        modifiers = {
+                            { target = "guard_power_bonus", value = -0.15, duration = 3 },
+                        },
+                    },
+                },
+            },
+        },
+
+        -- ================================================================
+        -- 勒索反噬
+        -- ================================================================
+        {
+            id = "extortion_backlash",
+            title = "勒索反噬",
+            priority = EventsData.PRIORITY.REGION,
+            icon = "💢",
+            trigger = {
+                min_reputation = -40,
+                min_year = 1910,
+                cooldown = 6,
+            },
+            chance = 0.10,
+            chance_modifier = "corruption_risk",
+            desc = "你过往的勒索行为终于引来了后果。被勒索的外国商人联合向帝国当局提起申诉，调查人员已到达矿区。",
+            options = {
+                {
+                    text = "行贿调查官员",
+                    desc = "花钱让调查不了了之，但腐败网越织越密",
+                    effects = {
+                        cash = -400,
+                        modifiers = {
+                            { target = "corruption_risk", value = 15, duration = 5 },
+                        },
+                    },
+                },
+                {
+                    text = "主动退还部分赃款",
+                    desc = "诚意和解损失惨重，但声誉得到一定恢复",
+                    effects = {
+                        cash = -600,
+                        modifiers = {
+                            { target = "reputation_penalty", value = 15, duration = 0 },
+                            { target = "legitimacy", value = 10, duration = 0 },
+                        },
+                    },
+                },
+                {
+                    text = "死不认账",
+                    desc = "强硬对抗调查，省了钱但声誉一落千丈",
+                    effects = {
+                        modifiers = {
+                            { target = "reputation_penalty", value = -12, duration = 0 },
+                            { target = "political_standing", value = -5, duration = 0 },
+                        },
+                    },
+                },
+            },
+        },
+
+        -- ================================================================
+        -- 走私军火
+        -- ================================================================
+        {
+            id = "arms_smuggling",
+            title = "走私军火",
+            priority = EventsData.PRIORITY.MINOR,
+            icon = "🔫",
+            trigger = {
+                min_reputation = -25,
+                requires_war = true,
+                cooldown = 5,
+            },
+            chance = 0.10,
+            desc = "战时混乱让军火走私变得有利可图。有人提议借用你的运输渠道走私武器，承诺分成丰厚。",
+            options = {
+                {
+                    text = "参与走私",
+                    desc = "风险极高但利润丰厚，运输风险飙升",
+                    effects = {
+                        cash = 500,
+                        modifiers = {
+                            { target = "transport_risk", value = 0.12, duration = 4 },
+                            { target = "corruption_risk", value = 15, duration = 4 },
+                            { target = "shadow_income", value = 80, duration = 3 },
+                        },
+                    },
+                },
+                {
+                    text = "向当局举报",
+                    desc = "配合执法赢得信任，获得运输保障",
+                    effects = {
+                        modifiers = {
+                            { target = "legitimacy", value = 8, duration = 0 },
+                            { target = "transport_risk", value = -0.06, duration = 4 },
+                            { target = "reputation_penalty", value = 5, duration = 0 },
+                        },
+                    },
+                },
+            },
+        },
+
+        -- ================================================================
+        -- 掠夺者联盟
+        -- ================================================================
+        {
+            id = "raider_alliance",
+            title = "掠夺者联盟",
+            priority = EventsData.PRIORITY.REGION,
+            icon = "🤝",
+            trigger = {
+                min_reputation = -35,
+                min_influence = 25,
+                min_year = 1915,
+                cooldown = 6,
+            },
+            chance = 0.07,
+            desc = "周边地区的几个势力头目注意到了你的影响力，提议组建松散的掠夺者联盟——共享情报、联合行动。代价是你必须分享部分资源。",
+            options = {
+                {
+                    text = "加入联盟",
+                    desc = "掠夺收益大增，但影响力和资源需分摊",
+                    effects = {
+                        cash = -200,
+                        modifiers = {
+                            { target = "plunder_loot_mult", value = 0.25, duration = 6 },
+                            { target = "mine_output_mult", value = -0.05, duration = 6 },
+                            { target = "reputation_penalty", value = -10, duration = 0 },
+                        },
+                    },
+                },
+                {
+                    text = "独善其身",
+                    desc = "保持独立运营，不受牵连",
+                    effects = {
+                        modifiers = {
+                            { target = "reputation_penalty", value = 3, duration = 0 },
+                        },
+                    },
+                },
+            },
+        },
+
+        -- ================================================================
+        -- 报复性袭击
+        -- ================================================================
+        {
+            id = "retaliation_raid",
+            title = "报复性袭击",
+            priority = EventsData.PRIORITY.REGION,
+            icon = "🔥",
+            trigger = {
+                min_reputation = -50,
+                requires_mine = true,
+                min_year = 1910,
+                cooldown = 5,
+            },
+            chance = 0.12,
+            desc = "你的掠夺行为激怒了受害方。一伙复仇者对你的矿区发起了蓄谋已久的破坏性袭击，设备损毁严重。",
+            options = {
+                {
+                    text = "全力修复并加强防御",
+                    desc = "花费巨资修复受损设备，同时加固矿区防御",
+                    effects = {
+                        cash = -500,
+                        security_bonus = 1,
+                        modifiers = {
+                            { target = "mine_output_mult", value = -0.12, duration = 2 },
+                        },
+                    },
+                },
+                {
+                    text = "追踪并剿灭袭击者",
+                    desc = "动用军事力量追击，短期损失大但杀鸡儆猴",
+                    effects = {
+                        cash = -300,
+                        modifiers = {
+                            { target = "mine_output_mult", value = -0.15, duration = 1 },
+                            { target = "reputation_penalty", value = -5, duration = 0 },
+                            { target = "guard_power_bonus", value = 0.10, duration = 4 },
+                        },
+                    },
+                },
+            },
+        },
+
+        -- ================================================================
+        --               ↓↓↓ 正面奖励/增益事件（7 个） ↓↓↓
+        -- ================================================================
+
+        -- ================================================================
+        -- 丰收之年
+        -- ================================================================
+        {
+            id = "bumper_harvest",
+            title = "丰收之年",
+            priority = EventsData.PRIORITY.MINOR,
+            icon = "🌾",
+            trigger = {
+                min_year = 1906,
+                cooldown = 5,
+            },
+            chance = 0.12,
+            desc = "今年粮食大丰收，物价下降，工人心情愉悦，矿区一片欣欣向荣。",
+            options = {
+                {
+                    text = "趁机降低食品补贴",
+                    desc = "省下补贴费用，工人也不会抱怨",
+                    effects = {
+                        cash = 150,
+                        modifiers = {
+                            { target = "worker_morale", value = 8, duration = 0 },
+                        },
+                    },
+                },
+                {
+                    text = "加大伙食改善",
+                    desc = "花点钱让工人吃好，士气和效率双提升",
+                    effects = {
+                        cash = -80,
+                        modifiers = {
+                            { target = "worker_morale", value = 15, duration = 0 },
+                            { target = "worker_efficiency", value = 0.06, duration = 3 },
+                        },
+                    },
+                },
+            },
+        },
+
+        -- ================================================================
+        -- 贵人相助
+        -- ================================================================
+        {
+            id = "noble_patron",
+            title = "贵人相助",
+            priority = EventsData.PRIORITY.MINOR,
+            icon = "🎩",
+            trigger = {
+                min_influence = 15,
+                min_year = 1908,
+                cooldown = 6,
+            },
+            chance = 0.08,
+            desc = "一位维也纳的贵族听闻了你的事迹，对你的矿业经营颇有兴趣。他愿意提供资金和政治支持，但要求在你的企业中占有一席之地。",
+            options = {
+                {
+                    text = "接受赞助",
+                    desc = "获得大笔资金和政治影响力提升",
+                    effects = {
+                        cash = 500,
+                        modifiers = {
+                            { target = "political_standing", value = 8, duration = 0 },
+                            { target = "legitimacy", value = 6, duration = 0 },
+                        },
+                    },
+                },
+                {
+                    text = "婉拒好意",
+                    desc = "保持独立经营，不受外部势力牵制",
+                    effects = {
+                        modifiers = {
+                            { target = "legitimacy", value = 3, duration = 0 },
+                        },
+                    },
+                },
+            },
+        },
+
+        -- ================================================================
+        -- 技术突破
+        -- ================================================================
+        {
+            id = "tech_breakthrough",
+            title = "技术突破",
+            priority = EventsData.PRIORITY.MINOR,
+            icon = "💡",
+            trigger = {
+                min_year = 1912,
+                min_development = 3,
+                cooldown = 6,
+            },
+            chance = 0.09,
+            desc = "你雇佣的一位工程师发明了一种新的采矿方法，大幅提高了矿石提取效率。这项技术引起了同行的关注。",
+            options = {
+                {
+                    text = "申请专利独享技术",
+                    desc = "独占技术优势，长期矿产效率提升",
+                    effects = {
+                        cash = -120,
+                        modifiers = {
+                            { target = "mine_output_mult", value = 0.10, duration = 5 },
+                            { target = "tech_bonus", value = 50, duration = 0 },
+                        },
+                    },
+                },
+                {
+                    text = "出售专利获取现金",
+                    desc = "技术变现获得丰厚回报",
+                    effects = {
+                        cash = 400,
+                        modifiers = {
+                            { target = "mine_output_mult", value = 0.05, duration = 2 },
+                        },
+                    },
+                },
+            },
+        },
+
+        -- ================================================================
+        -- 外交斡旋
+        -- ================================================================
+        {
+            id = "diplomatic_windfall",
+            title = "外交斡旋",
+            priority = EventsData.PRIORITY.MINOR,
+            icon = "🕊️",
+            trigger = {
+                min_influence = 20,
+                min_year = 1910,
+                cooldown = 6,
+            },
+            chance = 0.08,
+            desc = "你在地区事务中积累的影响力引起了外交官的注意。他们邀请你参与一项跨国贸易谈判，作为民间代表发言。",
+            options = {
+                {
+                    text = "积极参与谈判",
+                    desc = "扩大贸易关系，获得长期贸易收入加成",
+                    effects = {
+                        cash = -100,
+                        modifiers = {
+                            { target = "trade_income", value = 80, duration = 4 },
+                            { target = "political_standing", value = 5, duration = 0 },
+                        },
+                    },
+                },
+                {
+                    text = "低调出席以保身",
+                    desc = "稳妥行事，获得些许声望但不冒风险",
+                    effects = {
+                        modifiers = {
+                            { target = "political_standing", value = 2, duration = 0 },
+                            { target = "legitimacy", value = 3, duration = 0 },
+                        },
+                    },
+                },
+            },
+        },
+
+        -- ================================================================
+        -- 工人庆典
+        -- ================================================================
+        {
+            id = "worker_festival",
+            title = "工人庆典",
+            priority = EventsData.PRIORITY.MINOR,
+            icon = "🎉",
+            trigger = {
+                min_workers = 15,
+                min_year = 1906,
+                cooldown = 5,
+            },
+            chance = 0.12,
+            desc = "矿区工人自发组织了一场庆祝活动。几个月来辛苦劳作的疲惫在欢声笑语中消散，团队凝聚力空前高涨。",
+            options = {
+                {
+                    text = "出资赞助庆典",
+                    desc = "花一些钱让庆典更热闹，工人士气大振",
+                    effects = {
+                        cash = -100,
+                        modifiers = {
+                            { target = "worker_morale", value = 20, duration = 0 },
+                            { target = "worker_efficiency", value = 0.08, duration = 3 },
+                        },
+                    },
+                },
+                {
+                    text = "默许活动但不参与",
+                    desc = "工人自发庆祝，士气提升但幅度一般",
+                    effects = {
+                        modifiers = {
+                            { target = "worker_morale", value = 10, duration = 0 },
+                        },
+                    },
+                },
+            },
+        },
+
+        -- ================================================================
+        -- 考古发现
+        -- ================================================================
+        {
+            id = "archaeological_find",
+            title = "考古发现",
+            priority = EventsData.PRIORITY.MINOR,
+            icon = "🏺",
+            trigger = {
+                requires_mine = true,
+                min_year = 1908,
+                cooldown = 7,
+            },
+            chance = 0.07,
+            desc = "矿工在开采过程中发现了一处古代遗迹，出土了大量具有历史价值的文物。这一发现引起了学术界和媒体的极大兴趣。",
+            options = {
+                {
+                    text = "捐赠文物给博物馆",
+                    desc = "获得巨大声望和政治影响力",
+                    effects = {
+                        modifiers = {
+                            { target = "legitimacy", value = 15, duration = 0 },
+                            { target = "political_standing", value = 8, duration = 0 },
+                            { target = "public_support", value = 10, duration = 0 },
+                        },
+                    },
+                },
+                {
+                    text = "私下出售文物",
+                    desc = "获得高额利润，但名声受损",
+                    effects = {
+                        cash = 600,
+                        modifiers = {
+                            { target = "corruption_risk", value = 8, duration = 4 },
+                            { target = "legitimacy", value = -5, duration = 0 },
+                        },
+                    },
+                },
+            },
+        },
+
+        -- ================================================================
+        -- 贸易通道开放
+        -- ================================================================
+        {
+            id = "trade_route_opened",
+            title = "贸易通道开放",
+            priority = EventsData.PRIORITY.MINOR,
+            icon = "🚢",
+            trigger = {
+                min_year = 1910,
+                cooldown = 6,
+            },
+            chance = 0.10,
+            desc = "一条新的国际贸易航线开通，途经巴尔干地区。矿产出口有了更多选择，贸易前景一片光明。",
+            options = {
+                {
+                    text = "签订长期出口合同",
+                    desc = "锁定长期贸易收入，但需要预付保证金",
+                    effects = {
+                        cash = -200,
+                        modifiers = {
+                            { target = "trade_income", value = 100, duration = 5 },
+                            { target = "transport_risk", value = -0.05, duration = 4 },
+                        },
+                    },
+                },
+                {
+                    text = "灵活出售赚取短期利润",
+                    desc = "趁新航线涨价出售一批库存",
+                    effects = {
+                        cash = 250,
+                        gold = -2,
+                        modifiers = {
+                            { target = "gold_price_mod", value = 0.08, duration = 2 },
+                        },
+                    },
+                },
+            },
+        },
+
+        -- ================================================================
+        -- 媒体/市场情报事件（type: market_intel）
+        -- 自动应用市场效果，无玩家选项，文化顾问提供信息分级
+        -- ================================================================
+
+        -- 利好预测
+        {
+            id = "media_bull_forecast",
+            title = "📰 利好预测",
+            type = "market_intel",
+            priority = EventsData.PRIORITY.MINOR,
+            icon = "📰",
+            trigger = {
+                requires_tech = "d3_newspaper",
+                cooldown = 4,
+            },
+            chance = 0.12,
+            -- 目标选择：运行时随机选择一只非 balkan_press 股票
+            target_mode = "random_stock_exclude_press",
+            public_message = "{stock_name}基本面利好，业内人士预计未来4个季度将持续上涨。",
+            hint_message = "💡 顾问提示：此消息可信度存疑，建议谨慎。",
+            intel_message = "⚠ 顾问密报：消息源不可靠，实际利好仅持续约1个季度，之后庄家将集中出货。预计第2-4季度回落。",
+            -- actual_effects 由 event_market_effects.lua 映射
+        },
+
+        -- 利空恐慌
+        {
+            id = "media_bear_panic",
+            title = "📰 利空恐慌",
+            type = "market_intel",
+            priority = EventsData.PRIORITY.MINOR,
+            icon = "📰",
+            trigger = {
+                requires_tech = "d3_newspaper",
+                cooldown = 4,
+            },
+            chance = 0.10,
+            target_mode = "random_stock_exclude_press",
+            public_message = "{stock_name}被曝管理层丑闻，多家机构下调评级，恐将持续下跌。",
+            hint_message = "💡 顾问提示：此报道有夸大嫌疑。",
+            intel_message = "⚠ 顾问密报：报道系竞争对手授意，实际基本面未变。预计下跌1-2季后将反弹超越前高。",
+        },
+
+        -- 行业景气报告
+        {
+            id = "media_sector_report",
+            title = "📰 行业景气报告",
+            type = "market_intel",
+            priority = EventsData.PRIORITY.MINOR,
+            icon = "📻",
+            trigger = {
+                requires_tech = "d5_radio",
+                cooldown = 5,
+            },
+            chance = 0.15,
+            -- 目标选择：运行时随机选择一个 sector
+            target_mode = "random_sector",
+            public_message = "权威机构发布报告，{sector_name}行业未来将迎来黄金发展期，建议重仓配置。",
+            hint_message = "💡 顾问提示：报告作者与利益方有关联。",
+            intel_message = "⚠ 顾问密报：该报告由{sector_name}行业协会赞助。实际利好有限，仅2季温和增长后回归正常。",
+        },
+
+        -- 政治内幕
+        {
+            id = "media_political_leak",
+            title = "📰 政治内幕",
+            type = "market_intel",
+            priority = EventsData.PRIORITY.MINOR,
+            icon = "🏴",
+            trigger = {
+                requires_tech_any = { "d4a_nationalism", "d4b_internationalism" },
+                min_influence = 50,
+                cooldown = 6,
+            },
+            chance = 0.08,
+            target_mode = "random_stock_exclude_press",
+            public_message = "据可靠消息，政府正在考虑对{stock_name}所在行业实施新的监管政策。市场观望情绪浓厚。",
+            hint_message = "💡 顾问提示：政策落地尚不确定。",
+            intel_message = "⚠ 顾问密报：政策将在2个季度后实施，短期利空但长期利好（行业整合后龙头受益）。建议先减仓后回补。",
+        },
+
+        -- 战时谣言
+        {
+            id = "media_war_rumor",
+            title = "📰 战时谣言",
+            type = "market_intel",
+            priority = EventsData.PRIORITY.MINOR,
+            icon = "⚔️",
+            trigger = {
+                requires_war = true,
+                cooldown = 3,
+            },
+            chance = 0.20,
+            target_mode = "war_rumor",  -- 固定影响军工 + 航运
+            public_message = "前线传来消息，战事即将出现重大转折。军工股闻声大涨，航运股承压。",
+            hint_message = "💡 顾问提示：前线消息真假难辨。",
+            intel_message = "⚠ 顾问密报：经核实此为虚假情报，军工股短暂上涨后将回落，航运实际影响有限。",
+        },
     }
 end
 

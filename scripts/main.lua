@@ -63,6 +63,16 @@ function Start()
     graphics.windowTitle = Config.TITLE
     print("=== " .. Config.TITLE .. " v" .. Config.VERSION .. " ===")
 
+    -- 0.9 全局触控按下位置跟踪（供 Config.TapGuard 滑动/点击区分）
+    --     必须在 UI.Init() 之前订阅，确保 counter 先递增，
+    --     UI 层的 Modal overlay 关闭才能正确 ConsumeTap 防穿透。
+    SubscribeToEvent("MouseButtonDown", function()
+        Config.TapDown()
+    end)
+    SubscribeToEvent("TouchBegin", function()
+        Config.TapDown()
+    end)
+
     -- 1. 初始化 UI 系统
     UIManager.InitUI()
 
@@ -178,13 +188,7 @@ function Start()
         end
     end)
 
-    -- 5.1 全局触控按下位置跟踪（供 Config.TapGuard 滑动/点击区分）
-    SubscribeToEvent("MouseButtonDown", function()
-        Config.TapDown()
-    end)
-    SubscribeToEvent("TouchBegin", function()
-        Config.TapDown()
-    end)
+    -- 5.1 （已移至 UI.Init 之前，见 0.9）
 
     -- 6. 新游戏：先展示新手引导，引导结束后再检查开局事件
     if not loaded then
@@ -627,7 +631,18 @@ function FinalizeEndTurn()
     AudioManager.UpdateBGM(state_)
 
     -- 收集本季动态通知（战斗结果、AI行动、警告）
+    -- 保留 turn_engine 中已写入的 market_intel 消息
+    local prevIntelMsgs = {}
+    for _, m in ipairs(state_.turn_messages or {}) do
+        if m.type == "market_intel" then
+            table.insert(prevIntelMsgs, m)
+        end
+    end
     state_.turn_messages = {}
+    -- 先放回 market_intel 消息
+    for _, m in ipairs(prevIntelMsgs) do
+        table.insert(state_.turn_messages, m)
+    end
     for _, msg in ipairs(report.ai_changes or {}) do
         local mtype = "ai_move"
         if msg:find("⚔") then mtype = "combat_win"
@@ -641,6 +656,11 @@ function FinalizeEndTurn()
 
     -- 刷新 UI
     UIManager.RefreshAll(state_)
+
+    -- 新闻快报弹窗：如果本回合有 market_intel 消息，弹出专属弹窗
+    if #prevIntelMsgs > 0 then
+        UIManager.ShowMarketIntelPopup(state_, prevIntelMsgs)
+    end
 
     -- 回合推进后立即展示胜利/失败结算，避免只在下一次点击时提示。
     if GameState.IsGameOver(state_) then

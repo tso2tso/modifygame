@@ -247,6 +247,20 @@ function TechData.GetAll()
                 { kind = "stock_boost_all", value = 0.10 },
             },
         },
+        -- ── 做空科技（独立分支，与 b7a/b7b 并行）──
+        {
+            id   = "b7_short_selling",
+            name = "卖空交易",
+            icon = "📉",
+            desc = "引入卖空机制，允许在股票下跌时做空获利。需要证券交易所基础设施。",
+            cost = 900, turns = 5,
+            requires = "b6_stock_exchange",
+            era_hint = "1920s",
+            effect_desc = "解锁股票做空操作",
+            effects = {
+                { kind = "unlock_short_selling" },
+            },
+        },
         -- ── 分叉2: 国际贸易 vs 战时经济 ──
         {
             id   = "b7a_intl_trade",
@@ -564,6 +578,243 @@ function TechData.GetAll()
                 { kind = "influence_gain", value = 3 },
                 { kind = "research_speed", value = 0.10 },
                 { kind = "morale_bonus", value = 3 },
+            },
+        },
+
+        -- ================================================================
+        -- A线·采矿 扩展（3个，掠夺子分支）
+        -- 需要跨线前置，使用 AND(逗号) 语法
+        -- ================================================================
+        {
+            id   = "a8_raid_tactics",
+            name = "掠夺性开采",
+            icon = "⚒️",
+            desc = "开发激进的掠夺式开采战术，大幅提高劫掠商队和勒索时的收益。需要战时强采和军事补给管理的双重基础。",
+            cost = 1200, turns = 5,
+            requires = "a7_wartime_extraction,c2_logistics",
+            era_hint = "1940s",
+            effect_desc = "掠夺收益 +20%，矿山产出 ×1.08",
+            effects = {
+                { kind = "plunder_loot_mult", value = 0.20 },
+                { kind = "mine_output_mult", value = 0.08 },
+            },
+        },
+        {
+            id   = "a9_vein_exploitation",
+            name = "矿脉强占技术",
+            icon = "💎",
+            desc = "研发快速矿脉评估和强占技术，缩短掠夺冷却时间，提高矿山基础产出。",
+            cost = 1500, turns = 6,
+            requires = "a8_raid_tactics",
+            era_hint = "1940s",
+            effect_desc = "掠夺冷却 -1 季，矿山产出 +3",
+            effects = {
+                { kind = "plunder_cooldown_reduction", value = 1 },
+                { kind = "mine_output_base", value = 3 },
+            },
+        },
+        {
+            id   = "a10_guerrilla_logistics",
+            name = "游击后勤网",
+            icon = "🗺️",
+            desc = "建立分散式游击后勤网络，全面提升掠夺能力和矿产运输效率。",
+            cost = 1800, turns = 7,
+            requires = "a9_vein_exploitation,c5_motorized",
+            era_hint = "1940s",
+            effect_desc = "掠夺收益 +15%，掠夺冷却 -1 季，工人效率 +8%",
+            effects = {
+                { kind = "plunder_loot_mult", value = 0.15 },
+                { kind = "plunder_cooldown_reduction", value = 1 },
+                { kind = "worker_efficiency", value = 0.08 },
+            },
+        },
+
+        -- ================================================================
+        -- B线·经济 扩展（3个）
+        -- ================================================================
+        {
+            id   = "b9_insurance",
+            name = "商业保险体系",
+            icon = "🛡️",
+            desc = "建立商业保险制度，降低运输和事故风险，稳定经营收入。",
+            cost = 1300, turns = 6,
+            requires = "b8_central_banking",
+            era_hint = "1940s",
+            effect_desc = "事故概率 -12%，每季被动收入 +60 克朗",
+            effects = {
+                { kind = "accident_reduction", value = -0.12 },
+                { kind = "trade_income", value = 60 },
+            },
+        },
+        {
+            id   = "b10_offshore_account",
+            name = "海外账户",
+            icon = "🌐",
+            desc = "在中立国设立隐秘资产账户，降低税负并提升声誉恢复速度。",
+            cost = 1500, turns = 6,
+            requires = "b8_central_banking",
+            era_hint = "1940s",
+            effect_desc = "税率 -3%，声誉恢复 +1/季",
+            effects = {
+                { kind = "tax_reduction", value = -0.03 },
+                { kind = "rep_recovery_bonus", value = 1 },
+            },
+        },
+        {
+            id   = "b11_trade_monopoly",
+            name = "贸易垄断",
+            icon = "👑",
+            desc = "整合区域贸易网络形成垄断优势，大幅增加贸易收入和掠夺收益。需要金融网络和情报网络/重武装的双重支撑。",
+            cost = 2000, turns = 8,
+            requires = "b8_central_banking,c6a_intelligence|c6b_heavy_arms",
+            era_hint = "1940s",
+            effect_desc = "每季贸易收入 +120，掠夺收益 +10%",
+            effects = {
+                { kind = "trade_income", value = 120 },
+                { kind = "plunder_loot_mult", value = 0.10 },
+            },
+        },
+
+        -- ================================================================
+        -- C线·军事 扩展（6个，含掠夺科技 + 声誉管理分支）
+        -- ================================================================
+        {
+            id   = "c8_commando",
+            name = "突击队训练",
+            icon = "🎖️",
+            desc = "培训精锐突击队用于掠夺行动，提高掠夺收益和战斗力。",
+            cost = 1400, turns = 6,
+            requires = "c7_elite_force",
+            era_hint = "1940s",
+            effect_desc = "掠夺收益 +15%，护卫战斗力 +10%",
+            effects = {
+                { kind = "plunder_loot_mult", value = 0.15 },
+                { kind = "guard_power_bonus", value = 0.10 },
+            },
+        },
+        {
+            id   = "c9_armored_train",
+            name = "装甲列车",
+            icon = "🚂",
+            desc = "改装装甲列车用于矿石运输和武装押运，降低补给消耗并提高护卫战力。",
+            cost = 1600, turns = 7,
+            requires = "c8_commando",
+            era_hint = "1940s",
+            effect_desc = "补给消耗 -2，护卫战斗力 +15%",
+            effects = {
+                { kind = "supply_reduction", value = -2 },
+                { kind = "guard_power_bonus", value = 0.15 },
+            },
+        },
+        {
+            id   = "c10_total_war",
+            name = "全面战争",
+            icon = "💀",
+            desc = "进入全面战争状态，家族军事力量达到巅峰。需要军事和文化双线支撑。",
+            cost = 2200, turns = 8,
+            requires = "c9_armored_train,d7_wartime_media",
+            era_hint = "1940s",
+            effect_desc = "护卫战斗力 +25%，士气 +5，每季影响力 +2",
+            effects = {
+                { kind = "guard_power_bonus", value = 0.25 },
+                { kind = "morale_bonus", value = 5 },
+                { kind = "influence_gain", value = 2 },
+            },
+        },
+        -- ── 掠夺声誉管理分支（从 c8_commando 分出）──
+        {
+            id   = "c8a_intimidation",
+            name = "威慑战术",
+            icon = "😈",
+            desc = "通过武力威慑减少掠夺行动的阻力，缩短掠夺冷却时间。（与外交掩护互斥）",
+            cost = 1100, turns = 5,
+            requires = "c8_commando",
+            excludes = "c8b_diplomatic_cover",
+            era_hint = "1940s",
+            effect_desc = "掠夺冷却 -1 季，护卫战斗力 +10%",
+            effects = {
+                { kind = "plunder_cooldown_reduction", value = 1 },
+                { kind = "guard_power_bonus", value = 0.10 },
+            },
+        },
+        {
+            id   = "c8b_diplomatic_cover",
+            name = "外交掩护",
+            icon = "🕊️",
+            desc = "通过外交手段掩饰掠夺行径，加速声誉恢复。（与威慑战术互斥）",
+            cost = 1200, turns = 6,
+            requires = "c8_commando",
+            excludes = "c8a_intimidation",
+            era_hint = "1940s",
+            effect_desc = "声誉恢复 +2/季，每季影响力 +2",
+            effects = {
+                { kind = "rep_recovery_bonus", value = 2 },
+                { kind = "influence_gain", value = 2 },
+            },
+        },
+        {
+            id   = "c9_rep_management",
+            name = "声誉管理",
+            icon = "📋",
+            desc = "建立系统化的声誉管理机制，综合提升掠夺效率与声誉恢复。",
+            cost = 1600, turns = 6,
+            requires = "c8a_intimidation|c8b_diplomatic_cover",
+            era_hint = "1940s",
+            effect_desc = "声誉恢复 +2/季，掠夺收益 +10%，掠夺冷却 -1 季",
+            effects = {
+                { kind = "rep_recovery_bonus", value = 2 },
+                { kind = "plunder_loot_mult", value = 0.10 },
+                { kind = "plunder_cooldown_reduction", value = 1 },
+            },
+        },
+
+        -- ================================================================
+        -- D线·文化 扩展（3个）
+        -- ================================================================
+        {
+            id   = "d8_cultural_hegemony",
+            name = "文化霸权",
+            icon = "🏆",
+            desc = "建立区域文化霸权，影响力和士气获得持久优势。",
+            cost = 1600, turns = 7,
+            requires = "d7_wartime_media",
+            era_hint = "1940s",
+            effect_desc = "每季影响力 +4，士气 +4，工人效率 +5%",
+            effects = {
+                { kind = "influence_gain", value = 4 },
+                { kind = "morale_bonus", value = 4 },
+                { kind = "worker_efficiency", value = 0.05 },
+            },
+        },
+        {
+            id   = "d9_secret_society",
+            name = "秘密结社",
+            icon = "🔮",
+            desc = "建立跨国秘密结社网络，获得政治影响力和研发加成，同时有助于掩护掠夺行为。",
+            cost = 1800, turns = 7,
+            requires = "d8_cultural_hegemony,b8_central_banking",
+            era_hint = "1940s",
+            effect_desc = "每季影响力 +3，研发速度 +12%，声誉恢复 +1/季",
+            effects = {
+                { kind = "influence_gain", value = 3 },
+                { kind = "research_speed", value = 0.12 },
+                { kind = "rep_recovery_bonus", value = 1 },
+            },
+        },
+        {
+            id   = "d10_national_identity",
+            name = "民族认同",
+            icon = "🏛️",
+            desc = "锻造统一的民族认同感，全面巩固家族在地区的统治地位。",
+            cost = 2000, turns = 8,
+            requires = "d9_secret_society",
+            era_hint = "1940s",
+            effect_desc = "每季影响力 +5，士气 +5，行动点 +1，护卫战力 +10%",
+            effects = {
+                { kind = "influence_gain", value = 5 },
+                { kind = "morale_bonus", value = 5 },
+                { kind = "ap_bonus", value = 1 },
+                { kind = "guard_power_bonus", value = 0.10 },
             },
         },
     }

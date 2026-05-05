@@ -362,6 +362,119 @@ EventMarketEffects.BY_EVENT_ID = {
         { stock_id = "sarajevo_mining",   delta_mu = -0.06, duration = 3 },
         { stock_id = "oriental_trading",  delta_mu =  0.05, duration = 3 },
     },
+
+    -- ==================== 掠夺主题事件 ====================
+
+    ["vein_turf_war"] = {
+        { stock_id = "sarajevo_mining",   delta_mu = -0.08, duration = 3 },
+        { stock_id = "military_industry", delta_mu =  0.04, duration = 2 },
+    },
+
+    ["fence_network"] = {
+        { stock_id = "oriental_trading",  delta_mu =  0.05, duration = 3 },
+        { stock_id = "austro_bank_trust", delta_mu = -0.03, duration = 2 },
+    },
+
+    ["guard_desertion"] = {
+        { stock_id = "sarajevo_mining",   delta_mu = -0.06, duration = 2 },
+        { stock_id = "military_industry", delta_mu = -0.04, duration = 2 },
+    },
+
+    ["extortion_backlash"] = {
+        { stock_id = "sarajevo_mining",   delta_mu = -0.10, duration = 3 },
+        { stock_id = "austro_bank_trust", delta_mu = -0.05, duration = 3 },
+        { stock_id = "oriental_trading",  delta_mu = -0.04, duration = 2 },
+    },
+
+    ["arms_smuggling"] = {
+        { stock_id = "military_industry", delta_mu =  0.08, duration = 3 },
+        { stock_id = "balkan_shipping",   delta_mu =  0.04, duration = 2 },
+        { stock_id = "austro_bank_trust", delta_mu = -0.04, duration = 2 },
+    },
+
+    ["raider_alliance"] = {
+        { stock_id = "sarajevo_mining",   delta_mu = -0.06, duration = 3 },
+        { stock_id = "military_industry", delta_mu =  0.06, duration = 3 },
+        { stock_id = "oriental_trading",  delta_mu = -0.03, duration = 2 },
+    },
+
+    ["retaliation_raid"] = {
+        { stock_id = "sarajevo_mining",   delta_mu = -0.12, duration = 3 },
+        { stock_id = "imperial_railway",  delta_mu = -0.04, duration = 2 },
+        { stock_id = "military_industry", delta_mu =  0.05, duration = 2 },
+    },
+
+    -- ==================== 正面奖励/增益事件 ====================
+
+    ["bumper_harvest"] = {
+        { stock_id = "sarajevo_mining",   delta_mu =  0.04, duration = 2 },
+        { stock_id = "oriental_trading",  delta_mu =  0.03, duration = 2 },
+    },
+
+    ["noble_patron"] = {
+        { stock_id = "austro_bank_trust", delta_mu =  0.05, duration = 3 },
+        { stock_id = "sarajevo_mining",   delta_mu =  0.04, duration = 3 },
+    },
+
+    ["tech_breakthrough"] = {
+        { stock_id = "sarajevo_mining",   delta_mu =  0.08, duration = 3 },
+        { stock_id = "imperial_railway",  delta_mu =  0.03, duration = 2 },
+    },
+
+    ["diplomatic_windfall"] = {
+        { stock_id = "oriental_trading",  delta_mu =  0.08, duration = 4 },
+        { stock_id = "balkan_shipping",   delta_mu =  0.05, duration = 3 },
+        { stock_id = "austro_bank_trust", delta_mu =  0.03, duration = 2 },
+    },
+
+    ["worker_festival"] = {
+        { stock_id = "sarajevo_mining",   delta_mu =  0.03, duration = 2 },
+    },
+
+    ["archaeological_find"] = {
+        { stock_id = "sarajevo_mining",   delta_mu =  0.05, duration = 3 },
+        { stock_id = "oriental_trading",  delta_mu =  0.04, duration = 2 },
+    },
+
+    ["trade_route_opened"] = {
+        { stock_id = "balkan_shipping",   delta_mu =  0.10, duration = 4 },
+        { stock_id = "oriental_trading",  delta_mu =  0.08, duration = 4 },
+        { stock_id = "sarajevo_mining",   delta_mu =  0.04, duration = 3 },
+        { stock_id = "imperial_railway",  delta_mu =  0.03, duration = 2 },
+    },
+
+    -- ==================== 媒体/市场情报事件 ====================
+    -- 注意：target 占位符在运行时由 events.lua 替换为实际 stock_id
+
+    -- 利好预测：表面涨4季，实际只涨1季后回落3季
+    ["media_bull_forecast"] = {
+        { stock_id = "{target}", delta_mu =  0.20, duration = 1 },  -- Q1 涨
+        { stock_id = "{target}", delta_mu = -0.12, duration = 3 },  -- Q2-Q4 跌
+    },
+
+    -- 利空恐慌：表面持续跌，实际跌2季后反弹2季
+    ["media_bear_panic"] = {
+        { stock_id = "{target}", delta_mu = -0.18, duration = 2 },  -- Q1-Q2 跌
+        { stock_id = "{target}", delta_mu =  0.10, duration = 2 },  -- Q3-Q4 涨
+    },
+
+    -- 行业景气报告：目标板块所有股票温和涨2季
+    ["media_sector_report"] = {
+        { stock_id = "{sector}", delta_mu =  0.08, duration = 2 },  -- 板块涨
+    },
+
+    -- 政治内幕：先跌2季后涨2季
+    ["media_political_leak"] = {
+        { stock_id = "{target}", delta_mu = -0.10, duration = 2 },  -- Q1-Q2 跌
+        { stock_id = "{target}", delta_mu =  0.15, duration = 2 },  -- Q3-Q4 涨
+    },
+
+    -- 战时谣言：军工短涨后回落，航运轻微影响
+    ["media_war_rumor"] = {
+        { stock_id = "military_industry", delta_mu =  0.15, duration = 1 },  -- 军工Q1涨
+        { stock_id = "military_industry", delta_mu = -0.08, duration = 2 },  -- 军工Q2-Q3跌
+        { stock_id = "balkan_shipping",   delta_mu = -0.05, duration = 1 },  -- 航运Q1微跌
+    },
 }
 
 --- 获取某事件对应的股价效果列表

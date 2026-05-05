@@ -57,6 +57,7 @@ local function showList(title, rows)
         closeOnEscape = true,
         showCloseButton = true,
         onClose = function(self)
+            Config.ConsumeTap()
             currentModal_ = nil
             self:Destroy()
         end,

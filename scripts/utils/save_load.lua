@@ -191,6 +191,7 @@ function SaveLoad._SerializeState(state)
     data.cash = state.cash
     data.gold = state.gold
     data.copper = state.copper or 0
+    data.difficulty = state.difficulty
     data.coal = state.coal or 0
     data.inflation_factor = state.inflation_factor or 1.0
     data.ap = {
@@ -379,6 +380,10 @@ function SaveLoad._SerializeState(state)
         hire_cost_discount = state.hire_cost_discount or 0,
         supply_reduction_bonus = state.supply_reduction_bonus or 0,
         accident_rate_mod = state.accident_rate_mod or 0,
+        plunder_loot_mult_bonus = state.plunder_loot_mult_bonus or 0,
+        rep_recovery_bonus = state.rep_recovery_bonus or 0,
+        plunder_cooldown_reduction = state.plunder_cooldown_reduction or 0,
+        stock_return_bonus = state.stock_return_bonus or 0,
     }
 
     -- 新手引导
@@ -438,9 +443,23 @@ function SaveLoad._SerializeState(state)
     -- 全局标记
     data.flags = state.flags
 
+    -- 掠夺/声誉系统
+    data.reputation = state.reputation
+    data.plunder_cooldowns = state.plunder_cooldowns
+    data.manipulation_cooldowns = state.manipulation_cooldowns
+    data.direction_locks = state.direction_locks           -- M2: 方向互斥锁
+    data.press_credibility = state.press_credibility       -- M1: 媒体公信力
+    data.last_ai_counter = state.last_ai_counter           -- M4: 上次AI反制记录
+    data.has_seized_veins = state.has_seized_veins
+    data.seized_veins = state.seized_veins
+
     -- 累计统计
     data.total_income = state.total_income
     data.total_expense = state.total_expense
+
+    -- 称号系统
+    data.stats = state.stats
+    data.titles_unlocked = state.titles_unlocked
 
     return data
 end
@@ -495,6 +514,19 @@ function SaveLoad._DeserializeState(data)
     data.ai_factions = data.ai_factions or {}
     data.modifiers = data.modifiers or {}
     data.foreign_ops = data.foreign_ops or { scouted = {}, scouting = nil, active = {} }
+
+    -- 掠夺/声誉系统（v0.6.0 新增）
+    data.reputation = data.reputation or 0
+    data.plunder_cooldowns = data.plunder_cooldowns
+        or { raid_caravan = 0, seize_vein = 0, extort_foreign = 0 }
+    data.manipulation_cooldowns = data.manipulation_cooldowns
+        or { pump = 0, dump = 0, coordinated = 0 }
+    data.direction_locks = data.direction_locks or {}                -- M2: 方向互斥锁
+    data.press_credibility = data.press_credibility or 60           -- M1: 媒体公信力（旧档默认初始值）
+    -- data.last_ai_counter: nil 即无记录，不需要默认值             -- M4
+    if data.has_seized_veins == nil then data.has_seized_veins = false end
+    data.seized_veins = data.seized_veins or {}
+
     data.history_log = data.history_log or {}
     data.events_fired = data.events_fired or {}
     data.flags = data.flags or { at_war = false, war_start_turn = 0 }
@@ -502,6 +534,17 @@ function SaveLoad._DeserializeState(data)
     data.total_income = data.total_income or 0
     data.total_expense = data.total_expense or 0
     data.event_queue = data.event_queue or {}
+
+    -- 称号系统（旧存档迁移）
+    data.stats = data.stats or {
+        attacks_initiated     = 0,
+        plunder_successes     = 0,
+        manipulation_successes = 0,
+        trades_completed      = 0,
+        short_profit_total    = 0,
+    }
+    data.titles_unlocked = data.titles_unlocked or {}
+    data.titles_new      = data.titles_new or {}
     data.phase = data.phase or "action"
     data.turn_count = data.turn_count or 0
 
@@ -630,6 +673,10 @@ function SaveLoad._DeserializeState(data)
     data.hire_cost_discount = derived.hire_cost_discount or data.hire_cost_discount or 0
     data.supply_reduction_bonus = derived.supply_reduction_bonus or data.supply_reduction_bonus or 0
     data.accident_rate_mod = derived.accident_rate_mod or data.accident_rate_mod or 0
+    data.plunder_loot_mult_bonus = derived.plunder_loot_mult_bonus or data.plunder_loot_mult_bonus or 0
+    data.rep_recovery_bonus = derived.rep_recovery_bonus or data.rep_recovery_bonus or 0
+    data.plunder_cooldown_reduction = derived.plunder_cooldown_reduction or data.plunder_cooldown_reduction or 0
+    data.stock_return_bonus = derived.stock_return_bonus or data.stock_return_bonus or 0
     data.derived_effects = nil  -- 清除残留，避免序列化时产生嵌套冗余
     data.military.supply = data.military.supply or 20
 
@@ -696,6 +743,14 @@ function SaveLoad._DeserializeState(data)
                         data.mine_slots_bonus = (data.mine_slots_bonus or 0) + eff.value
                     elseif eff.kind == "prospect_success" then
                         data.prospect_success_bonus = (data.prospect_success_bonus or 0) + eff.value
+                    elseif eff.kind == "stock_boost_all" then
+                        data.stock_return_bonus = (data.stock_return_bonus or 0) + (eff.value or 0.10)
+                    elseif eff.kind == "plunder_loot_mult" then
+                        data.plunder_loot_mult_bonus = (data.plunder_loot_mult_bonus or 0) + eff.value
+                    elseif eff.kind == "rep_recovery_bonus" then
+                        data.rep_recovery_bonus = (data.rep_recovery_bonus or 0) + eff.value
+                    elseif eff.kind == "plunder_cooldown_reduction" then
+                        data.plunder_cooldown_reduction = (data.plunder_cooldown_reduction or 0) + eff.value
                     end
                 end
             end

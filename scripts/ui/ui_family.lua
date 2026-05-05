@@ -796,6 +796,7 @@ function FamilyPage._ShowCandidateModal(pos)
         closeOnOverlay = true,
         closeOnEscape = true,
         onClose = function()
+            Config.ConsumeTap()
             currentModal_ = nil
         end,
     }
@@ -1281,6 +1282,7 @@ function FamilyPage._ShowMemberDetail(member)
         closeOnEscape = true,
         contentPadding = { 0, 12, 12, 12 },
         onClose = function()
+            Config.ConsumeTap()
             currentModal_ = nil
         end,
     }
