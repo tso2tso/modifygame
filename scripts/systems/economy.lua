@@ -810,8 +810,13 @@ function Economy._GetEstimateImpl(state)
             taxRate = taxRate - taxReduction
         end
     end
+    -- 内政总监减税：bonus × 20%（与 Settle 保持一致）
+    local civilBonus = GameState.GetPositionBonus(state, "civil_director")
+    if civilBonus > 0 then
+        taxRate = taxRate * (1 - civilBonus * 0.2)
+    end
     taxRate = math.max(0, math.min(0.35, taxRate))
-    details.tax = math.floor(math.max(0, state.cash + income) * taxRate)
+    details.tax = math.floor(math.max(0, state.cash) * taxRate)
     local expense = expenseBeforeTax + details.tax + details.ai_penalty
 
     return income, expense, details

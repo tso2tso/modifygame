@@ -190,7 +190,7 @@ local function applyEffect(state, eff, techId)
     elseif eff.kind == "security_bonus" then
         for _, r in ipairs(state.regions) do
             if r.id == "mine_district" then
-                r.security = math.min(5, r.security + eff.value)
+                r.security = math.min(5, (r.security or 3) + eff.value)
             end
         end
 

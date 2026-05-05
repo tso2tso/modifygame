@@ -363,7 +363,7 @@ function PlayerActionsGP.ExecuteAction(state, powerId, actionId)
     GameState.SpendAP(state, action.ap_cost)
 
     -- 外交总监加成：记录好感度变化量，对正向变化额外加成
-    local power = GrandPowers.GetPower(state, powerId)
+    local power = state.powers and state.powers[powerId]
     local attBefore = power and power.attitude_to_player or 0
 
     -- 执行

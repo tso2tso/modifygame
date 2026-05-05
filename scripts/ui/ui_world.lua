@@ -2126,14 +2126,8 @@ function WorldPage._CreateTitlePortrait(title, isUnlocked, accent, size)
         children = {
             UI.Label {
                 text = title.icon or "🏅",
-                fontSize = 30,
+                fontSize = 36,
                 fontColor = isUnlocked and accent or C.text_muted,
-                pointerEvents = "none",
-            },
-            UI.Label {
-                text = "1:1 立绘",
-                fontSize = F.label,
-                fontColor = C.text_muted,
                 pointerEvents = "none",
             },
         },
@@ -2170,8 +2164,10 @@ function WorldPage._ShowTitleDetail(state, title, cat)
                     UI.Panel {
                         width = "100%",
                         alignItems = "center",
+                        justifyContent = "center",
+                        paddingVertical = 10,
                         children = {
-                            WorldPage._CreateTitlePortrait(title, isUnlocked, accent, 220),
+                            WorldPage._CreateTitlePortrait(title, isUnlocked, accent, 280),
                         },
                     },
                     UI.Panel {
@@ -2232,14 +2228,6 @@ function WorldPage._ShowTitleDetail(state, title, cat)
                             },
                             WorldPage._InfoRow("所属分支", (cat.icon or "•") .. " " .. cat.label, accent),
                             WorldPage._InfoRow("获得回合", unlockedTurn, isUnlocked and C.accent_green or C.text_muted),
-                            UI.Label {
-                                text = title.portraitImage
-                                    and ("立绘资源：" .. title.portraitImage)
-                                    or "立绘接口：portraitImage（1:1）",
-                                fontSize = F.label,
-                                fontColor = C.text_muted,
-                                whiteSpace = "normal",
-                            },
                         },
                     },
                 },
@@ -2275,54 +2263,64 @@ function WorldPage._CreateTitleNode(state, title, cat, isNew)
         statusColor = C.accent_gold
     end
 
-    local nodeChildren = {
-        UI.Panel {
-            width = "100%",
-            flexDirection = "row",
-            justifyContent = "space-between",
-            alignItems = "center",
-            pointerEvents = "none",
-            children = {
-                UI.Panel {
-                    flexDirection = "row",
-                    alignItems = "center",
-                    gap = 7,
-                    flexShrink = 1,
-                    children = {
-                        UI.Label {
-                            text = isUnlocked and (title.icon or "🏅") or "◇",
-                            fontSize = F.body,
-                            fontColor = isUnlocked and accent or C.text_muted,
-                            pointerEvents = "none",
-                        },
-                        UI.Label {
-                            text = title.name,
-                            fontSize = F.body,
-                            fontWeight = isUnlocked and "bold" or "medium",
-                            fontColor = isUnlocked and C.text_primary or C.text_muted,
-                            flexShrink = 1,
-                            pointerEvents = "none",
-                        },
+    -- 第一行：图标 + 名称 + 状态标签
+    local topRow = UI.Panel {
+        width = "100%",
+        flexDirection = "row",
+        justifyContent = "space-between",
+        alignItems = "center",
+        pointerEvents = "none",
+        children = {
+            UI.Panel {
+                flexDirection = "row",
+                alignItems = "center",
+                gap = 7,
+                flexShrink = 1,
+                children = {
+                    UI.Label {
+                        text = isUnlocked and (title.icon or "🏅") or "◇",
+                        fontSize = F.body,
+                        fontColor = isUnlocked and accent or C.text_muted,
+                        pointerEvents = "none",
+                    },
+                    UI.Label {
+                        text = title.name,
+                        fontSize = F.body,
+                        fontWeight = isUnlocked and "bold" or "medium",
+                        fontColor = isUnlocked and C.text_primary or C.text_muted,
+                        flexShrink = 1,
+                        pointerEvents = "none",
                     },
                 },
-                UI.Panel {
-                    paddingHorizontal = 6,
-                    paddingVertical = 2,
-                    borderRadius = S.radius_badge,
-                    backgroundColor = { statusColor[1], statusColor[2], statusColor[3], 38 },
-                    children = {
-                        UI.Label {
-                            text = statusText,
-                            fontSize = F.label,
-                            fontWeight = "bold",
-                            fontColor = statusColor,
-                            pointerEvents = "none",
-                        },
+            },
+            UI.Panel {
+                paddingHorizontal = 6,
+                paddingVertical = 2,
+                borderRadius = S.radius_badge,
+                backgroundColor = { statusColor[1], statusColor[2], statusColor[3], 38 },
+                children = {
+                    UI.Label {
+                        text = statusText,
+                        fontSize = F.label,
+                        fontWeight = "bold",
+                        fontColor = statusColor,
+                        pointerEvents = "none",
                     },
                 },
             },
         },
     }
+
+    -- 第二行：解锁条件描述
+    local descRow = UI.Label {
+        text = title.desc,
+        fontSize = F.label,
+        fontColor = C.text_muted,
+        pointerEvents = "none",
+        marginLeft = 21,
+    }
+
+    local nodeChildren = { topRow, descRow }
 
     return UI.Panel {
         width = "100%",
@@ -2334,10 +2332,11 @@ function WorldPage._CreateTitleNode(state, title, cat, isNew)
         borderLeftColor = isUnlocked and accent or { 60, 60, 70, 255 },
         borderWidth = 0,
         flexDirection = "column",
+        gap = 3,
         pointerEvents = "auto",
-        onPointerUp = Config.TapGuard(function()
+        onPointerUp = (isUnlocked or isNew) and Config.TapGuard(function()
             WorldPage._ShowTitleDetail(state, title, cat)
-        end),
+        end) or nil,
         children = nodeChildren,
     }
 end
@@ -2459,7 +2458,7 @@ function WorldPage._CreateTitlesCard(state)
                 fontColor = activeAccent,
             },
             UI.Label {
-                text = string.format("点击称号查看描述  (%d/%d)", unlockedInCat, #catTitles),
+                text = string.format("解锁后可点击查看详情  (%d/%d)", unlockedInCat, #catTitles),
                 fontSize = F.label,
                 fontColor = C.text_secondary,
             },

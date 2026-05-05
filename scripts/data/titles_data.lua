@@ -3,6 +3,8 @@
 -- 18 个称号 × 5 大类，条件偏后期（每类有一个入门称号）
 -- ============================================================================
 
+local EquipmentData = require("data.equipment_data")
+
 local TitlesData = {}
 
 --- 称号类别
@@ -59,12 +61,23 @@ TitlesData.TITLES = {
     {
         id       = "iron_wall",
         name     = "铁壁防线",
-        desc     = "拥有 60+ 武装且装备等级达到 6",
+        desc     = "拥有 60+ 武装且拥有最高等级（T6）装备",
         category = "military",
         icon     = "🛡️",
         check    = function(state, stats)
             local mil = state.military or {}
-            return (mil.guards or 0) >= 60 and (mil.equipment or 0) >= 6
+            if (mil.guards or 0) < 60 then return false end
+            -- 检查编队和库存中最高装备 tier
+            local maxTier = 0
+            for _, sq in ipairs(mil.squads or {}) do
+                local cat = EquipmentData.CATALOG[sq.equip_id]
+                if cat and cat.tier > maxTier then maxTier = cat.tier end
+            end
+            for _, inv in ipairs(mil.inventory or {}) do
+                local cat = EquipmentData.CATALOG[inv.equip_id]
+                if cat and cat.tier > maxTier then maxTier = cat.tier end
+            end
+            return maxTier >= 6
         end,
     },
 

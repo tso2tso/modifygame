@@ -264,7 +264,8 @@ function EventModal._FormatEffects(effects, state)
         --- 修正器显示映射
         local modDisplay = {
             mine_output_mult       = { icon = "⛏️", label = "产出",   pct = true },
-            worker_morale          = { icon = "💪", label = "士气",   pct = false },
+            worker_morale          = { icon = "💪", label = "工人士气", pct = false },
+            guard_morale           = { icon = "🛡️", label = "护卫士气", pct = false },
             tax_rate               = { icon = "📋", label = "税率",   pct = true, invert = true },
             transport_risk         = { icon = "🚚", label = "运输风险", pct = true, invert = true },
             shadow_income          = { icon = "🌑", label = "暗收入", pct = false },

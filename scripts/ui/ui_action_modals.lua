@@ -507,11 +507,13 @@ function ActionModals.ShowTrade(state, accent)
         local credibility = state.press_credibility or 100
         local credMult = StockEngine.GetCredibilityMultiplier(state)
         local credColor = credibility >= 70 and C.accent_green
-            or credibility >= 40 and C.accent_yellow
+            or credibility >= 40 and C.accent_amber
             or C.accent_red
+        -- 标题行
         table.insert(rows, UI.Panel {
             width = "100%",
-            paddingVertical = 6,
+            paddingTop = 6,
+            paddingBottom = 2,
             flexDirection = "row",
             justifyContent = "space-between",
             alignItems = "center",
@@ -520,12 +522,66 @@ function ActionModals.ShowTrade(state, accent)
                     text = "📊 市场操盘",
                     fontSize = F.body,
                     fontWeight = "bold",
-                    fontColor = C.accent_yellow,
+                    fontColor = C.accent_amber,
                 },
+            },
+        })
+        -- 公信力信息条：进度条 + 数值 + 效果说明
+        table.insert(rows, UI.Panel {
+            width = "100%",
+            paddingVertical = 4,
+            paddingHorizontal = 4,
+            marginBottom = 4,
+            borderRadius = 4,
+            backgroundColor = C.bg_inset,
+            children = {
+                -- 第一行：标签 + 数值
+                UI.Panel {
+                    width = "100%",
+                    flexDirection = "row",
+                    justifyContent = "space-between",
+                    alignItems = "center",
+                    marginBottom = 4,
+                    children = {
+                        UI.Label {
+                            text = "📰 媒体公信力",
+                            fontSize = F.body_minor,
+                            fontColor = C.text_secondary,
+                        },
+                        UI.Panel {
+                            flexDirection = "row",
+                            alignItems = "center",
+                            children = {
+                                UI.Label {
+                                    text = string.format("%d", credibility),
+                                    fontSize = F.body,
+                                    fontWeight = "bold",
+                                    fontColor = credColor,
+                                },
+                                UI.Label {
+                                    text = " / 100",
+                                    fontSize = F.body_minor,
+                                    fontColor = C.text_tertiary,
+                                },
+                            },
+                        },
+                    },
+                },
+                -- 进度条
+                UI.ProgressBar {
+                    value = credibility / 100,
+                    width = "100%",
+                    height = 6,
+                    borderRadius = 3,
+                    trackColor = C.bg_surface,
+                    fillColor = credColor,
+                },
+                -- 第二行：效果说明
                 UI.Label {
-                    text = string.format("公信力 %d/100（×%.0f%%）", credibility, credMult * 100),
-                    fontSize = F.small,
+                    text = string.format("操盘成功率 ×%.0f%%", credMult * 100),
+                    fontSize = F.label,
                     fontColor = credColor,
+                    marginTop = 3,
                 },
             },
         })
@@ -768,7 +824,7 @@ function ActionModals.ShowPlunder(state, accent)
     local rows = {}
     local repTier = GameState.GetReputationTier(state)
     local repLabel = GameState.GetReputationLabel(repTier)
-    local repColor = repTier <= 2 and C.accent_green or (repTier <= 3 and C.accent_yellow or C.accent_red)
+    local repColor = repTier <= 2 and C.accent_green or (repTier <= 3 and C.accent_amber or C.accent_red)
 
     -- 声誉状态栏
     table.insert(rows, UI.Panel {
@@ -817,7 +873,7 @@ function ActionModals.ShowPlunder(state, accent)
                 UI.Label {
                     text = "⚠ " .. effectText,
                     fontSize = F.label,
-                    fontColor = C.accent_yellow,
+                    fontColor = C.accent_amber,
                 },
             },
         })

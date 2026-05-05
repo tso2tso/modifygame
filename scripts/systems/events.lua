@@ -97,8 +97,43 @@ function Events.CheckEvents(state)
         end
     end
 
-    -- 3. 更新事件干旱计数器
-    if #triggered > 0 then
+    -- 3. 检查灾害事件（独立触发池，不受保底机制影响）
+    -- 开局前 16 季度（1904-1907）完全免疫，由 min_year >= 1908 保证
+    local disasterTemplates = EventsData.GetDisasterEventTemplates()
+    local shuffledDisasters = {}
+    for _, e in ipairs(disasterTemplates) do table.insert(shuffledDisasters, e) end
+    for i = #shuffledDisasters, 2, -1 do
+        local j = math.random(1, i)
+        shuffledDisasters[i], shuffledDisasters[j] = shuffledDisasters[j], shuffledDisasters[i]
+    end
+
+    local disasterCount = 0
+    local maxDisaster = 1  -- 每季最多触发 1 个灾害
+    for _, event in ipairs(shuffledDisasters) do
+        if disasterCount >= maxDisaster then break end
+        if Events._CheckTrigger(state, event) then
+            local cd = state.random_cooldowns[event.id] or 0
+            if cd <= 0 then
+                local effectiveChance = (event.chance or 0.05) * diff.event_chance_mult
+                -- 灾害自带的概率修正
+                if event.chance_modifier then
+                    local modVal = GameState.GetModifierValue(state, event.chance_modifier)
+                    if modVal ~= 0 then
+                        effectiveChance = effectiveChance * (1 + modVal)
+                    end
+                end
+                -- 灾害事件不享受保底加成（不用 chanceMultiplier）
+                -- 灾害事件不使用早期概率衰减（由 min_year 硬性屏蔽）
+                if math.random() < effectiveChance then
+                    table.insert(triggered, event)
+                    disasterCount = disasterCount + 1
+                end
+            end
+        end
+    end
+
+    -- 4. 更新事件干旱计数器（灾害事件不计入，仅标准随机事件参与保底）
+    if randomCount > 0 then
         state.event_drought_counter = 0
     else
         state.event_drought_counter = (state.event_drought_counter or 0) + 1
@@ -606,6 +641,20 @@ function Events.ApplyOption(state, event, optionIndex)
         local kept = {}
         for _, m in ipairs(state.modifiers) do
             if m.target ~= "worker_morale" then
+                table.insert(kept, m)
+            end
+        end
+        state.modifiers = kept
+    end
+
+    -- 6.1 护卫士气修正（立即应用）
+    local guardMoraleMod = GameState.GetModifierValue(state, "guard_morale")
+    if guardMoraleMod ~= 0 then
+        state.military.morale = math.max(0, math.min(100,
+            state.military.morale + guardMoraleMod))
+        local kept = {}
+        for _, m in ipairs(state.modifiers) do
+            if m.target ~= "guard_morale" then
                 table.insert(kept, m)
             end
         end

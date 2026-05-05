@@ -1,6 +1,6 @@
 -- ============================================================================
--- 事件数据：固定历史事件 + 随机事件模板
--- 范围：1904-1955（战后重建），共 43 个固定事件 + 14 个随机模板
+-- 事件数据：固定历史事件 + 随机事件模板 + 灾害事件模板
+-- 范围：1904-1955（战后重建），共 43 个固定事件 + 8 个随机模板 + 6 个灾害模板
 -- 所有效果使用系数修正（multiplier / drift），不使用直接数值
 -- ============================================================================
 
@@ -2249,50 +2249,6 @@ end
 function EventsData.GetRandomEventTemplates()
     return {
         -- ================================================================
-        -- 矿难事故
-        -- ================================================================
-        {
-            id = "mine_accident",
-            title = "矿难事故",
-            priority = EventsData.PRIORITY.REGION,
-            icon = "⚠️",
-            trigger = {
-                requires_mine = true,
-                max_security = 3,
-                cooldown = 4,
-            },
-            chance = 0.20,
-            desc = "矿井深处发生塌方事故，多名矿工被困。救援行动刻不容缓，但也需要大量资金。",
-            options = {
-                {
-                    text = "全力救援，不惜代价",
-                    desc = "不惜代价救人，赢得人心但停产损失大",
-                    effects = {
-                        cash = -150,
-                        inflation_delta = 0.005,
-                        modifiers = {
-                            { target = "worker_morale", value = 15, duration = 0 },
-                            { target = "public_support", value = 5, duration = 0 },
-                            { target = "mine_output_mult", value = -0.10, duration = 2 },
-                        },
-                    },
-                },
-                {
-                    text = "最低限度救援",
-                    desc = "省了钱但寒了人心",
-                    effects = {
-                        cash = -30,
-                        modifiers = {
-                            { target = "worker_morale", value = -20, duration = 0 },
-                            { target = "public_support", value = -10, duration = 0 },
-                            { target = "mine_output_mult", value = -0.08, duration = 1 },
-                        },
-                    },
-                },
-            },
-        },
-
-        -- ================================================================
         -- 工人罢工
         -- ================================================================
         {
@@ -2581,48 +2537,7 @@ function EventsData.GetRandomEventTemplates()
             },
         },
 
-        -- ================================================================
-        -- 瘟疫/疾病爆发
-        -- ================================================================
-        {
-            id = "disease_outbreak",
-            title = "矿区疫病",
-            priority = EventsData.PRIORITY.REGION,
-            icon = "🦠",
-            trigger = {
-                requires_mine = true,
-                max_security = 4,
-                cooldown = 6,
-            },
-            chance = 0.15,
-            desc = "矿区爆发传染病，工人大面积感染。产量骤降，如果不控制还会蔓延到周边社区。",
-            options = {
-                {
-                    text = "紧急请医生并隔离治疗",
-                    desc = "花大价钱救人，赢得人心但短期停产严重",
-                    effects = {
-                        cash = -250,
-                        inflation_delta = 0.01,
-                        modifiers = {
-                            { target = "worker_morale", value = 10, duration = 0 },
-                            { target = "public_support", value = 8, duration = 0 },
-                            { target = "mine_output_mult", value = -0.12, duration = 2 },
-                        },
-                    },
-                },
-                {
-                    text = "继续生产，忽视疫情",
-                    desc = "漠视生命，工人死伤惨重，人心尽失",
-                    effects = {
-                        workers_bonus = -5,
-                        modifiers = {
-                            { target = "worker_morale", value = -25, duration = 0 },
-                            { target = "public_support", value = -15, duration = 0 },
-                        },
-                    },
-                },
-            },
-        },
+
 
         -- ================================================================
         -- 技术人才流失
@@ -2664,46 +2579,7 @@ function EventsData.GetRandomEventTemplates()
             },
         },
 
-        -- ================================================================
-        -- 自然灾害
-        -- ================================================================
-        {
-            id = "natural_disaster",
-            title = "山洪暴发",
-            priority = EventsData.PRIORITY.REGION,
-            icon = "🌊",
-            trigger = {
-                requires_mine = true,
-                cooldown = 6,
-            },
-            chance = 0.12,
-            desc = "暴雨引发山洪，冲毁了部分矿区道路和设施。运输中断，需要紧急修复。",
-            options = {
-                {
-                    text = "全面修复并加固设施",
-                    desc = "大修加固一劳永逸，但花费不菲且短期停产",
-                    effects = {
-                        cash = -300,
-                        modifiers = {
-                            { target = "transport_risk", value = -0.10, duration = 0 },
-                            { target = "mine_output_mult", value = -0.10, duration = 2 },
-                            { target = "public_support", value = 5, duration = 0 },
-                        },
-                    },
-                },
-                {
-                    text = "临时修补道路",
-                    desc = "省钱应急，但运输隐患留了下来",
-                    effects = {
-                        cash = -80,
-                        modifiers = {
-                            { target = "transport_risk", value = 0.05, duration = 4 },
-                            { target = "mine_output_mult", value = -0.05, duration = 1 },
-                        },
-                    },
-                },
-            },
-        },
+
 
         -- ================================================================
         -- 国际矿石需求波动
@@ -2836,142 +2712,7 @@ function EventsData.GetRandomEventTemplates()
             },
         },
 
-        -- ================================================================
-        -- 旱灾粮荒
-        -- ================================================================
-        {
-            id = "drought_famine",
-            title = "旱灾粮荒",
-            priority = EventsData.PRIORITY.REGION,
-            icon = "☀️",
-            trigger = {
-                min_year = 1908,
-                cooldown = 6,
-            },
-            chance = 0.13,
-            desc = "持续干旱导致粮食歉收，矿区工人的口粮供应出现短缺。物价飞涨，工人要求补贴。",
-            options = {
-                {
-                    text = "购买粮食发放给工人",
-                    desc = "自掏腰包济民，人心大振但物价更高了",
-                    effects = {
-                        cash = -200,
-                        inflation_delta = 0.02,
-                        inflation_drift_mod = 0.003,
-                        inflation_drift_duration = 3,
-                        modifiers = {
-                            { target = "worker_morale", value = 12, duration = 0 },
-                            { target = "public_support", value = 10, duration = 0 },
-                        },
-                    },
-                },
-                {
-                    text = "削减口粮标准",
-                    desc = "省了粮食钱，但工人饿着肚子干活效率骤降",
-                    effects = {
-                        inflation_delta = 0.025,
-                        inflation_drift_mod = 0.004,
-                        inflation_drift_duration = 3,
-                        modifiers = {
-                            { target = "worker_morale", value = -15, duration = 0 },
-                            { target = "mine_output_mult", value = -0.08, duration = 3 },
-                        },
-                    },
-                },
-            },
-        },
 
-        -- ================================================================
-        -- 劫匪劫道
-        -- ================================================================
-        {
-            id = "bandit_raid",
-            title = "劫匪劫道",
-            priority = EventsData.PRIORITY.REGION,
-            icon = "🏴‍☠️",
-            trigger = {
-                requires_mine = true,
-                min_year = 1905,
-                cooldown = 4,
-            },
-            chance = 0.08,
-            chance_modifier = "transport_risk", -- 运输风险越高越容易触发
-            desc = "一伙武装劫匪袭击了从矿区出发的运输队，押运人员被打散，部分货物被劫走。治安堪忧。",
-            options = {
-                {
-                    text = "出钱赎回货物并加强护送",
-                    desc = "花钱止损并降低后续运输风险，但开销不小",
-                    effects = {
-                        cash = -150,
-                        modifiers = {
-                            { target = "transport_risk", value = -0.08, duration = 4 },
-                        },
-                    },
-                },
-                {
-                    text = "组织武装追击",
-                    desc = "动用武装追剿匪帮，消耗兵力但有望夺回货物",
-                    effects = {
-                        gold = -2,
-                        security_bonus = 1,
-                        modifiers = {
-                            { target = "transport_risk", value = -0.05, duration = 6 },
-                        },
-                    },
-                },
-                {
-                    text = "认栽吃亏，吸取教训",
-                    desc = "损失已成定局，运输隐患依然存在",
-                    effects = {
-                        gold = -3,
-                        modifiers = {
-                            { target = "worker_morale", value = -5, duration = 0 },
-                        },
-                    },
-                },
-            },
-        },
-
-        -- ================================================================
-        -- 铁路瘫痪
-        -- ================================================================
-        {
-            id = "railway_shutdown",
-            title = "铁路瘫痪",
-            priority = EventsData.PRIORITY.REGION,
-            icon = "🚂",
-            trigger = {
-                requires_mine = true,
-                min_year = 1910,
-                cooldown = 6,
-            },
-            chance = 0.06,
-            chance_modifier = "transport_risk", -- 运输风险越高越容易触发
-            desc = "铁路干线发生严重事故——桥梁垮塌、路基损毁，短期内无法修复。矿区出产的黄金堆在仓库里运不出去，本季度无法出售。",
-            options = {
-                {
-                    text = "紧急抢修，尽快恢复通车",
-                    desc = "花大价钱加急修复，下季度恢复销售，运输风险略降",
-                    effects = {
-                        cash = -300,
-                        modifiers = {
-                            { target = "railway_blocked", value = 1, duration = 1 },
-                            { target = "transport_risk", value = -0.05, duration = 0 },
-                        },
-                    },
-                },
-                {
-                    text = "等待官方修复，节省开支",
-                    desc = "省了修路钱，但黄金积压更久且运输风险上升",
-                    effects = {
-                        modifiers = {
-                            { target = "railway_blocked", value = 1, duration = 2 },
-                            { target = "transport_risk", value = 0.08, duration = 3 },
-                        },
-                    },
-                },
-            },
-        },
 
         -- ================================================================
         --               ↓↓↓ 掠夺主题事件（7 个） ↓↓↓
@@ -3082,7 +2823,7 @@ function EventsData.GetRandomEventTemplates()
                         cash = -250,
                         modifiers = {
                             { target = "guard_power_bonus", value = -0.10, duration = 2 },
-                            { target = "worker_morale", value = -5, duration = 0 },
+                            { target = "guard_morale", value = -5, duration = 0 },
                         },
                     },
                 },
@@ -3655,6 +3396,292 @@ function EventsData.GetRandomEventTemplates()
             public_message = "前线传来消息，战事即将出现重大转折。军工股闻声大涨，航运股承压。",
             hint_message = "💡 顾问提示：前线消息真假难辨。",
             intel_message = "⚠ 顾问密报：经核实此为虚假情报，军工股短暂上涨后将回落，航运实际影响有限。",
+        },
+    }
+end
+
+-- ============================================================================
+-- 灾害事件模板（独立分类，低概率高危害，开局 16 季度免疫）
+-- type = "disaster"  —— 与标准随机事件分开触发池，每季最多 1 个
+-- 设计原则：罕见但毁灭性，迫使玩家预留应急储备金
+-- ============================================================================
+
+--- 获取灾害事件模板
+---@return table[]
+function EventsData.GetDisasterEventTemplates()
+    return {
+        -- ================================================================
+        -- 矿难事故（重大）
+        -- ================================================================
+        {
+            id = "mine_accident",
+            title = "矿难事故",
+            type = "disaster",
+            priority = EventsData.PRIORITY.MAIN,
+            icon = "⚠️",
+            trigger = {
+                requires_mine = true,
+                max_security = 3,
+                min_year = 1908,
+                cooldown = 8,
+            },
+            chance = 0.08,
+            desc = "矿井深处发生严重塌方，大量矿工被困在地下。浓烟与粉尘封住了巷道，救援异常艰难。这是一场对家族财力和人心的双重考验。",
+            options = {
+                {
+                    text = "全力救援，不惜代价",
+                    desc = "不惜代价救人，赢得人心但停产损失极大",
+                    effects = {
+                        cash = -350,
+                        inflation_delta = 0.01,
+                        modifiers = {
+                            { target = "worker_morale", value = 15, duration = 0 },
+                            { target = "public_support", value = 5, duration = 0 },
+                            { target = "mine_output_mult", value = -0.20, duration = 3 },
+                        },
+                    },
+                },
+                {
+                    text = "最低限度救援",
+                    desc = "省了钱但寒了人心，矿工家属怒不可遏",
+                    effects = {
+                        cash = -60,
+                        modifiers = {
+                            { target = "worker_morale", value = -35, duration = 0 },
+                            { target = "public_support", value = -20, duration = 0 },
+                            { target = "mine_output_mult", value = -0.15, duration = 2 },
+                        },
+                    },
+                },
+            },
+        },
+
+        -- ================================================================
+        -- 矿区瘟疫（重大）
+        -- ================================================================
+        {
+            id = "disease_outbreak",
+            title = "矿区瘟疫",
+            type = "disaster",
+            priority = EventsData.PRIORITY.MAIN,
+            icon = "🦠",
+            trigger = {
+                requires_mine = true,
+                max_security = 4,
+                min_year = 1908,
+                cooldown = 10,
+            },
+            chance = 0.06,
+            desc = "矿区爆发烈性传染病，工人成批倒下，尸体来不及掩埋。疫病正沿着矿道向周边村镇蔓延，若不尽快控制，整个矿区将彻底瘫痪。",
+            options = {
+                {
+                    text = "紧急请医生并全面隔离",
+                    desc = "花重金救人，赢得人心但矿区长期停产",
+                    effects = {
+                        cash = -500,
+                        inflation_delta = 0.02,
+                        modifiers = {
+                            { target = "worker_morale", value = 10, duration = 0 },
+                            { target = "public_support", value = 8, duration = 0 },
+                            { target = "mine_output_mult", value = -0.25, duration = 4 },
+                        },
+                    },
+                },
+                {
+                    text = "继续生产，忽视疫情",
+                    desc = "漠视生命，工人死伤惨重，人心尽失",
+                    effects = {
+                        workers_bonus = -10,
+                        modifiers = {
+                            { target = "worker_morale", value = -40, duration = 0 },
+                            { target = "public_support", value = -25, duration = 0 },
+                        },
+                    },
+                },
+            },
+        },
+
+        -- ================================================================
+        -- 山洪暴发（重大）
+        -- ================================================================
+        {
+            id = "natural_disaster",
+            title = "山洪暴发",
+            type = "disaster",
+            priority = EventsData.PRIORITY.MAIN,
+            icon = "🌊",
+            trigger = {
+                requires_mine = true,
+                min_year = 1908,
+                cooldown = 10,
+            },
+            chance = 0.05,
+            desc = "连日暴雨引发百年一遇的山洪，泥石流吞没了矿区道路和大片设施。仓库被冲毁，矿井进水，运输完全中断。重建需要巨额资金。",
+            options = {
+                {
+                    text = "全面修复并加固设施",
+                    desc = "大修加固一劳永逸，但花费惊人且长期停产",
+                    effects = {
+                        cash = -600,
+                        modifiers = {
+                            { target = "transport_risk", value = -0.10, duration = 0 },
+                            { target = "mine_output_mult", value = -0.20, duration = 3 },
+                            { target = "public_support", value = 5, duration = 0 },
+                        },
+                    },
+                },
+                {
+                    text = "临时修补道路",
+                    desc = "省钱应急，但运输隐患加剧，产能恢复缓慢",
+                    effects = {
+                        cash = -150,
+                        modifiers = {
+                            { target = "transport_risk", value = 0.10, duration = 6 },
+                            { target = "mine_output_mult", value = -0.12, duration = 2 },
+                        },
+                    },
+                },
+            },
+        },
+
+        -- ================================================================
+        -- 旱灾粮荒（重大）
+        -- ================================================================
+        {
+            id = "drought_famine",
+            title = "旱灾粮荒",
+            type = "disaster",
+            priority = EventsData.PRIORITY.MAIN,
+            icon = "☀️",
+            trigger = {
+                min_year = 1908,
+                cooldown = 10,
+            },
+            chance = 0.05,
+            desc = "持续大旱导致颗粒无收，矿区粮食储备见底。工人们饿着肚子无法劳动，黑市粮价飞涨。部分工人开始逃离矿区，局势岌岌可危。",
+            options = {
+                {
+                    text = "高价购粮发放给工人",
+                    desc = "自掏腰包济民，人心大振但物价飞涨",
+                    effects = {
+                        cash = -400,
+                        inflation_delta = 0.04,
+                        inflation_drift_mod = 0.006,
+                        inflation_drift_duration = 4,
+                        modifiers = {
+                            { target = "worker_morale", value = 12, duration = 0 },
+                            { target = "public_support", value = 10, duration = 0 },
+                        },
+                    },
+                },
+                {
+                    text = "削减口粮标准",
+                    desc = "省了粮食钱，但工人饿着肚子干活效率骤降",
+                    effects = {
+                        inflation_delta = 0.05,
+                        inflation_drift_mod = 0.008,
+                        inflation_drift_duration = 4,
+                        modifiers = {
+                            { target = "worker_morale", value = -25, duration = 0 },
+                            { target = "mine_output_mult", value = -0.15, duration = 4 },
+                        },
+                    },
+                },
+            },
+        },
+
+        -- ================================================================
+        -- 劫匪劫道（重大）
+        -- ================================================================
+        {
+            id = "bandit_raid",
+            title = "劫匪劫道",
+            type = "disaster",
+            priority = EventsData.PRIORITY.MAIN,
+            icon = "🏴‍☠️",
+            trigger = {
+                requires_mine = true,
+                min_year = 1908,
+                cooldown = 8,
+            },
+            chance = 0.04,
+            chance_modifier = "transport_risk",
+            desc = "一支训练有素的武装匪帮伏击了矿区运输队，护卫被击溃，整批货物被洗劫一空。矿区士气大挫，工人们人心惶惶。",
+            options = {
+                {
+                    text = "出重金赎回货物并加强护送",
+                    desc = "花大价钱止损并降低后续运输风险",
+                    effects = {
+                        cash = -300,
+                        modifiers = {
+                            { target = "transport_risk", value = -0.08, duration = 4 },
+                        },
+                    },
+                },
+                {
+                    text = "组织武装追击",
+                    desc = "动用武装追剿匪帮，消耗兵力但有望夺回货物",
+                    effects = {
+                        gold = -4,
+                        security_bonus = 1,
+                        modifiers = {
+                            { target = "transport_risk", value = -0.05, duration = 6 },
+                        },
+                    },
+                },
+                {
+                    text = "认栽吃亏，吸取教训",
+                    desc = "损失惨重，运输隐患依然存在，工人心寒",
+                    effects = {
+                        gold = -6,
+                        modifiers = {
+                            { target = "worker_morale", value = -12, duration = 0 },
+                        },
+                    },
+                },
+            },
+        },
+
+        -- ================================================================
+        -- 铁路瘫痪（重大）
+        -- ================================================================
+        {
+            id = "railway_shutdown",
+            title = "铁路瘫痪",
+            type = "disaster",
+            priority = EventsData.PRIORITY.MAIN,
+            icon = "🚂",
+            trigger = {
+                requires_mine = true,
+                min_year = 1910,
+                cooldown = 10,
+            },
+            chance = 0.03,
+            chance_modifier = "transport_risk",
+            desc = "铁路干线发生灾难性事故——桥梁垮塌、路基塌陷，数十节车厢倾覆。矿区出产的黄金堆在仓库里运不出去，短期内完全无法销售。",
+            options = {
+                {
+                    text = "紧急抢修，尽快恢复通车",
+                    desc = "花巨资加急修复，封路时间缩短，运输风险略降",
+                    effects = {
+                        cash = -500,
+                        modifiers = {
+                            { target = "railway_blocked", value = 1, duration = 2 },
+                            { target = "transport_risk", value = -0.05, duration = 0 },
+                        },
+                    },
+                },
+                {
+                    text = "等待官方修复，节省开支",
+                    desc = "省了修路钱，但黄金积压更久且运输风险大幅上升",
+                    effects = {
+                        modifiers = {
+                            { target = "railway_blocked", value = 1, duration = 3 },
+                            { target = "transport_risk", value = 0.15, duration = 5 },
+                        },
+                    },
+                },
+            },
         },
     }
 end

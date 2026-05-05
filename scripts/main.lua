@@ -153,9 +153,10 @@ function Start()
     print(string.format("地区 %d | AI %d | 矿山 %d",
         #state_.regions, #state_.ai_factions, #state_.mines))
 
-    -- 3. 更新 AP 上限
+    -- 3. 更新 AP 上限 & 治安等级
     state_.ap.max = GameState.CalcMaxAP(state_)
     state_.ap.current = math.min(state_.ap.current, state_.ap.max)
+    GameState.RecalcSecurity(state_)
 
     -- 4. 创建 UI
     UIManager.Create(state_, {

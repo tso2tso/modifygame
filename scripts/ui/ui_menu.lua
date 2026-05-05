@@ -548,7 +548,7 @@ function MenuPage._ApplyCheat(state)
     state.finance_passive_income = 200
     state.finance_supply_discount = 0.20
     state.gold_price_bonus = 0.3
-    state.hire_cost_discount = 0.3
+    state.hire_cost_discount = -0.3
     state.supply_reduction_bonus = 0.3
     state.accident_rate_mod = -0.5
     state.passive_influence = 20
@@ -623,14 +623,43 @@ function MenuPage._ApplyCheat(state)
     -- 14. 通胀保持正常
     state.inflation_factor = 1.0
 
-    -- 15. 重算 AP 上限
+    -- 15. 累计统计拉满（称号检测依赖）
+    state.stats = state.stats or {}
+    state.stats.attacks_initiated      = math.max(state.stats.attacks_initiated or 0, 50)
+    state.stats.plunder_successes      = math.max(state.stats.plunder_successes or 0, 30)
+    state.stats.trades_completed       = math.max(state.stats.trades_completed or 0, 120)
+    state.stats.manipulation_successes = math.max(state.stats.manipulation_successes or 0, 30)
+    state.stats.short_profit_total     = math.max(state.stats.short_profit_total or 0, 60000)
+
+    -- 16. 累计收支拉满
+    state.total_income  = math.max(state.total_income or 0, 1200000)
+    state.total_expense = state.total_expense or 0
+
+    -- 17. 声誉归零（默认中立，方便测试正负两端）
+    state.reputation = 0
+
+    -- 18. 称号全解锁
+    local TitlesData = require("data.titles_data")
+    state.titles_unlocked = state.titles_unlocked or {}
+    local newlyUnlocked = {}
+    for _, title in ipairs(TitlesData.TITLES) do
+        if not state.titles_unlocked[title.id] then
+            state.titles_unlocked[title.id] = state.turn_count or 1
+            table.insert(newlyUnlocked, { id = title.id })
+        end
+    end
+    if #newlyUnlocked > 0 then
+        state.titles_new = newlyUnlocked
+    end
+
+    -- 19. 重算 AP 上限
     state.ap.max = GameState.CalcMaxAP(state)
     state.ap.current = state.ap.max
 
-    -- 16. 存档
+    -- 20. 存档
     SaveLoad.Save(state, SaveLoad.SLOT_AUTO)
 
-    print("[CHEAT] 所有属性已拉满！")
+    print("[CHEAT] 所有属性已拉满！（含称号全解锁、统计数据拉满）")
 end
 
 --- 处理统计标题点击（连续 6 次触发作弊）
@@ -647,7 +676,7 @@ function MenuPage._OnStatsTitleTap()
         if stateRef_ then
             MenuPage._ApplyCheat(stateRef_)
             AudioManager.PlayEffect("event_trigger")
-            UI.Toast.Show("🔓 测试模式：所有属性已拉满！", { variant = "success", duration = 3 })
+            UI.Toast.Show("🔓 测试模式：属性+称号+统计 全部拉满！", { variant = "success", duration = 3 })
             if onStateChanged_ then
                 onStateChanged_()
             end
@@ -783,6 +812,7 @@ function MenuPage._OnLoadSlot(slotName)
     if loaded then
         loaded.ap.max = GameState.CalcMaxAP(loaded)
         loaded.ap.current = math.min(loaded.ap.current, loaded.ap.max)
+        GameState.RecalcSecurity(loaded)
 
         UI.Toast.Show("读档成功：" .. slotName, { variant = "success", duration = 1.5 })
         if onNewGame_ then

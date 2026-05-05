@@ -460,6 +460,7 @@ function SaveLoad._SerializeState(state)
     -- 称号系统
     data.stats = state.stats
     data.titles_unlocked = state.titles_unlocked
+    data.titles_new      = state.titles_new or {}
 
     return data
 end
@@ -562,6 +563,7 @@ function SaveLoad._DeserializeState(data)
     data.tech.researched = data.tech.researched or {}
     data.portfolio = data.portfolio or { holdings = {} }
     data.portfolio.holdings = data.portfolio.holdings or {}
+    data.portfolio.short_positions = data.portfolio.short_positions or {}
     data.passive_influence = data.passive_influence or 0
     data.battle_wins_total = data.battle_wins_total or 0
     data.battle_wins_unclaimed = data.battle_wins_unclaimed or 0

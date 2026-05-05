@@ -1,6 +1,6 @@
 # 百年萨拉热窝：黄金家族 — 完整数值系统文档
 
-> **版本**: v0.5.1  
+> **版本**: v0.5.3  
 > **游戏时间跨度**: 1904年 Q1 — 1955年 Q4（共 208 个季度 / 52 年）  
 > **核心循环**: 采矿 → 结算 → 事件 → 行动 → 下一季度  
 > **数据来源**: `scripts/data/balance.lua`、`scripts/systems/*.lua`、`scripts/data/*.lua`、`scripts/game_state.lua`
@@ -274,8 +274,26 @@ max_ap = base_ap (6)
 | 补给消耗 | 3 单位 / 护卫 / 季 |
 | 补给单价 | 2 / 单位 |
 | 基础士气 | 70 |
-| 装备等级 | 1-5 |
-| 装备战力加成 | +15% / 级（`equipment_bonus = 0.15`） |
+| 装备等级（旧字段） | 1-6（已弃用，见下方"小队装备系统"） |
+| 装备战力加成（旧） | +15% / 级（`equipment_bonus = 0.15`，旧公式仍用于 PlayerPower 计算的兜底） |
+
+### 小队装备系统（新）
+
+旧的 `state.military.equipment` 整数字段已**弃用**（`tech.lua` 不再更新），
+装备现在挂在**小队 (squad)** 和**库存 (inventory)** 上，每件装备有独立的 `tier`（1-6）。
+
+| Tier | equip_id | 名称 | power_mul |
+|------|----------|------|-----------|
+| 1 | rifle | 步枪 | 1.0 |
+| 2 | improved_rifle | 改良步枪 | 1.2 |
+| 3 | mg | 机枪 | 1.5 |
+| 4 | mortar | 迫击炮 | 1.8 |
+| 5 | motorized | 摩托化装备 | 2.2 |
+| 6 | elite_kit | 精锐套装 | 2.8 |
+
+> 数据来源：`scripts/data/equipment_data.lua` → `EquipmentData.CATALOG`。
+> 小队结构：`{ id, name, size, equip_id, veterancy, condition, battles }`。
+> 库存结构：`{ equip_id, condition }`。
 
 ### 士气变动
 
@@ -652,7 +670,7 @@ effective_mu = stock.mu + Σ(event_mod.delta_mu for all active mods)
 
 | 参数 | 值 |
 |------|-----|
-| 最大核心成员 | 6 人 |
+| 最大核心成员 | 11 人 |
 | 培养新成员费用 | 200 现金 |
 | 培养周期 | 10 季度 |
 
@@ -810,7 +828,7 @@ PlayerPower = guards × guard_base_power(1.0)
 |------|------|
 | guards | 护卫数量 |
 | morale | 士气 × 0.01（最低 0.3） |
-| equipment | 装备等级 1-5，每级 +15% |
+| equipment | 装备等级 1-6，每级 +15%（旧字段已弃用，固定为 1；实际战力由小队 `equip_id` 的 `power_mul` 决定，见 §6 小队装备系统） |
 | chiefBonus | 军务主管岗位加成 |
 | guard_power_tech_bonus | 科技带来的战力加成 |
 
@@ -873,91 +891,186 @@ FactionPower = faction.power × base_faction_power(1.0) × (1 + presence / 200)
 
 连续 2-3 个季度无随机事件时，下一季度的随机事件概率乘以递增因子（鼓励"旱后必涝"）。
 
-### 固定历史事件（35+）
+### 固定历史事件（43 个）
 
-#### 第一章：铜版帝国（1904-1913）
+#### 第一章：铜版帝国（1904-1913）— 6 个事件
 
-| 事件 ID | 触发时间 | 名称 | 关键效果 |
-|---------|----------|------|----------|
-| family_founding_1904 | 1904 Q1 | 金矿矿权 | 初始选择影响开局方向 |
-| first_miners_1905 | 1905 Q1 | 第一批矿工 | 工人/资金相关 |
-| railway_expansion_1906 | 1906 Q2 | 铁路扩建 | 运输/基建相关 |
-| imperial_control_1908 | 1908 Q4 | 帝国管制令 | 税负/合法性，股市影响 |
-| annexation_crisis_1909 | 1909 Q2 | 波黑危机 | 地缘政治紧张 |
-| balkan_wars_1912 | 1912 Q2 | 巴尔干战云 | 军需/物资，股市大幅波动 |
-| modernization_1910 | 1910 Q3 | 现代化浪潮 | 科技/发展 |
+| 事件 ID | 触发时间 | 名称 | 分类 | 选项数 | 关键效果 |
+|---------|----------|------|------|--------|----------|
+| family_founding_1904 | 1904 Q1 | 金矿矿权 | 经济 | 3 | cash, gold_reserve, mine_output_mult, local_relations |
+| railway_survey_1906 | 1906 Q2 | 铁路测量队 | 经济/基建 | 3 | cash, mine_output_mult, transport_risk, foreign_control |
+| worker_barracks_1907 | 1907 Q3 | 矿工宿舍扩建 | 社会 | 3 | cash, worker_morale, worker_cost_multiplier, public_support |
+| imperial_control_1908 | 1908 Q4 | 帝国管制令 | 政治 | 3 | cash, tax_rate, legitimacy, corruption_risk, shadow_income |
+| bosnian_parliament_1910 | 1910 Q1 | 波黑议会设立 | 政治 | 2 | cash, political_standing, tax_rate, mine_output_mult |
+| balkan_wars_1912 | 1912 Q2 | 巴尔干战云 | 军事 | 2 | cash, gold, supply_reserve, transport_risk, 多支股票波动 |
 
-#### 第二章：战报红章（1914-1918）
+#### 第二章：战报红章（1914-1918）— 7 个事件
 
-| 事件 ID | 触发时间 | 名称 | 关键效果 |
-|---------|----------|------|----------|
-| sarajevo_shots_1914 | 1914 Q2 | 萨拉热窝枪声 | 战争开始，通胀加速，股市剧烈波动 |
-| war_economy_1915 | 1915 Q1 | 战时经济体制 | 军需/管制 |
-| eastern_front_1916 | 1916 Q2 | 东线攻势 | 军事/外交 |
-| revolution_echoes_1917 | 1917 Q3 | 革命回声 | 社会/政治动荡 |
-| empire_collapse_1918 | 1918 Q4 | 帝国崩解 | 秩序重建，所有股票受冲击 |
+| 事件 ID | 触发时间 | 名称 | 分类 | 选项数 | 关键效果 |
+|---------|----------|------|------|--------|----------|
+| sarajevo_shots_1914 | 1914 Q2 | 萨拉热窝枪声 | 军事🔴 | 3 | **war_state=true**, ongoing_modifiers(16Q), 股市剧烈波动 |
+| war_mobilization_1914 | 1914 Q3 | 战争动员令 | 军事🔴 | 3 | cash, worker_morale, public_support, shadow_income |
+| wartime_inflation_1915 | 1915 Q2 | 战时通胀加剧 | 经济 | 3 | cash, gold, inflation_delta/drift, gold_price_mod |
+| wartime_shortage_1916 | 1916 Q1 | 物资短缺 | 经济 | 3 | cash, gold, worker_morale, shadow_income, 多价格修正 |
+| mutiny_wave_1917 | 1917 Q1 | 兵变与逃亡潮 | 军事/社会 | 3 | workers_bonus, mine_output_mult, worker_morale, security |
+| russian_revolution_1917 | 1917 Q3 | 俄国革命冲击 | 政治 | 3 | cash, worker_morale, worker_cost_multiplier, public_support |
+| empire_collapse_1918 | 1918 Q4 | 帝国崩解 | 政治🔴 | 3 | **war_state=false**, cash, total_assets, 所有股票受冲击 |
 
-#### 第三章：黑金工业（1919-1940）
+#### 第三章：黑金工业（1919-1938）— 16 个事件
 
-| 事件 ID | 触发时间 | 名称 | 关键效果 |
-|---------|----------|------|----------|
-| new_kingdom_1920 | 1920 Q1 | 新王国成立 | 政治重组 |
-| roaring_twenties_1924 | 1924 Q2 | 繁荣年代 | 经济繁荣 |
-| great_depression_1929 | 1929 Q4 | 大萧条 | 通缩、资产暴跌（asset_price_mod -0.60） |
-| recovery_signs_1932 | 1932 Q2 | 经济复苏 | 温和回暖 |
-| fascist_tide_1933 | 1933 Q3 | 法西斯浪潮 | 政治紧张 |
-| king_assassination_1934 | 1934 Q4 | 国王遇刺 | 政治危机 |
-| german_rearmament_1936 | 1936 Q2 | 德国重整军备 | 军工需求上升 |
-| spanish_civil_war_1937 | 1937 Q1 | 西班牙内战 | 国际局势紧张 |
-| munich_agreement_1938 | 1938 Q3 | 慕尼黑协定 | 绥靖政策 |
-| wwii_outbreak_1939 | 1939 Q3 | 二战爆发 | 战争预警 |
+| 事件 ID | 触发时间 | 名称 | 分类 | 选项数 | 关键效果 |
+|---------|----------|------|------|--------|----------|
+| kingdom_shs_1919 | 1919 Q2 | 塞克斯王国 | 政治 | 3 | cash, legitimacy, tax_rate, political_standing |
+| unionization_wave_1920 | 1920 Q3 | 矿业工会化浪潮 | 社会 | 3 | worker_morale, worker_cost_multiplier, public_support |
+| postwar_inflation_1922 | 1922 Q1 | 战后通胀高峰 | 经济 | 3 | cash, gold, inflation_delta(高), gold_price_mod |
+| railway_nationalization_1923 | 1923 Q3 | 铁路国有化风波 | 经济/政治 | 2 | cash, transport_risk, independence, political_standing |
+| mining_modernization_1925 | 1925 Q1 | 矿业现代化机遇 | 经济 | 3 | cash, mine_output_mult, worker_cost_multiplier, foreign_control |
+| uk_general_strike_1926 | 1926 Q3 | 英国大罢工冲击 | 经济 | 2 | cash, mine_output_mult, worker_morale, coal_price_mod |
+| political_crisis_1928 | 1928 Q2 | 议会枪击事件 | 政治 | 3 | cash, political_standing, independence, asset_price_mod |
+| royal_dictatorship_1929 | 1929 Q1 | 国王独裁 | 政治 | 3 | cash, legitimacy, political_standing, independence |
+| great_depression_1929 | 1929 Q4 | 大萧条波及 | 经济 | 3 | cash, inflation_delta(通缩), asset_price_mod(**-0.60**), 多股崩盘 |
+| bank_run_1931 | 1931 Q1 | 银行挤兑风潮 | 经济 | 3 | cash, inflation_delta, gold_price_mod, total_assets |
+| fascist_tide_1933 | 1933 Q1 | 法西斯思潮蔓延 | 政治 | 3 | cash, mine_output_mult, foreign_control, political_standing |
+| king_assassination_1934 | 1934 Q4 | 国王遇刺 | 政治 | 2 | cash, political_standing, gold_price_mod, asset_price_mod |
+| german_rearmament_1936 | 1936 Q2 | 德国重新武装 | 军事/经济 | 3 | cash, mine_output_mult, military_industry_profit |
+| spanish_civil_war_1937 | 1937 Q3 | 西班牙内战阴影 | 政治/社会 | 2 | workers_bonus, public_support, worker_morale |
+| munich_agreement_1938 | 1938 Q4 | 慕尼黑协定 | 军事/政治 | 3 | cash, gold, inflation_delta, supply_reserve, 多价格修正 |
+| wwii_outbreak_1939 | 1939 Q3 | 二战爆发 | 军事🔴 | 3 | cash, military_industry_profit, mine_output_mult, 多股波动 |
 
-#### 第四章：战时灰幕（1941-1945）
+#### 第四章：战时灰幕（1941-1945）— 6 个事件
 
-| 事件 ID | 触发时间 | 名称 | 关键效果 |
-|---------|----------|------|----------|
-| axis_ultimatum_1941 | 1941 Q1 | 轴心最后通牒 | 战争直接影响 |
-| old_order_collapse_1941 | 1941 Q3 | 旧秩序崩溃 | 政权更迭 |
-| partisan_warfare_1942 | 1942 Q2 | 游击战争 | 军事/安全 |
-| italy_surrender_1943 | 1943 Q3 | 意大利投降 | 战局转折 |
-| allied_bombing_1944 | 1944 Q1 | 盟军轰炸 | 破坏/损失 |
-| new_regime_1945 | 1945 Q2 | 新政权建立 | 政治重组 |
+| 事件 ID | 触发时间 | 名称 | 分类 | 选项数 | 关键效果 |
+|---------|----------|------|------|--------|----------|
+| axis_ultimatum_1941 | 1941 Q1 | 轴心国最后通牒 | 军事/政治 | 3 | cash, security, supply_reserve, public_support |
+| old_order_collapse_1941 | 1941 Q2 | 旧秩序瓦解 | 军事🔴 | 3 | **war_state=true**, cash, gold, tax_rate(占领税) |
+| partisan_warfare_1942 | 1942 Q2 | 游击战与民族仇杀 | 军事 | 3 | cash, gold, public_support, transport_risk, security |
+| italy_surrender_1943 | 1943 Q3 | 意大利投降 | 军事 | 3 | cash, supply_reserve, transport_risk, political_standing |
+| allied_bombing_1944 | 1944 Q2 | 盟军轰炸与解放前夜 | 军事 | 3 | cash, gold, mine_output_mult, transport_risk, total_assets |
+| new_regime_1945 | 1945 Q2 | 新政权建立 | 政治🔴 | 3 | **war_state=false**, cash, gold, tax_rate(16Q长期), inflation_delta(通缩) |
 
-#### 第五章：战后余烬（1946-1955）
+#### 第五章：战后余烬（1946-1955）— 8 个事件
 
-| 事件 ID | 触发时间 | 名称 | 关键效果 |
-|---------|----------|------|----------|
-| land_reform_1946 | 1946 Q2 | 土地改革 | 经济重组 |
-| five_year_plan_1947 | 1947 Q1 | 五年计划 | 工业化 |
-| tito_stalin_split_1948 | 1948 Q2 | 铁托-斯大林决裂 | 地缘政治重大转折 |
-| western_aid_1949 | 1949 Q3 | 西方援助 | 经济注入 |
-| korean_war_boom_1951 | 1951 Q1 | 朝鲜战争景气 | 军工需求 |
-| self_management_1952 | 1952 Q2 | 自治管理 | 政治改革 |
-| trieste_resolution_1954 | 1954 Q1 | 的里雅斯特解决 | 领土/外交 |
-| family_legacy_1955 | 1955 Q3 | 家族遗产 | 终局总结 |
+| 事件 ID | 触发时间 | 名称 | 分类 | 选项数 | 关键效果 |
+|---------|----------|------|------|--------|----------|
+| land_reform_1946 | 1946 Q2 | 土地改革 | 政治 | 3 | cash, political_standing, total_assets, public_support |
+| five_year_plan_1947 | 1947 Q1 | 五年计划 | 经济/政治 | 3 | cash, gold, mine_output_mult, worker_morale |
+| tito_stalin_split_1948 | 1948 Q3 | 铁托决裂 | 政治 | 3 | cash, political_standing, trade_income_mult, legitimacy |
+| western_aid_1949 | 1949 Q4 | 西方援助 | 经济/政治 | 2 | cash, tech_bonus, mine_output_mult, political_standing |
+| korean_war_boom_1951 | 1951 Q1 | 矿产热潮 | 经济 | 3 | cash, gold, mine_output_mult, worker_morale, asset_price_mod |
+| self_management_1952 | 1952 Q3 | 工人自治 | 政治/社会 | 3 | worker_morale, mine_output_mult, public_support, legitimacy |
+| trieste_resolution_1954 | 1954 Q1 | 的里雅斯特和约 | 政治/经济 | 2 | cash, gold, trade_income_mult, foreign_assets |
+| family_legacy_1955 | 1955 Q3 | 百年传承 | 政治(终局) | 3 | political_standing, public_support, legitimacy, total_influence |
 
-### 随机事件模板（15 种）
+> 🔴 标记 = 改变战争状态 (`war_state`) 的关键事件。`sarajevo_shots_1914` 是唯一拥有 `ongoing_modifiers`（16 季持续战争经济效果）的事件。
 
-| 事件 ID | 名称 | 触发条件 | 概率/季 | 冷却 |
-|---------|------|----------|---------|------|
-| mine_accident | 矿难事故 | 有矿山 + 治安 ≤ 3 | 15% | 4 季 |
-| worker_strike | 工人罢工 | 工人 ≥ 15 | 12% | 6 季 |
-| foreign_investors | 外资考察团 | 年份 ≥ 1906 + 基建 ≥ 2 | 10% | 8 季 |
-| ore_vein_discovery | 矿脉发现 | 有矿山 | 8% | 8 季 |
-| local_pressure | 地方势力施压 | — | 12% | 4 季 |
-| gold_price_surge | 金价飙升 | — | 8% | 6 季 |
-| smuggling_route | 走私路线 | 治安 ≤ 4 | 10% | 6 季 |
-| disease_outbreak | 瘟疫爆发 | 工人 ≥ 10 | 8% | 8 季 |
-| brain_drain | 人才外流 | 年份 ≥ 1910 | 6% | 8 季 |
-| natural_disaster | 自然灾害 | — | 8% | 6 季 |
-| commodity_boom | 大宗商品繁荣 | — | 10% | 6 季 |
-| currency_crisis | 货币危机 | 年份 ≥ 1920 | 8% | 8 季 |
-| espionage_scandal | 间谍丑闻 | — | 6% | 8 季 |
-| drought_famine | 旱灾饥荒 | — | 8% | 6 季 |
-| bandit_raid | 土匪袭击 | 治安 ≤ 3 | 12% | 4 季 |
-| railway_shutdown | 铁路封锁 | — | 10% | 6 季 |
+---
 
-> 部分随机事件有 `chance_modifier`：如 `transport_risk` 修正器会增加 `bandit_raid` 和 `railway_shutdown` 的触发概率。
+### 随机事件模板（24 种 + 6 种灾害）
+
+#### 灾害事件（6 种）🔴 独立触发池
+
+> **v0.5.3 重大调整**：灾害事件从标准随机池中独立出来，拥有独立的触发逻辑。
+> - **低概率高危害**：概率降至原来的 30%-50%，但危害数值翻倍
+> - **开局免疫**：1904-1907（前 16 季度）完全不会触发，给玩家发展缓冲期
+> - **独立触发池**：每季最多 1 个灾害，与标准随机事件互不影响
+> - **不参与保底**：灾害事件不受"事件干旱"保底机制加成
+> - **全屏弹窗**：`priority = MAIN`，强调灾害的严重性
+
+| 事件 ID | 名称 | 触发条件 | 概率 | 冷却 | 选项 | 关键危害（最重选项） |
+|---------|------|----------|------|------|------|---------------------|
+| mine_accident | 矿难事故 | 有矿山 + 治安 ≤ 3 + **≥1908** | 8% | 8 季 | 2 | cash -350, output -20%×3Q |
+| disease_outbreak | 矿区瘟疫 | 有矿山 + 治安 ≤ 4 + **≥1908** | 6% | 10 季 | 2 | cash -500, output -25%×4Q |
+| natural_disaster | 山洪暴发 | 有矿山 + **≥1908** | 5% | 10 季 | 2 | cash -600, output -20%×3Q |
+| drought_famine | 旱灾粮荒 | **≥1908** | 5% | 10 季 | 2 | cash -400, inflation +0.04 |
+| bandit_raid | 劫匪劫道 | 有矿山 + **≥1908** | 4% | 8 季 | 3 | cash -300 或 gold -6 |
+| railway_shutdown | 铁路瘫痪 | 有矿山 + **≥1910** | 3% | 10 季 | 2 | cash -500, 封路 2-3Q |
+
+**灾害数值对比（v0.5.2 → v0.5.3）**：
+
+| 事件 | 旧概率 | 新概率 | 旧冷却 | 新冷却 | 旧最大 cash 损失 | 新最大 cash 损失 | 旧最大产能惩罚 | 新最大产能惩罚 |
+|------|--------|--------|--------|--------|-----------------|-----------------|---------------|---------------|
+| mine_accident | 20% | 8% | 4 季 | 8 季 | -150 | -350 | -10%×2Q | -20%×3Q |
+| disease_outbreak | 15% | 6% | 6 季 | 10 季 | -250 | -500 | -12%×2Q | -25%×4Q |
+| natural_disaster | 12% | 5% | 6 季 | 10 季 | -300 | -600 | -10%×2Q | -20%×3Q |
+| drought_famine | 13% | 5% | 6 季 | 10 季 | -200 | -400 | -8%×3Q | -15%×4Q |
+| bandit_raid | 8% | 4% | 4 季 | 8 季 | -150 | -300 | — | — |
+| railway_shutdown | 6% | 3% | 6 季 | 10 季 | -300 | -500 | 封路 1-2Q | 封路 2-3Q |
+
+#### 标准随机事件（10 种）
+
+| 事件 ID | 名称 | 分类 | 触发条件 | 概率 | 冷却 | 选项 |
+|---------|------|------|----------|------|------|------|
+| worker_strike | 工人罢工 | 社会 | 工人 ≥ 15 | 20% | 5 季 | 3 |
+| foreign_investors | 外资考察团 | 经济 | 1906-1940 + 基建 ≥ 2 | 18% | 6 季 | 3 |
+| ore_vein_discovery | 新矿脉发现 | 经济 | 有矿山 + ≥1905 | 14% | 5 季 | 2 |
+| local_pressure | 地方势力施压 | 政治 | ≥1906 | 18% | 5 季 | 3 |
+| gold_price_surge | 金价异动 | 经济 | ≥1905 | 16% | 4 季 | 3 |
+| smuggling_route | 走私通道 | 军事/犯罪 | ≥1914 + **战时** | 22% | 4 季 | 3 |
+| brain_drain | 技术人才流失 | 社会 | ≥1918 | 16% | 5 季 | 2 |
+| commodity_boom | 矿石需求暴增 | 经济 | ≥1910 | 15% | 5 季 | 2 |
+| currency_crisis | 汇率危机 | 经济 | ≥1920 | 16% | 5 季 | 3 |
+| espionage_scandal | 间谍风波 | 政治 | ≥1935 | 14% | 6 季 | 2 |
+
+#### 掠夺主题随机事件（7 种）
+
+> 这些事件与掠夺系统联动，由声望 (reputation) 和军事状态触发。
+
+| 事件 ID | 名称 | 分类 | 触发条件 | 概率 | 冷却 | 选项 |
+|---------|------|------|----------|------|------|------|
+| vein_turf_war | 矿脉争夺战 | 军事/掠夺 | 有矿山 + 已夺矿脉 + ≥1910 | 10% | 5 季 | 2 |
+| fence_network | 赃物销赃渠道 | 犯罪/掠夺 | 声望 ≤ -20 + ≥1912 | 9% | 5 季 | 2 |
+| guard_desertion | 护卫叛逃 | 军事/掠夺 | 护卫 ≥ 8 + 声望 ≤ -30 + ≥1908 | 8% | 5 季 | 2 |
+| extortion_backlash | 勒索反噬 | 政治/掠夺 | 声望 ≤ -40 + ≥1910 | 10% | 6 季 | 3 |
+| arms_smuggling | 走私军火 | 军事/犯罪 | 声望 ≤ -25 + **战时** | 10% | 5 季 | 2 |
+| raider_alliance | 掠夺者联盟 | 犯罪/掠夺 | 声望 ≤ -35 + 影响力 ≥ 25 + ≥1915 | 7% | 6 季 | 2 |
+| retaliation_raid | 报复性袭击 | 军事/掠夺 | 声望 ≤ -50 + 有矿山 + ≥1910 | 12% | 5 季 | 2 |
+
+#### 正面/奖励随机事件（7 种）
+
+| 事件 ID | 名称 | 分类 | 触发条件 | 概率 | 冷却 | 选项 |
+|---------|------|------|----------|------|------|------|
+| bumper_harvest | 丰收之年 | 社会(正面) | ≥1906 | 12% | 5 季 | 2 |
+| noble_patron | 贵人相助 | 政治(正面) | 影响力 ≥ 15 + ≥1908 | 8% | 6 季 | 2 |
+| tech_breakthrough | 技术突破 | 经济(正面) | ≥1912 + 基建 ≥ 3 | 9% | 6 季 | 2 |
+| diplomatic_windfall | 外交斡旋 | 政治(正面) | 影响力 ≥ 20 + ≥1910 | 8% | 6 季 | 2 |
+| worker_festival | 工人庆典 | 社会(正面) | 工人 ≥ 15 + ≥1906 | 12% | 5 季 | 2 |
+| archaeological_find | 考古发现 | 社会(正面) | 有矿山 + ≥1908 | 7% | 7 季 | 2 |
+| trade_route_opened | 贸易通道开放 | 经济(正面) | ≥1910 | 10% | 6 季 | 2 |
+
+#### 市场情报事件（5 种）
+
+> 无玩家选项，自动触发股价波动。需要解锁对应媒体科技。提供三级信息：公开消息、暗示消息、情报消息。
+
+| 事件 ID | 名称 | 分类 | 前置科技 | 概率 | 冷却 |
+|---------|------|------|----------|------|------|
+| media_bull_forecast | 利好预测 | 经济/市场 | d3_newspaper | 12% | 4 季 |
+| media_bear_panic | 利空恐慌 | 经济/市场 | d3_newspaper | 10% | 4 季 |
+| media_sector_report | 行业景气报告 | 经济/市场 | d5_radio | 15% | 5 季 |
+| media_political_leak | 政治内幕 | 政治/市场 | d4a 或 d4b | 8% | 6 季 |
+| media_war_rumor | 战时谣言 | 军事/市场 | **战时** | 20% | 3 季 |
+
+### 随机事件统计
+
+| 分类 | 数量 | 典型概率范围 | 触发池 | 说明 |
+|------|------|-------------|--------|------|
+| 🔴 灾害 | 6 | 3%-8% | **独立池**（每季 ≤1） | 低概率高危害，≥1908 才触发，不受保底加成 |
+| 标准（中性/负面） | 10 | 14%-22% | 标准池（每季 ≤2） | 政治危机、经济波动、社会事件 |
+| 掠夺主题 | 7 | 7%-12% | 标准池 | 声望越低越容易触发 |
+| 正面/奖励 | 7 | 7%-12% | 标准池 | 提供发展机遇 |
+| 市场情报 | 5 | 8%-20% | 标准池 | 自动触发，无选项 |
+| **合计** | **35** | — | — | 灾害 6 + 随机 29 + 固定 43 = 总计 78 |
+
+> **灾害事件触发规则**（v0.5.3 新增）：
+> - 独立触发池，与标准随机事件并行检测，每季最多触发 1 个灾害
+> - 前 16 季度（1904-1907）**完全免疫**，所有灾害 `min_year ≥ 1908`
+> - 不享受"事件干旱"保底概率翻倍，灾害概率恒定
+> - `bandit_raid` 和 `railway_shutdown` 受 `transport_risk` 修正器加成
+>
+> **chance_modifier 机制**：部分事件的触发概率受修正器影响——`extortion_backlash` 受 `corruption_risk` 修正。
+>
+> **bonus_ap 机制**：`foreign_investors` 是唯一赠送 bonus_ap(+1) 的随机事件。
+>
+> **战时限定**：`smuggling_route`、`arms_smuggling`、`media_war_rumor` 仅在 `war_state=true` 时触发。
 
 ### 事件修正器系统
 
@@ -974,7 +1087,8 @@ FactionPower = faction.power × base_faction_power(1.0) × (1 + presence / 200)
 | 资产 | `asset_price_mod`, `gold_price_mod`, `copper_price_mod`, `coal_price_mod` |
 | 劳动力 | `worker_cost_multiplier`, `hire_cost_multiplier`, `worker_efficiency_bonus` |
 | 矿业 | `mine_output`, `mine_output_base_bonus`, `mine_output_mult_bonus` |
-| 军事 | `guard_power_bonus`, `morale_bonus`, `supply_discount` |
+| 军事 | `guard_power_bonus`, `morale_bonus`, `guard_morale`, `supply_discount` |
+| 士气 | `worker_morale`, `guard_morale`（立即生效后移除，不按 duration 衰减） |
 | 通胀 | `inflation_drift`, `inflation_delta` |
 | 政治 | `legitimacy`, `political_standing`, `public_support`, `corruption_risk`, `risk` |
 | 运输 | `transport_risk` |
@@ -1890,7 +2004,38 @@ AI dominance 有额外加成来自 `totalPresence/2`（后期约 95/2 = 47）和
 
 ## 变更日志
 
-### v0.5.1（当前版本）
+### v0.5.3（当前版本）
+
+与 v0.5.2 相比的主要变更：
+
+| 变更类别 | 具体变化 |
+|----------|----------|
+| **灾害事件独立分类** | 6 个灾害事件（矿难事故、矿区疫病、山洪暴发、旱灾粮荒、劫匪劫道、铁路瘫痪）从标准随机池中拆出，组成**独立触发池**，每季最多触发 1 个灾害 |
+| **灾害危害显著增大** | 所有灾害的现金损失约 ×2、产出惩罚约 ×2、持续时长延长 1-2 季，优先级从 `REGION` 提升为 `MAIN`（全屏弹窗） |
+| **灾害概率大幅降低** | 触发概率降至原来的 40%-50%（如矿难 20%→8%、疫病 15%→6%），冷却期翻倍（4→8 季、6→10 季） |
+| **开局灾害规避** | 所有灾害统一 `min_year ≥ 1908`，前 16 季度（1904-1907）完全免疫 |
+| **灾害不受保底加成** | 灾害触发不计入"事件干旱"保底计数器，概率不会因长期无事件而翻倍 |
+| **§16 事件统计更新** | 随机事件从 28 种 → **35 种**（10 标准 + 7 掠夺 + 7 正面 + 5 市场情报 + 6 灾害），总事件 78 |
+
+---
+
+### v0.5.2
+
+与 v0.5.1 相比的主要变更：
+
+| 变更类别 | 具体变化 |
+|----------|----------|
+| **修复护卫士气 modifier** | 新增 `guard_morale` modifier target（立即生效后移除），修复护卫叛逃事件误扣工人士气的 BUG（`events_data.lua` guard_desertion 选项 `worker_morale` → `guard_morale`） |
+| **修复铁壁防线称号不可达** | `iron_wall` 检查从已弃用的 `military.equipment ≥ 6` 改为遍历小队/库存装备的最高 tier ≥ 6，护卫门槛从 40 → 60 |
+| **§6 武装系统补充** | 新增"小队装备系统"小节，记录 6 级装备 Tier/equip_id/power_mul 对照表，标注旧 `equipment` 字段已弃用 |
+| **§12 家族系统修正** | 最大核心成员从 6 → **11**（与 `balance.lua` 的 `max_members` 一致） |
+| **§15 战斗系统补注** | PlayerPower 公式的 `equipment` 因素标注旧字段已弃用，指向 §6 小队装备系统 |
+| **§16 事件系统补充** | modifier targets 军事类新增 `guard_morale`；新增"士气"类别列出 `worker_morale` 和 `guard_morale` 的立即生效语义 |
+| **§16 事件目录全面重写** | 固定事件从简略 35+ 扩充为精确 **43 个**（与代码对齐），每个事件补充分类、选项数、关键效果；随机事件从 15 种扩充为 **28 种**（14 标准 + 7 掠夺 + 7 正面 + 5 市场情报），新增掠夺/正面/市场情报三个子分类及统计汇总 |
+
+---
+
+### v0.5.1
 
 与 v0.5.0 相比的主要变更：
 
@@ -1944,7 +2089,7 @@ AI dominance 有额外加成来自 `totalPresence/2`（后期约 95/2 = 47）和
 | `first_blood` | 初战告捷 | `state.battle_wins_total` | ≥ 1 | 入门 |
 | `warmonger` | 战争狂人 | `stats.attacks_initiated` | ≥ 30 | 后期 |
 | `ever_victorious` | 常胜将军 | `state.battle_wins_total` | ≥ 25 | 后期 |
-| `iron_wall` | 铁壁防线 | `military.guards` + `military.equipment` | guards ≥ 40 且 equipment = 5 | 后期 |
+| `iron_wall` | 铁壁防线 | `military.guards` + 小队/库存装备 tier | guards ≥ 60 且拥有 T6（elite_kit）装备 | 后期 |
 
 #### 掠夺类 🏴（3个）
 
@@ -2002,11 +2147,11 @@ AI dominance 有额外加成来自 `totalPresence/2`（后期约 95/2 = 47）和
 | 科技先驱 | 第 3 章 | 10 项科技约需 30+ 回合投入 |
 | 金融巨鳄 | 第 3-4 章 | 取决于经营效率 |
 | 操盘圣手 | 第 4-5 章 | 60 笔交易需长期活跃 |
-| 铁壁防线 | 第 4-5 章 | 装备 Lv5 需完整军事科技树 |
+| 铁壁防线 | 第 4-5 章 | 需 60+ 护卫 + 获取 T6 精锐套装（通过军事科技树或装备系统） |
 | 家族兴旺 | 第 4-5 章 | 6 人且全在岗需精心管理 |
 
 ---
 
-*文档版本：v0.5.2*  
+*文档版本：v0.5.3*  
 *更新时间：2026-05-05*  
 *数据来源：`scripts/data/balance.lua`、`scripts/systems/*.lua`、`scripts/data/*.lua`、`scripts/game_state.lua`*
