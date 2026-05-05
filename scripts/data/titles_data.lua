@@ -35,32 +35,36 @@ TitlesData.TITLES = {
     {
         id       = "warmonger",
         name     = "战争狂人",
-        desc     = "主动发起 30 次攻击",
+        desc     = "主动发起 40 次攻击，且拥有 30+ 武装",
         category = "military",
         icon     = "🔥",
         check    = function(state, stats)
-            return (stats.attacks_initiated or 0) >= 30
+            local mil = state.military or {}
+            return (stats.attacks_initiated or 0) >= 40
+                and (mil.guards or 0) >= 30
         end,
     },
     {
         id       = "ever_victorious",
         name     = "常胜将军",
-        desc     = "累计赢得 25 场战斗",
+        desc     = "累计赢得 35 场战斗，且护卫士气达到 70+",
         category = "military",
         icon     = "🏆",
         check    = function(state, stats)
-            return (state.battle_wins_total or 0) >= 25
+            local mil = state.military or {}
+            return (state.battle_wins_total or 0) >= 35
+                and (mil.morale or 0) >= 70
         end,
     },
     {
         id       = "iron_wall",
         name     = "铁壁防线",
-        desc     = "拥有 40+ 武装且装备等级达到 5",
+        desc     = "拥有 60+ 武装且装备等级达到 6",
         category = "military",
         icon     = "🛡️",
         check    = function(state, stats)
             local mil = state.military or {}
-            return (mil.guards or 0) >= 40 and (mil.equipment or 0) >= 5
+            return (mil.guards or 0) >= 60 and (mil.equipment or 0) >= 6
         end,
     },
 
@@ -80,21 +84,23 @@ TitlesData.TITLES = {
     {
         id       = "balkan_wolf",
         name     = "巴尔干之狼",
-        desc     = "成功掠夺 15 次",
+        desc     = "成功掠夺 25 次，且声誉降至 -50 以下",
         category = "plunder",
         icon     = "🐺",
         check    = function(state, stats)
-            return (stats.plunder_successes or 0) >= 15
+            return (stats.plunder_successes or 0) >= 25
+                and (state.reputation or 0) <= -50
         end,
     },
     {
         id       = "infamous",
         name     = "臭名昭著",
-        desc     = "声誉降至 -80 以下",
+        desc     = "声誉降至 -95 以下，且成功掠夺 20 次",
         category = "plunder",
         icon     = "💀",
         check    = function(state, stats)
-            return (state.reputation or 0) <= -80
+            return (state.reputation or 0) <= -95
+                and (stats.plunder_successes or 0) >= 20
         end,
     },
 
@@ -114,32 +120,41 @@ TitlesData.TITLES = {
     {
         id       = "financial_titan",
         name     = "金融巨鳄",
-        desc     = "现金余额达到 30,000",
+        desc     = "现金余额达到 500,000，且累计收入达到 1,000,000",
         category = "economy",
         icon     = "🏦",
         check    = function(state, stats)
-            return (state.cash or 0) >= 30000
+            return (state.cash or 0) >= 500000
+                and (state.total_income or 0) >= 1000000
         end,
     },
     {
         id       = "debt_emperor",
         name     = "债务帝王",
-        desc     = "同时背负 5 笔贷款且未破产",
+        desc     = "同时背负 3 笔贷款，总负债达到 100,000，且没有连续违约",
         category = "economy",
         icon     = "📜",
         check    = function(state, stats)
-            return #(state.loans or {}) >= 5 and not state.bankrupt
+            local debt = 0
+            for _, loan in ipairs(state.loans or {}) do
+                debt = debt + (loan.principal or 0)
+            end
+            return #(state.loans or {}) >= 3
+                and debt >= 100000
+                and (state.loan_consecutive_defaults or 0) == 0
+                and not state.bankrupt
         end,
     },
     {
         id       = "inflation_survivor",
         name     = "通胀幸存者",
-        desc     = "通胀因子达到 2.0 以上且现金 ≥ 5,000",
+        desc     = "通胀因子达到 3.0 以上，且现金 ≥ 50,000、黄金 ≥ 100",
         category = "economy",
         icon     = "📉",
         check    = function(state, stats)
-            return (state.inflation_factor or 1) >= 2.0
-                and (state.cash or 0) >= 5000
+            return (state.inflation_factor or 1) >= 3.0
+                and (state.cash or 0) >= 50000
+                and (state.gold or 0) >= 100
         end,
     },
 
@@ -159,31 +174,31 @@ TitlesData.TITLES = {
     {
         id       = "invisible_hand",
         name     = "有形大手",
-        desc     = "成功操纵股市 15 次",
+        desc     = "成功操纵股市 25 次",
         category = "stock",
         icon     = "🤚",
         check    = function(state, stats)
-            return (stats.manipulation_successes or 0) >= 15
+            return (stats.manipulation_successes or 0) >= 25
         end,
     },
     {
         id       = "master_trader",
         name     = "操盘圣手",
-        desc     = "完成 60 笔股票交易",
+        desc     = "完成 100 笔股票交易",
         category = "stock",
         icon     = "🎯",
         check    = function(state, stats)
-            return (stats.trades_completed or 0) >= 60
+            return (stats.trades_completed or 0) >= 100
         end,
     },
     {
         id       = "short_hunter",
         name     = "空头猎人",
-        desc     = "做空累计盈利达到 10,000",
+        desc     = "做空累计盈利达到 50,000",
         category = "stock",
         icon     = "🦅",
         check    = function(state, stats)
-            return (stats.short_profit_total or 0) >= 10000
+            return (stats.short_profit_total or 0) >= 50000
         end,
     },
 
@@ -193,7 +208,7 @@ TitlesData.TITLES = {
     {
         id       = "tech_pioneer",
         name     = "科技先驱",
-        desc     = "研究完成 10 项科技",
+        desc     = "研究完成 24 项科技",
         category = "comprehensive",
         icon     = "🔬",
         check    = function(state, stats)
@@ -203,34 +218,42 @@ TitlesData.TITLES = {
                     count = count + 1
                 end
             end
-            return count >= 10
+            return count >= 24
         end,
     },
     {
         id       = "family_prosperity",
         name     = "家族兴旺",
-        desc     = "家族成员达到 6 人且全部在岗",
+        desc     = "家族成员达到 6 人、全部在岗、无人适应中，且总影响力达到 150",
         category = "comprehensive",
         icon     = "👨‍👩‍👧‍👦",
         check    = function(state, stats)
             local members = state.family and state.family.members or {}
-            if #members < 6 then return false end
+            local positioned = 0
             for _, m in ipairs(members) do
-                if m.status ~= "active" or not m.position then
-                    return false
+                if m.status == "active" and m.position then
+                    if (m.onboarding_remaining or 0) > 0 then
+                        return false
+                    end
+                    positioned = positioned + 1
                 end
             end
-            return true
+            if positioned < 6 then return false end
+            local totalInfluence = 0
+            for _, r in ipairs(state.regions or {}) do
+                totalInfluence = totalInfluence + (r.influence or 0)
+            end
+            return totalInfluence >= 150
         end,
     },
     {
         id       = "witness_of_ages",
         name     = "时代见证者",
-        desc     = "存活超过 60 个回合（15年）",
+        desc     = "存活超过 160 个回合（40年）且未破产",
         category = "comprehensive",
         icon     = "⏳",
         check    = function(state, stats)
-            return (state.turn_count or 0) >= 60
+            return (state.turn_count or 0) >= 160 and not state.bankrupt
         end,
     },
 }

@@ -132,6 +132,7 @@ function UIManager.Create(state, callbacks)
     EquipModals.SetRoot(uiRoot_)
     MarketPage.SetRoot(uiRoot_)
     FamilyPage.SetRoot(uiRoot_)
+    WorldPage.SetRoot(uiRoot_)
     EndingModal.SetRoot(uiRoot_)
     EndingModal.SetCallbacks({
         onNewGame = onNewGame_,
