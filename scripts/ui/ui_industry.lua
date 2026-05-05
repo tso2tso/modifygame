@@ -164,6 +164,8 @@ end
 
 --- 矿山卡片（§6.3 资产卡片样式）
 function IndustryPage._CreateMineCard(state, mine)
+    mine.resource = mine.resource or "gold"
+    local isCoalMine = mine.resource == "coal"
     local region = GameState.GetRegion(state, mine.region_id)
     local mineReserve = mine.reserve or 0
     local security = region and region.security or 0
@@ -180,6 +182,13 @@ function IndustryPage._CreateMineCard(state, mine)
     local directorMember = GameState.GetMemberAtPosition(state, "mine_director")
     local directorName = directorMember and directorMember.name or "空缺"
     local directorColor = directorMember and C.accent_green or C.accent_red
+
+    local mineIcon = isCoalMine and "⚫" or "⛏️"
+    local mineAccent = isCoalMine and { 140, 130, 120, 255 } or C.accent_gold
+    local outputLabel = isCoalMine and "产煤" or "产金"
+    local reserveBase = isCoalMine
+        and ((Balance.TRADE.local_coal_mine or {}).base_reserve or 1500)
+        or (Balance.TRADE.new_mine.base_reserve or 1500)
 
     -- 铜储量（矿区资源）
     local copperReserve = (region and region.resources and region.resources.copper_reserve) or 0
@@ -216,7 +225,8 @@ function IndustryPage._CreateMineCard(state, mine)
         -- 是否有可迁移目标
         local hasTarget = false
         for _, m in ipairs(state.mines) do
-            if m ~= mine and m.active and not m.migrating and (m.reserve or 0) > 0 then
+            if m ~= mine and (m.resource or "gold") == mine.resource
+                and m.active and not m.migrating and (m.reserve or 0) > 0 then
                 hasTarget = true; break
             end
         end
@@ -237,7 +247,7 @@ function IndustryPage._CreateMineCard(state, mine)
         table.insert(bottomChildren, UI.Button {
             text = canMigrate
                 and string.format("🔄 产能迁移 (💰%d ⚡%d)", migrateCost, migrateAP)
-                or (not hasTarget and "🔄 无可用目标矿山"
+                or (not hasTarget and "🔄 无同类目标矿山"
                 or string.format("🔄 产能迁移 (💰%d ⚡%d) 资源不足", migrateCost, migrateAP)),
             fontSize = F.body_minor,
             height = S.btn_small_height,
@@ -331,7 +341,7 @@ function IndustryPage._CreateMineCard(state, mine)
                         alignItems = "center",
                         children = {
                             UI.Label {
-                                text = isDepleted and "⚠️" or "⛏️",
+                                text = isDepleted and "⚠️" or mineIcon,
                                 fontSize = 24,
                             },
                         },
@@ -346,7 +356,7 @@ function IndustryPage._CreateMineCard(state, mine)
                                 text = mine.name,
                                 fontSize = F.subtitle,
                                 fontWeight = "bold",
-                                fontColor = isDepleted and C.accent_red or C.accent_gold,
+                                fontColor = isDepleted and C.accent_red or mineAccent,
                             },
                             UI.Label {
                                 text = statusText or ("等级 " .. mine.level .. "/" .. BM.max_level),
@@ -365,10 +375,10 @@ function IndustryPage._CreateMineCard(state, mine)
                                 text = (isDepleted and "0" or tostring(currentOutput)) .. "/季",
                                 fontSize = F.data_small,
                                 fontWeight = "bold",
-                                fontColor = isDepleted and C.text_muted or C.accent_amber,
+                                fontColor = isDepleted and C.text_muted or (isCoalMine and C.text_secondary or C.accent_amber),
                             },
                             UI.Label {
-                                text = "产金",
+                                text = outputLabel,
                                 fontSize = F.label,
                                 fontColor = C.text_muted,
                             },
@@ -385,15 +395,15 @@ function IndustryPage._CreateMineCard(state, mine)
                 gap = 6,
                 children = {
                     -- 矿山独立储量
-                    IndustryPage._InfoRow("矿山储量", mineReserve .. " 单位",
+                    IndustryPage._InfoRow(isCoalMine and "煤矿储量" or "矿山储量", mineReserve .. " 单位",
                         isDepleted and C.accent_red or (mineReserve < 100 and C.accent_amber or C.text_primary)),
                     UI.ProgressBar {
-                        value = math.min(1, mineReserve / (Balance.TRADE.new_mine.base_reserve or 1500)),
+                        value = math.min(1, mineReserve / reserveBase),
                         width = "100%",
                         height = 6,
                         borderRadius = 3,
                         trackColor = C.bg_surface,
-                        fillColor = isDepleted and C.accent_red or (mineReserve < 100 and C.accent_amber or C.accent_gold),
+                        fillColor = isDepleted and C.accent_red or (mineReserve < 100 and C.accent_amber or mineAccent),
                     },
                     -- 矿业总监满配独有：矿脉洞察，显示预计枯竭季度
                     (not isDepleted and currentOutput > 0 and GameState.HasExcellentPosition(state, "mine_director"))
@@ -402,9 +412,9 @@ function IndustryPage._CreateMineCard(state, mine)
                             mineReserve / currentOutput <= 4 and C.accent_red or C.accent_amber)
                         or nil,
                     -- 铜储量（共享 region）
-                    IndustryPage._InfoRow("铜储量", copperReserve .. " 单位",
+                    (not isCoalMine) and IndustryPage._InfoRow("铜储量", copperReserve .. " 单位",
                         copperReserve < 100 and C.accent_red or C.text_secondary),
-                    UI.ProgressBar {
+                    (not isCoalMine) and UI.ProgressBar {
                         value = math.min(1, copperReserve / 500),
                         width = "100%",
                         height = 6,
@@ -413,7 +423,7 @@ function IndustryPage._CreateMineCard(state, mine)
                         fillColor = copperReserve < 100 and C.accent_red or { 184, 115, 51, 255 },
                     },
                     -- 煤储量（共享 region）
-                    IndustryPage._InfoRow("煤储量", coalReserve .. " 单位",
+                    IndustryPage._InfoRow(isCoalMine and "工业区煤储量" or "煤储量", coalReserve .. " 单位",
                         coalReserve < 200 and C.accent_red or C.text_secondary),
                     UI.ProgressBar {
                         value = math.min(1, coalReserve / 4000),
@@ -989,6 +999,13 @@ function IndustryPage._CreateCoalPowerCard(state)
     end
     local industrialConsumption = indConsTable[maxMineLevel] or 0
     local totalConsumption = factoryConsumption + industrialConsumption
+    local _, _, estimateDetails = Economy.GetEstimate(state)
+    local estCoalOutput = estimateDetails.est_coal_output or 0
+    local estFactory = estimateDetails.est_coal_factory or 0
+    local estIndustrial = estimateDetails.est_coal_industrial or 0
+    local estMineAlloc = estimateDetails.est_coal_mine or 0
+    local estCoalIncome = estimateDetails.coal_income or 0
+    local estNetCoal = estCoalOutput - estFactory - estIndustrial - estMineAlloc
 
     -- 可分配给矿山的上限（总库存 - 工厂需求 - 工业运营, 最低0）
     local maxToMines = math.max(0, coalStock - totalConsumption)
@@ -1047,6 +1064,13 @@ function IndustryPage._CreateCoalPowerCard(state)
                 fontColor = C.accent_red,
                 whiteSpace = "normal",
             } or nil,
+            IndustryPage._InfoRow("预计产煤", "+" .. estCoalOutput .. " 煤",
+                estCoalOutput > 0 and C.accent_green or C.text_muted),
+            IndustryPage._InfoRow("预计净变化",
+                string.format("%+d 煤", estNetCoal),
+                estNetCoal >= 0 and C.accent_green or C.accent_red),
+            state.coal_auto_sell and IndustryPage._InfoRow("预计售煤收入",
+                "+" .. estCoalIncome .. " 克朗", estCoalIncome > 0 and C.accent_gold or C.text_muted) or nil,
             UI.Divider { color = C.divider },
             -- 分配给矿山
             UI.Label {

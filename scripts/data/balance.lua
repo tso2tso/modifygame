@@ -491,6 +491,7 @@ Balance.DIPLOMACY = {
 -- ============================================================================
 Balance.TRADE = {
     new_mine = { ap = 2, cash = 1200, base_reserve = 1500, max_mines = 4 },  -- 基础4槽，科技可扩至8
+    local_coal_mine = { ap = 1, cash = 700, base_reserve = 1500, base_output = 8 },
     sell_mine = { ap = 2, cash_per_level = 500 },
     raid_ai = { ap = 2, cash = 300, recruit_block_duration = 4 },  -- 破坏招募：封锁AI扩张4季
 }

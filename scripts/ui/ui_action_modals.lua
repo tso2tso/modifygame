@@ -444,6 +444,21 @@ function ActionModals.ShowTrade(state, accent)
         minesFull or state.cash < newMineCost or (state.ap.current + (state.ap.temp or 0)) < Balance.TRADE.new_mine.ap
     ))
 
+    -- 本地煤矿（采矿科技解锁，复用矿山槽位）
+    if state.local_coal_mine_unlocked then
+        local coalCfg = Balance.TRADE.local_coal_mine or {}
+        local coalMineCost = math.floor((coalCfg.cash or 700) * assetPriceFactor)
+        local coalMineAP = coalCfg.ap or 1
+        table.insert(rows, ActionModals._TradeOption(
+            "⚫ 开发本地煤矿",
+            string.format("投入 %d 克朗 / %d AP 建立一座煤矿（%d/%d）",
+                coalMineCost, coalMineAP, #state.mines, maxMines),
+            accent,
+            function() ActionModals._TradeNewCoalMine(state) end,
+            minesFull or state.cash < coalMineCost or (state.ap.current + (state.ap.temp or 0)) < coalMineAP
+        ))
+    end
+
     -- 出售矿山
     for _, mine in ipairs(state.mines) do
         if mine.active and #state.mines > 1 then
@@ -758,6 +773,54 @@ function ActionModals._TradeNewMine(state)
     end
     GameState.AddLog(state, string.format("[交易] 新矿开发完成，独立储量 %d", newReserve))
     UI.Toast.Show("新矿已建成", { variant = "success", duration = 1.5 })
+    closeModal()
+    notifyChanged()
+end
+
+function ActionModals._TradeNewCoalMine(state)
+    if not state.local_coal_mine_unlocked then
+        UI.Toast.Show("需要先研发电气化矿井", { variant = "warning", duration = 1.5 })
+        return
+    end
+
+    local cfg = Balance.TRADE.local_coal_mine or {}
+    local cashCost = math.floor((cfg.cash or 700) * GameState.GetAssetPriceFactor(state))
+    local apCost = cfg.ap or 1
+    local maxMines = (Balance.TRADE.new_mine.max_mines or 4) + (state.mine_slots_bonus or 0)
+    if #state.mines >= maxMines then
+        UI.Toast.Show(string.format("矿山已达上限（%d/%d）", #state.mines, maxMines),
+            { variant = "warning", duration = 1.5 })
+        return
+    end
+    if state.cash < cashCost or (state.ap.current + (state.ap.temp or 0)) < apCost then
+        UI.Toast.Show("资源不足", { variant = "error", duration = 1.2 })
+        return
+    end
+    if not GameState.SpendAP(state, apCost) then
+        UI.Toast.Show("行动点不足", { variant = "error", duration = 1.2 })
+        return
+    end
+
+    state.cash = state.cash - cashCost
+    local id = "coal_mine_" .. tostring(state.turn_count) .. "_" .. tostring(math.random(1000, 9999))
+    local region = state.regions[1]
+    for _, r in ipairs(state.regions) do
+        if r.id == "industrial_town" then region = r; break end
+    end
+    local newReserve = cfg.base_reserve or 1500
+    table.insert(state.mines, {
+        id = id,
+        name = "本地煤矿 #" .. (#state.mines + 1),
+        region_id = region and region.id or "industrial_town",
+        resource = "coal",
+        level = 1,
+        output_bonus = 0,
+        active = true,
+        reserve = newReserve,
+        initial_reserve = newReserve,
+    })
+    GameState.AddLog(state, string.format("[交易] 本地煤矿开发完成，独立煤储量 %d", newReserve))
+    UI.Toast.Show("本地煤矿已建成", { variant = "success", duration = 1.5 })
     closeModal()
     notifyChanged()
 end

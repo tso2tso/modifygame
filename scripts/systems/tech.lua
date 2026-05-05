@@ -251,6 +251,9 @@ local function applyEffect(state, eff, techId)
     elseif eff.kind == "mine_slots" then
         state.mine_slots_bonus = (state.mine_slots_bonus or 0) + eff.value
 
+    elseif eff.kind == "unlock_local_coal_mine" then
+        state.local_coal_mine_unlocked = true
+
     elseif eff.kind == "prospect_success" then
         state.prospect_success_bonus = (state.prospect_success_bonus or 0) + eff.value
 

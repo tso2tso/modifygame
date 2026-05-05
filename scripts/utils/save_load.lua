@@ -228,6 +228,7 @@ function SaveLoad._SerializeState(state)
     data.coal_auto_sell = state.coal_auto_sell or false
     data.coal_to_mines = state.coal_to_mines or 0
     data.factory_coal_shortage = state.factory_coal_shortage or false
+    data.local_coal_mine_unlocked = state.local_coal_mine_unlocked or false
 
     -- 监管压力
     data.regulation_pressure = state.regulation_pressure or 0
@@ -313,6 +314,7 @@ function SaveLoad._SerializeState(state)
             id = mine.id,
             name = mine.name,
             region_id = mine.region_id,
+            resource = mine.resource or "gold",
             level = mine.level,
             output_bonus = mine.output_bonus,
             active = mine.active,
@@ -561,6 +563,9 @@ function SaveLoad._DeserializeState(data)
     data.loans = data.loans or {}
     data.tech = data.tech or { researched = {}, in_progress = nil, bonus_points = 0 }
     data.tech.researched = data.tech.researched or {}
+    if data.tech.researched.a3_electric_mine then
+        data.local_coal_mine_unlocked = true
+    end
     data.portfolio = data.portfolio or { holdings = {} }
     data.portfolio.holdings = data.portfolio.holdings or {}
     data.portfolio.short_positions = data.portfolio.short_positions or {}
@@ -591,6 +596,7 @@ function SaveLoad._DeserializeState(data)
     data.coal_to_mines = data.coal_to_mines or 0
     if data.factory_coal_shortage == nil then data.factory_coal_shortage = false end
     data.mine_coal_power_bonus = 0  -- 运行时计算，不持久化
+    if data.local_coal_mine_unlocked == nil then data.local_coal_mine_unlocked = false end
 
     -- 监管压力（v0.4.0 新增保存）
     data.regulation_pressure = data.regulation_pressure or 0
@@ -703,9 +709,11 @@ function SaveLoad._DeserializeState(data)
     data.coal_prospect_count = data.coal_prospect_count or 0
     -- 矿山独立储量兼容（旧存档无 reserve 字段）
     for _, mine in ipairs(data.mines) do
+        mine.resource = mine.resource or "gold"
         if mine.reserve == nil then mine.reserve = 500 end
         if mine.initial_reserve == nil then
             local defaultReserve = mine.id == "main_mine" and 500
+                or (mine.resource == "coal" and (((require("data.balance").TRADE or {}).local_coal_mine or {}).base_reserve))
                 or ((require("data.balance").TRADE or {}).new_mine or {}).base_reserve
                 or 1500
             mine.initial_reserve = math.max(defaultReserve, mine.reserve or 0)
@@ -743,6 +751,8 @@ function SaveLoad._DeserializeState(data)
                         data.accident_rate_mod = (data.accident_rate_mod or 0) + eff.value
                     elseif eff.kind == "mine_slots" then
                         data.mine_slots_bonus = (data.mine_slots_bonus or 0) + eff.value
+                    elseif eff.kind == "unlock_local_coal_mine" then
+                        data.local_coal_mine_unlocked = true
                     elseif eff.kind == "prospect_success" then
                         data.prospect_success_bonus = (data.prospect_success_bonus or 0) + eff.value
                     elseif eff.kind == "stock_boost_all" then

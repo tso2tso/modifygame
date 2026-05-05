@@ -45,6 +45,7 @@ function Economy.Settle(state)
         copper_mined = 0,
         copper_sold = 0,
         copper_income = 0,
+        coal_mined = 0,
         gold_reserve_interest = 0,
         gold_hedge_pct = 0,
         worker_expense = 0,
@@ -71,24 +72,32 @@ function Economy.Settle(state)
 
     for _, mine in ipairs(state.mines) do
         if mine.active and not mine.migrating then
+            mine.resource = mine.resource or "gold"
             local mineReserve = mine.reserve or 0
             local output = Economy._CalcMineOutput(state, mine)
             -- 检查独立储量
             if mineReserve > 0 then
                 output = math.min(output, mineReserve)
                 mine.reserve = mineReserve - output
-                state.gold = state.gold + output
-                report.gold_mined = report.gold_mined + output
+                if mine.resource == "coal" then
+                    state.coal = (state.coal or 0) + output
+                    report.coal_mined = (report.coal_mined or 0) + output
+                else
+                    state.gold = state.gold + output
+                    report.gold_mined = report.gold_mined + output
+                end
             end
             -- 铜副产物：按矿山等级产出（消耗 region 共享 copper_reserve）
-            local region = GameState.GetRegion(state, mine.region_id)
-            local copperOut = math.floor(BM.base_copper_output
-                * (1 + (mine.level - 1) * BM.level_output_bonus))
-            if copperOut > 0 and region and (region.resources.copper_reserve or 0) > 0 then
-                copperOut = math.min(copperOut, region.resources.copper_reserve)
-                region.resources.copper_reserve = region.resources.copper_reserve - copperOut
-                state.copper = (state.copper or 0) + copperOut
-                report.copper_mined = report.copper_mined + copperOut
+            if mine.resource ~= "coal" then
+                local region = GameState.GetRegion(state, mine.region_id)
+                local copperOut = math.floor(BM.base_copper_output
+                    * (1 + (mine.level - 1) * BM.level_output_bonus))
+                if copperOut > 0 and region and (region.resources.copper_reserve or 0) > 0 then
+                    copperOut = math.min(copperOut, region.resources.copper_reserve)
+                    region.resources.copper_reserve = region.resources.copper_reserve - copperOut
+                    state.copper = (state.copper or 0) + copperOut
+                    report.copper_mined = report.copper_mined + copperOut
+                end
             end
         end
     end
@@ -123,7 +132,7 @@ function Economy.Settle(state)
     -- ============================
     -- 1.5 煤炭采集（工业区）— 受矿山最高等级加成
     -- ============================
-    report.coal_mined = 0
+    report.coal_mined = report.coal_mined or 0
     -- 取最高矿山等级，代表整体采矿技术水平
     local maxMineLevel = 1
     for _, mine in ipairs(state.mines) do
@@ -491,9 +500,11 @@ end
 --- 计算单个矿山的产出
 ---@param state table
 ---@param mine table
----@return number output 黄金产出量
+---@return number output 矿山产出量（金矿产金，煤矿产煤）
 function Economy._CalcMineOutput(state, mine)
-    local base = BM.base_gold_output
+    local isCoalMine = (mine.resource == "coal")
+    local coalCfg = (Balance.TRADE or {}).local_coal_mine or {}
+    local base = isCoalMine and (coalCfg.base_output or 8) or BM.base_gold_output
     -- 等级加成
     local levelMul = 1.0 + (mine.level - 1) * BM.level_output_bonus
     -- 矿业总监岗位加成
@@ -510,19 +521,22 @@ function Economy._CalcMineOutput(state, mine)
     local workersForMine = (state.workers.hired or 0) / activeMineCount
     local workerBonus = math.floor(workersForMine / BW.workers_per_unit * efficiencyMul)
     -- 事件修正
-    local outputMod = GameState.GetModifierValue(state, "mine_output")
-        + (state.mine_output_base_bonus or 0)
-        + (mine.output_bonus or 0)
+    local outputMod = mine.output_bonus or 0
+    if not isCoalMine then
+        outputMod = outputMod
+            + GameState.GetModifierValue(state, "mine_output")
+            + (state.mine_output_base_bonus or 0)
+    end
 
     local total = (base + outputMod) * levelMul * (1 + posBonus * 0.5) + workerBonus
     -- 科技乘法加成（mine_output_mult）
-    local multBonus = (state.mine_output_mult_bonus or 0)
-        + GameState.GetModifierValue(state, "mine_output_mult")
+    local multBonus = isCoalMine and 0 or ((state.mine_output_mult_bonus or 0)
+        + GameState.GetModifierValue(state, "mine_output_mult"))
     if multBonus ~= 0 then
         total = total * (1 + multBonus)
     end
     -- 煤炭电力加成（玩家分配煤炭给矿山）
-    local coalPowerBonus = state.mine_coal_power_bonus or 0
+    local coalPowerBonus = isCoalMine and 0 or (state.mine_coal_power_bonus or 0)
     if coalPowerBonus > 0 then
         total = total * (1 + coalPowerBonus)
     end
@@ -531,6 +545,7 @@ function Economy._CalcMineOutput(state, mine)
     -- 产能不能无限接近整座矿山储量。按单矿初始储量设置季度开采上限；
     -- 剩余储量封顶仍在 Settle / Estimate 中处理。
     local defaultInitial = mine.id == "main_mine" and 500
+        or (isCoalMine and coalCfg.base_reserve)
         or ((Balance.TRADE or {}).new_mine or {}).base_reserve
         or 1500
     local effectiveInitial = math.max(mine.initial_reserve or 0, mine.reserve or 0, defaultInitial)
@@ -595,30 +610,38 @@ function Economy._GetEstimateImpl(state)
     estGoldPrice = math.floor(estGoldPrice)
 
     local estTotalGoldOut = 0
+    local estCoalMined = 0
     for _, mine in ipairs(state.mines) do
         if mine.active and not mine.migrating then
+            mine.resource = mine.resource or "gold"
             local mineReserve = mine.reserve or 0
             if mineReserve > 0 then
-                local goldOut = Economy._CalcMineOutput(state, mine)
-                goldOut = math.min(goldOut, mineReserve)
-                details.gold_potential_income = details.gold_potential_income + goldOut * estGoldPrice
-                estTotalGoldOut = estTotalGoldOut + goldOut
+                local mineOut = Economy._CalcMineOutput(state, mine)
+                mineOut = math.min(mineOut, mineReserve)
+                if mine.resource == "coal" then
+                    estCoalMined = estCoalMined + mineOut
+                else
+                    details.gold_potential_income = details.gold_potential_income + mineOut * estGoldPrice
+                    estTotalGoldOut = estTotalGoldOut + mineOut
+                end
             end
             -- 铜
-            local region = GameState.GetRegion(state, mine.region_id)
-            local copperOut = math.floor(BM.base_copper_output
-                * (1 + (mine.level - 1) * BM.level_output_bonus))
-            if region and (region.resources.copper_reserve or 0) > 0 then
-                copperOut = math.min(copperOut, region.resources.copper_reserve)
-            else
-                copperOut = 0
-            end
-            details.est_copper_output = (details.est_copper_output or 0) + copperOut
-            local copperPriceMod = GameState.GetModifierValue(state, "copper_price_mod")
-            -- 铜收入仅在手动出售模式开启时计算
-            if state.copper_auto_sell then
-                details.copper_income = details.copper_income
-                    + math.floor(copperOut * BM.copper_price * inflation * (1 + copperPriceMod))
+            if mine.resource ~= "coal" then
+                local region = GameState.GetRegion(state, mine.region_id)
+                local copperOut = math.floor(BM.base_copper_output
+                    * (1 + (mine.level - 1) * BM.level_output_bonus))
+                if region and (region.resources.copper_reserve or 0) > 0 then
+                    copperOut = math.min(copperOut, region.resources.copper_reserve)
+                else
+                    copperOut = 0
+                end
+                details.est_copper_output = (details.est_copper_output or 0) + copperOut
+                local copperPriceMod = GameState.GetModifierValue(state, "copper_price_mod")
+                -- 铜收入仅在手动出售模式开启时计算
+                if state.copper_auto_sell then
+                    details.copper_income = details.copper_income
+                        + math.floor(copperOut * BM.copper_price * inflation * (1 + copperPriceMod))
+                end
             end
         end
     end
@@ -637,7 +660,6 @@ function Economy._GetEstimateImpl(state)
         estCoalPrice = estCoalPrice * (1 + BC.war_price_premium)
     end
     estCoalPrice = math.max(1, math.floor(estCoalPrice))
-    local estCoalMined = 0
     -- 预估也需要矿山等级加成
     local estMaxMineLevel = 1
     for _, mine in ipairs(state.mines) do
@@ -654,7 +676,7 @@ function Economy._GetEstimateImpl(state)
             estCoalMined = estCoalMined + coalOut
         end
     end
-    details.est_coal_output = estCoalMined
+    details.est_coal_output = (details.est_coal_output or 0) + estCoalMined
 
     -- 外国矿预估收入
     details.foreign_gold_income = 0
@@ -830,8 +852,10 @@ end
 function Economy._SyncRegionGoldReserve(state)
     local sums = {}
     for _, mine in ipairs(state.mines) do
-        local rid = mine.region_id or "mine_district"
-        sums[rid] = (sums[rid] or 0) + math.max(0, mine.reserve or 0)
+        if (mine.resource or "gold") == "gold" then
+            local rid = mine.region_id or "mine_district"
+            sums[rid] = (sums[rid] or 0) + math.max(0, mine.reserve or 0)
+        end
     end
     for _, r in ipairs(state.regions) do
         if r.resources.gold_reserve ~= nil then
@@ -847,8 +871,10 @@ function Economy._ProcessMigrations(state)
     for _, mine in ipairs(state.mines) do
         if mine.migrating then
             local target = nil
+            local resource = mine.resource or "gold"
             for _, m in ipairs(state.mines) do
-                if m ~= mine and m.active and not m.migrating and (m.reserve or 0) > 0 then
+                if m ~= mine and (m.resource or "gold") == resource
+                    and m.active and not m.migrating and (m.reserve or 0) > 0 then
                     target = m
                     break
                 end

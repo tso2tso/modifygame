@@ -1326,8 +1326,17 @@ function TurnEngine.FormatReportSummary(report)
 
     -- 经济
     local eco = report.economy
-    table.insert(lines, string.format("采金 %d | 产铜 %d | 收入 %d",
-        eco.gold_mined, eco.copper_mined, eco.total_income))
+    table.insert(lines, string.format("采金 %d | 产铜 %d | 产煤 %d | 收入 %d",
+        eco.gold_mined, eco.copper_mined, eco.coal_mined or 0, eco.total_income))
+    if (eco.coal_mined or 0) > 0 or (eco.coal_factory_consumed or 0) > 0
+        or (eco.coal_industrial_consumed or 0) > 0 or (eco.coal_mine_allocated or 0) > 0
+        or (eco.coal_sold or 0) > 0 then
+        table.insert(lines, string.format("煤炭 明细：工厂-%d 工业-%d 矿山-%d 售出%d",
+            eco.coal_factory_consumed or 0,
+            eco.coal_industrial_consumed or 0,
+            eco.coal_mine_allocated or 0,
+            eco.coal_sold or 0))
+    end
     table.insert(lines, string.format("支出 %d (工资%d+军费%d+补给%d+税%d)",
         eco.total_expense, eco.worker_expense, eco.military_expense,
         eco.supply_expense, eco.tax))

@@ -44,15 +44,16 @@ function TechData.GetAll()
             id   = "a3_electric_mine",
             name = "电气化矿井",
             icon = "💡",
-            desc = "矿井电气化改造，提高安全性并降低事故风险。",
+            desc = "矿井电气化改造，提高安全性并降低事故风险，同时让本地煤矿开发具备可行性。",
             cost = 600, turns = 5,
             requires = "a2_steam_drill",
             era_hint = "1910s",
-            effect_desc = "矿区安全 +1，事故概率 -15%，矿山槽位 +2",
+            effect_desc = "矿区安全 +1，事故概率 -15%，矿山槽位 +2，解锁本地煤矿",
             effects = {
                 { kind = "security_bonus", value = 1 },
                 { kind = "accident_reduction", value = -0.15 },
                 { kind = "mine_slots", value = 2 },
+                { kind = "unlock_local_coal_mine" },
             },
         },
         -- ── 分叉1: 通风 vs 爆破 ──

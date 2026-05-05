@@ -41,6 +41,7 @@ local EFFECT_LABELS = {
     gold_price_bonus  = function(v) return string.format("黄金售价 +%d%%", math.floor(v * 100)) end,
     hire_cost_reduction = function(v) return string.format("雇佣成本 %d%%", math.floor(v * 100)) end,
     mine_slots          = function(v) return string.format("矿山槽位 +%d", v) end,
+    unlock_local_coal_mine = function() return "解锁本地煤矿开发" end,
     prospect_success    = function(v) return string.format("探矿成功率 +%d%%", math.floor(v * 100)) end,
     plunder_loot_mult   = function(v) return string.format("掠夺收益 +%d%%", math.floor(v * 100)) end,
     rep_recovery_bonus  = function(v) return string.format("声誉恢复 +%d/季", v) end,

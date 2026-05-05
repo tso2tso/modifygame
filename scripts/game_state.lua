@@ -54,6 +54,7 @@ function GameState.CreateNew()
         coal_to_mines = 0,         -- 分配给矿山的煤炭数量
         factory_coal_shortage = false,  -- 工厂煤炭短缺标记
         mine_coal_power_bonus = 0, -- 运行时计算的煤炭动力加成
+        local_coal_mine_unlocked = false, -- 科技解锁：本地煤矿开发
 
         -- ============================
         -- 行动点
