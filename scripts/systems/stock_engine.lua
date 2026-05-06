@@ -674,7 +674,7 @@ function StockEngine.GetShortParams(state)
         end
     end
 
-    return { max_pct = maxPct, interest = interest, force_close_pct = forceClose }
+    return { max_pct = maxPct, interest = interest, force_close_pct = forceClose, margin_ratio = SS.margin_ratio }
 end
 
 --- 获取某支股票可做空的最大股数

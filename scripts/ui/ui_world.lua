@@ -2096,11 +2096,15 @@ function WorldPage._CreateTitleBranchTab(state, cat, isActive)
 end
 
 function WorldPage._CreateTitlePortrait(title, isUnlocked, accent, size)
-    size = size or 92
+    local isDetail = (size == "detail")
+    local detailSize = 380
+    local w = isDetail and detailSize or (size or 92)
+    local h = isDetail and detailSize or (size or 92)
+
     if title.portraitImage then
         return UI.Panel {
-            width = size,
-            height = size,
+            width = w,
+            height = h,
             borderRadius = S.radius_card,
             backgroundImage = title.portraitImage,
             backgroundFit = "cover",
@@ -2112,8 +2116,8 @@ function WorldPage._CreateTitlePortrait(title, isUnlocked, accent, size)
     end
 
     return UI.Panel {
-        width = size,
-        height = size,
+        width = isDetail and detailSize or (size or 92),
+        height = isDetail and detailSize or (size or 92),
         borderRadius = S.radius_card,
         backgroundColor = C.bg_inset,
         borderWidth = 1,
@@ -2126,7 +2130,7 @@ function WorldPage._CreateTitlePortrait(title, isUnlocked, accent, size)
         children = {
             UI.Label {
                 text = title.icon or "🏅",
-                fontSize = 36,
+                fontSize = isDetail and 72 or 36,
                 fontColor = isUnlocked and accent or C.text_muted,
                 pointerEvents = "none",
             },
@@ -2165,9 +2169,8 @@ function WorldPage._ShowTitleDetail(state, title, cat)
                         width = "100%",
                         alignItems = "center",
                         justifyContent = "center",
-                        paddingVertical = 10,
                         children = {
-                            WorldPage._CreateTitlePortrait(title, isUnlocked, accent, 280),
+                            WorldPage._CreateTitlePortrait(title, isUnlocked, accent, "detail"),
                         },
                     },
                     UI.Panel {
@@ -2176,9 +2179,9 @@ function WorldPage._ShowTitleDetail(state, title, cat)
                         borderRadius = S.radius_card,
                         borderWidth = 1,
                         borderColor = accent,
-                        padding = S.card_padding,
+                        padding = 7,
                         flexDirection = "column",
-                        gap = 8,
+                        gap = 3,
                         children = {
                             UI.Panel {
                                 width = "100%",

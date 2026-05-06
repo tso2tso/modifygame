@@ -1167,8 +1167,8 @@ function MarketPage._PortfolioCard(state, val, pnl, pnlColor, accent)
     -- 做空仓位区域
     if shortCnt > 0 then
         table.insert(children, UI.Divider { color = C.divider })
-        local shortVal = StockEngine.ShortPositionValue(state)
-        local shortPnlColor = (shortVal.total_pnl or 0) >= 0 and C.accent_green or C.accent_red
+        local shortPnl, shortMargin = StockEngine.ShortPositionValue(state)
+        local shortPnlColor = (shortPnl or 0) >= 0 and C.accent_green or C.accent_red
         table.insert(children, UI.Panel {
             width = "100%",
             flexDirection = "row",
@@ -1183,7 +1183,7 @@ function MarketPage._PortfolioCard(state, val, pnl, pnlColor, accent)
                 },
                 UI.Label {
                     text = string.format("保证金 %.0f  浮盈 %+.0f",
-                        shortVal.total_margin or 0, shortVal.total_pnl or 0),
+                        shortMargin or 0, shortPnl or 0),
                     fontSize = F.body_minor,
                     fontWeight = "bold",
                     fontColor = shortPnlColor,
@@ -1452,7 +1452,7 @@ function MarketPage._OpenTradeModal(state, stock, accent)
 
     tradeModal_ = UI.Modal {
         title = stock.name,
-        size = "sm",
+        size = "md",
         closeOnOverlay = true,
         closeOnEscape = true,
         showCloseButton = true,
@@ -1469,7 +1469,13 @@ function MarketPage._OpenTradeModal(state, stock, accent)
     local up = (stock.change_pct or 0) >= 0
     local changeColor = up and C.accent_green or C.accent_red
 
-    local content = UI.Panel {
+    local content = UI.ScrollView {
+        width = "100%",
+        flexGrow = 1,
+        flexBasis = 0,
+        scrollY = true,
+        showScrollbar = true,
+        children = { UI.Panel {
         width = "100%",
         flexDirection = "column",
         gap = 10,
@@ -1600,6 +1606,7 @@ function MarketPage._OpenTradeModal(state, stock, accent)
             -- 做空/平仓（需 b7_short_selling 科技）
             MarketPage._ShortSection(state, stock, accent),
         },
+    } },
     }
     tradeModal_:AddContent(content)
     -- Modal 必须加入 UI 树才能渲染
