@@ -69,6 +69,10 @@ function MilitaryPage._BuildContent(state)
     -- 招募费用
     local recruitCost = math.floor(BMI.recruit_cost * inflation
         * (1 - GameState.GetInfluenceRecruitDiscount(state)))
+    local moraleBoostCost = math.floor((BMI.morale_boost_cost_per_guard or 40)
+        * (mil.guards or 0) * inflation)
+    local moraleBoostAP = BMI.morale_boost_ap or 1
+    local moraleBoostAmount = BMI.morale_boost_amount or 6
 
     -- 编队信息
     local squads = mil.squads or {}
@@ -197,6 +201,13 @@ function MilitaryPage._BuildContent(state)
                         fontColor = (state.flags and state.flags.at_war) and C.accent_red or C.text_muted,
                         whiteSpace = "normal",
                     },
+                    UI.Label {
+                        text = string.format("可通过犒赏军心花费现金恢复士气（+%d）。",
+                            moraleBoostAmount),
+                        fontSize = F.label,
+                        fontColor = C.text_muted,
+                        whiteSpace = "normal",
+                    },
                 },
             },
 
@@ -266,6 +277,25 @@ function MilitaryPage._BuildContent(state)
                         onClick = Config.ClickGuard(function(self)
                             self.props.disabled = true
                             MilitaryPage._OnResupply(20)
+                        end),
+                    },
+                    UI.Button {
+                        text = string.format("犒赏军心 +%d (💰%d ⚡%d)",
+                            moraleBoostAmount, moraleBoostCost, moraleBoostAP),
+                        fontSize = F.body_minor,
+                        height = S.btn_small_height,
+                        width = "100%",
+                        variant = (mil.morale < 100
+                                and state.cash >= moraleBoostCost
+                                and (state.ap.current + (state.ap.temp or 0)) >= moraleBoostAP)
+                            and "primary" or "outlined",
+                        disabled = mil.morale >= 100
+                            or state.cash < moraleBoostCost
+                            or (state.ap.current + (state.ap.temp or 0)) < moraleBoostAP,
+                        borderRadius = S.radius_btn,
+                        onClick = Config.ClickGuard(function(self)
+                            self.props.disabled = true
+                            MilitaryPage._OnBoostMorale()
                         end),
                     },
                 },
@@ -570,6 +600,34 @@ function MilitaryPage._OnResupply(amount)
     stateRef_.military.supply = stateRef_.military.supply + amount
     GameState.AddLog(stateRef_, string.format("补充补给 %d，花费 %d", amount, cost))
     UI.Toast.Show(string.format("补给 +%d", amount), { variant = "success", duration = 1.5 })
+    if onStateChanged_ then onStateChanged_() end
+end
+
+--- 犒赏军心
+function MilitaryPage._OnBoostMorale()
+    if not stateRef_ then return end
+    local amount = BMI.morale_boost_amount or 6
+    local cost = math.floor((BMI.morale_boost_cost_per_guard or 40)
+        * (stateRef_.military.guards or 0) * GameState.GetInflationFactor(stateRef_))
+    local apCost = BMI.morale_boost_ap or 1
+
+    if stateRef_.military.morale >= 100 then
+        UI.Toast.Show("士气已满", { variant = "warning", duration = 1.5 })
+        return
+    end
+    if stateRef_.cash < cost then
+        UI.Toast.Show("资金不足", { variant = "error", duration = 1.5 }); return
+    end
+    if not GameState.SpendAP(stateRef_, apCost) then
+        UI.Toast.Show("行动点不足", { variant = "error", duration = 1.5 }); return
+    end
+
+    local before = stateRef_.military.morale
+    stateRef_.cash = stateRef_.cash - cost
+    stateRef_.military.morale = math.min(100, before + amount)
+    local gained = stateRef_.military.morale - before
+    GameState.AddLog(stateRef_, string.format("犒赏军心，花费 %d，护卫士气 +%d", cost, gained))
+    UI.Toast.Show(string.format("士气 +%d", gained), { variant = "success", duration = 1.5 })
     if onStateChanged_ then onStateChanged_() end
 end
 

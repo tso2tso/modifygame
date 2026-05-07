@@ -127,6 +127,9 @@ Balance.MILITARY = {
     -- 士气
     base_morale      = 70,
     morale_decay     = -2,    -- 每季自然衰减
+    morale_boost_cost_per_guard = 40, -- 犒赏军心：每名护卫基础现金消耗
+    morale_boost_ap   = 1,    -- 犒赏军心：AP 消耗
+    morale_boost_amount = 6,  -- 犒赏军心：士气恢复量
     -- 注意：战斗胜负士气变化使用 Balance.COMBAT.win_morale / lose_morale
 }
 
@@ -506,7 +509,7 @@ Balance.COMBAT = {
     player_attack_ap    = 2,     -- 主动突袭 AI 消耗 AP
     player_attack_cash  = 180,   -- 主动突袭的情报/补给准备费
     win_morale          = 10,
-    lose_morale         = -18,
+    lose_morale         = -14,
     lose_guards_ratio   = 0.30,  -- 战败损失 30% 护卫
     loot_ratio          = 0.25,  -- 战胜抢夺 AI 25% 现金
 }
