@@ -156,16 +156,20 @@ function ForeignOps.CanExploit(state, tileId)
     if fo.active[tileId] then
         return false, "已在开采中"
     end
-    -- 检查该国是否被占领
+    -- 检查该国是否被占领（sovereign 变更 = 被某方占领）
     local countryId = getTileCountry(state, tileId)
+    local isOccupiedByPlayer = false
     if countryId and state.europe and state.europe[countryId] then
         local country = state.europe[countryId]
         if country.sovereign == country.original then
             return false, "该国未被占领"
         end
+        -- 玩家亲自占领（sovereign == "bosnia"）可跳过合作分检查
+        isOccupiedByPlayer = (country.sovereign == "bosnia")
     end
-    -- 合作分
-    if (state.collaboration_score or 0) < BF.exploit_min_collab then
+    -- 合作分（玩家已占领的国家免检）
+    if not isOccupiedByPlayer
+       and (state.collaboration_score or 0) < BF.exploit_min_collab then
         return false, "合作分不足（需要≥" .. BF.exploit_min_collab .. "）"
     end
     -- 并发上限

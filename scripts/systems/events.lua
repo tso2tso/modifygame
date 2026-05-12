@@ -85,8 +85,9 @@ function Events.CheckEvents(state)
                         effectiveChance = effectiveChance * (1 + modVal)
                     end
                 end
-                -- 前两年（1904-1905）降低随机事件概率，给玩家缓冲期
-                if state.year and state.year <= 1905 then
+                -- 前期缓冲：early_shield_years 之前降低随机事件概率
+                local shieldYear = diff.early_shield_years or 1905
+                if state.year and state.year <= shieldYear then
                     effectiveChance = effectiveChance * 0.4
                 end
                 if math.random() < effectiveChance then
@@ -114,7 +115,7 @@ function Events.CheckEvents(state)
         if Events._CheckTrigger(state, event) then
             local cd = state.random_cooldowns[event.id] or 0
             if cd <= 0 then
-                local effectiveChance = (event.chance or 0.05) * diff.event_chance_mult
+                local effectiveChance = (event.chance or 0.05) * (diff.disaster_chance_mult or diff.event_chance_mult)
                 -- 灾害自带的概率修正
                 if event.chance_modifier then
                     local modVal = GameState.GetModifierValue(state, event.chance_modifier)
@@ -163,7 +164,7 @@ function Events._CheckTrigger(state, event)
     if trigger.max_security then
         local mineRegion = GameState.GetRegion(state, "mine_district")
         local effectiveSecurity = mineRegion and mineRegion.security or 0
-        if mineRegion and GameState.HasInfluenceThreshold(state, 30) then
+        if mineRegion and GameState.HasControlMilestone(state, 80) then
             effectiveSecurity = effectiveSecurity + 1
         end
         if mineRegion and effectiveSecurity > trigger.max_security then
@@ -234,9 +235,9 @@ function Events._CheckTrigger(state, event)
         end
     end
 
-    -- 最低影响力（使用所有地区总和）
-    if trigger.min_influence then
-        if GameState.CalcTotalInfluence(state) < trigger.min_influence then
+    -- 最低控制度（使用所有地区总和）
+    if trigger.min_control then
+        if GameState.CalcTotalControl(state) < trigger.min_control then
             return false
         end
     end
@@ -257,6 +258,13 @@ function Events._CheckTrigger(state, event)
             if researched[tid] then anyMet = true; break end
         end
         if not anyMet then return false end
+    end
+
+    -- 自定义触发条件（用于远征制裁等复杂逻辑）
+    if trigger.custom then
+        if not trigger.custom(state) then
+            return false
+        end
     end
 
     return true
@@ -633,7 +641,7 @@ function Events.ApplyOption(state, event, optionIndex)
         state.modifiers = kept
     end
 
-    -- 6. 工人士气修正（立即应用）
+    -- 6. 劳工满意度修正（立即应用）
     local moraleMod = GameState.GetModifierValue(state, "worker_morale")
     if moraleMod ~= 0 then
         state.workers.morale = math.max(0, math.min(100,
@@ -647,7 +655,7 @@ function Events.ApplyOption(state, event, optionIndex)
         state.modifiers = kept
     end
 
-    -- 6.1 护卫士气修正（立即应用）
+    -- 6.1 战意修正（立即应用）
     local guardMoraleMod = GameState.GetModifierValue(state, "guard_morale")
     if guardMoraleMod ~= 0 then
         state.military.morale = math.max(0, math.min(100,

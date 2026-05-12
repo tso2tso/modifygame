@@ -44,7 +44,7 @@ function Dashboard.RefreshDynamic(root, state)
     -- 1. 招募按钮：更新 disabled + text
     local BW = Balance.WORKERS
     local hireCost = math.floor(BW.hire_cost * GameState.GetLaborCostFactor(state)
-        * (1 - GameState.GetInfluenceRecruitDiscount(state)))
+        * (1 - GameState.GetControlRecruitDiscount(state)))
     local hireBtn = root:FindById("focusHireBtn")
     if hireBtn then
         local canHire = state.cash >= hireCost * 5 and (state.ap.current + (state.ap.temp or 0)) >= 1
@@ -651,7 +651,7 @@ function Dashboard._FocusCard(state, mine, era)
     -- 雇佣费用
     local BW = Balance.WORKERS
     local hireCost = math.floor(BW.hire_cost * GameState.GetLaborCostFactor(state)
-        * (1 - GameState.GetInfluenceRecruitDiscount(state)))
+        * (1 - GameState.GetControlRecruitDiscount(state)))
     local canHire = state.cash >= hireCost * 5 and (state.ap.current + (state.ap.temp or 0)) >= 1
 
     return UI.Panel {
@@ -1054,10 +1054,7 @@ function Dashboard._SeasonOverview(state)
     local debtRatio = state.cash > 0
         and math.floor(estExpense / state.cash * 100) or 0
     local publicSentiment = state.workers.morale
-    local influence = 0
-    for _, r in ipairs(state.regions) do
-        influence = influence + (r.influence or 0)
-    end
+    local totalControl = GameState.CalcTotalControl(state)
 
     local cashFlowColor = cashFlow >= 0 and C.accent_green or C.accent_red
     local debtColor = debtRatio > 30 and C.accent_amber or C.text_primary
@@ -1115,7 +1112,7 @@ function Dashboard._SeasonOverview(state)
                                 (cashFlow >= 0 and "+" or "") .. Config.FormatNumber(cashFlow), cashFlowColor),
                             Dashboard._OverviewRow("📊", "负债率", debtRatio .. "%", debtColor),
                             Dashboard._OverviewRow("❤️", "民心", tostring(publicSentiment), sentimentColor),
-                            Dashboard._OverviewRow("🌐", "影响力", tostring(influence), C.text_primary),
+                            Dashboard._OverviewRow("🌐", "控制度", tostring(totalControl), C.text_primary),
                         },
                     },
                 },

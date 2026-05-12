@@ -270,7 +270,6 @@ function EventsData.GetFixedEvents()
                         cash = -80,
                         inflation_delta = 0.015,
                         modifiers = {
-                            { target = "supply_reserve", value = 20, duration = 0 },
                             { target = "transport_risk", value = -0.05, duration = 4 },
                             { target = "gold_price_mod", value = 0.15, duration = 4 },
                             { target = "coal_price_mod", value = 0.25, duration = 4 },
@@ -1421,7 +1420,6 @@ function EventsData.GetFixedEvents()
                         inflation_drift_duration = 6,
                         modifiers = {
                             { target = "gold_price_mod", value = 0.25, duration = 8 },
-                            { target = "supply_reserve", value = 30, duration = 0 },
                         },
                     },
                 },
@@ -1532,7 +1530,6 @@ function EventsData.GetFixedEvents()
                         inflation_drift_duration = 8,
                         security_bonus = 1,
                         modifiers = {
-                            { target = "supply_reserve", value = 40, duration = 0 },
                             { target = "gold_price_mod", value = 0.30, duration = 8 },
                             { target = "coal_price_mod", value = 0.45, duration = 8 },
                         },
@@ -1711,7 +1708,6 @@ function EventsData.GetFixedEvents()
                         inflation_delta = 0.08,
                         security_bonus = -1,
                         modifiers = {
-                            { target = "supply_reserve", value = 25, duration = 0 },
                             { target = "military_relation", value = 8, duration = 0 },
                             { target = "transport_risk", value = 0.15, duration = 4 },
                         },
@@ -2033,7 +2029,7 @@ function EventsData.GetFixedEvents()
                         inflation_delta = -0.02,
                         modifiers = {
                             { target = "tech_bonus", value = 12, duration = 12 },
-                            { target = "foreign_influence", value = 15, duration = 0 },
+                            { target = "foreign_control", value = 15, duration = 0 },
                             { target = "mine_output_mult", value = 0.10, duration = 8 },
                         },
                     },
@@ -2145,7 +2141,7 @@ function EventsData.GetFixedEvents()
                     desc = "借制度之名行揽权之实，腐败风险极高",
                     effects = {
                         modifiers = {
-                            { target = "total_influence", value = 15, duration = 0 },
+                            { target = "total_control", value = 15, duration = 0 },
                             { target = "corruption_risk", value = 25, duration = 12 },
                             { target = "political_standing", value = -5, duration = 0 },
                         },
@@ -2211,7 +2207,7 @@ function EventsData.GetFixedEvents()
                             { target = "political_standing", value = 30, duration = 0 },
                             { target = "public_support", value = 20, duration = 0 },
                             { target = "legitimacy", value = 25, duration = 0 },
-                            { target = "total_influence", value = 20, duration = 0 },
+                            { target = "total_control", value = 20, duration = 0 },
                         },
                     },
                 },
@@ -2943,7 +2939,7 @@ function EventsData.GetRandomEventTemplates()
             icon = "🤝",
             trigger = {
                 min_reputation = -35,
-                min_influence = 25,
+                min_control = 25,
                 min_year = 1915,
                 cooldown = 6,
             },
@@ -3069,7 +3065,7 @@ function EventsData.GetRandomEventTemplates()
             priority = EventsData.PRIORITY.MINOR,
             icon = "🎩",
             trigger = {
-                min_influence = 15,
+                min_control = 15,
                 min_year = 1908,
                 cooldown = 6,
             },
@@ -3148,7 +3144,7 @@ function EventsData.GetRandomEventTemplates()
             priority = EventsData.PRIORITY.MINOR,
             icon = "🕊️",
             trigger = {
-                min_influence = 20,
+                min_control = 20,
                 min_year = 1910,
                 cooldown = 6,
             },
@@ -3197,7 +3193,7 @@ function EventsData.GetRandomEventTemplates()
             options = {
                 {
                     text = "出资赞助庆典",
-                    desc = "花一些钱让庆典更热闹，工人士气大振",
+                    desc = "花一些钱让庆典更热闹，劳工满意度大幅提升",
                     effects = {
                         cash = -100,
                         modifiers = {
@@ -3370,7 +3366,7 @@ function EventsData.GetRandomEventTemplates()
             icon = "🏴",
             trigger = {
                 requires_tech_any = { "d4a_nationalism", "d4b_internationalism" },
-                min_influence = 50,
+                min_control = 50,
                 cooldown = 6,
             },
             chance = 0.08,
@@ -3396,6 +3392,137 @@ function EventsData.GetRandomEventTemplates()
             public_message = "前线传来消息，战事即将出现重大转折。军工股闻声大涨，航运股承压。",
             hint_message = "💡 顾问提示：前线消息真假难辨。",
             intel_message = "⚠ 顾问密报：经核实此为虚假情报，军工股短暂上涨后将回落，航运实际影响有限。",
+        },
+
+        -- ================================================================
+        -- 远征制裁：侵略值达到制裁阈值时触发
+        -- 条件：远征已解锁 + 侵略值 >= 制裁阈值 + 未在制裁中
+        -- ================================================================
+        {
+            id = "expedition_sanction",
+            title = "列强联合制裁",
+            type = "crisis",
+            priority = EventsData.PRIORITY.MAIN,
+            icon = "⚖",
+            trigger = {
+                min_year = 1910,
+                custom = function(state)
+                    if not state.unlocked_features or not state.unlocked_features["expedition"] then
+                        return false
+                    end
+                    local agg = state.expeditions and state.expeditions.aggression_counter or 0
+                    local Balance = require("data.balance")
+                    return agg >= Balance.EXPEDITION.sanction_threshold
+                        and not (state.expeditions.under_sanction)
+                end,
+                cooldown = 8,
+            },
+            chance = 1.0,
+            desc = "你在巴尔干的军事行动引起了列强关注。奥匈帝国和沙俄联合向波斯尼亚施压，要求你停止一切跨境武装活动，否则将面临严厉的经济制裁。",
+            options = {
+                {
+                    text = "接受制裁，暂停远征行动",
+                    desc = "声誉恢复，但远征被封锁4季度，侵略值缓慢下降",
+                    effects = {
+                        custom = function(state)
+                            state.expeditions.under_sanction = true
+                            state.expeditions.sanction_remaining = require("data.balance").EXPEDITION.sanction_duration
+                            state.expeditions.aggression_counter = math.max(0,
+                                state.expeditions.aggression_counter - 2)
+                            local GameState = require("game_state")
+                            GameState.AddLog(state, "⚖ 接受列强制裁，远征行动暂停"
+                                .. state.expeditions.sanction_remaining .. "季度")
+                        end,
+                    },
+                },
+                {
+                    text = "无视制裁，继续扩张",
+                    desc = "远征继续，但贸易收入-30%持续6季度，侵略值+1",
+                    effects = {
+                        custom = function(state)
+                            state.expeditions.aggression_counter =
+                                state.expeditions.aggression_counter + 1
+                            local GameState = require("game_state")
+                            GameState.AddModifier(state, "sanction_trade_penalty",
+                                "trade_income_mult", -0.30, 6)
+                            GameState.AddLog(state, "⚖ 无视列强制裁！贸易收入-30%持续6季度")
+                        end,
+                    },
+                },
+            },
+        },
+
+        -- ================================================================
+        -- 远征武装干预：侵略值达到干预阈值时触发
+        -- 条件：远征已解锁 + 侵略值 >= 干预阈值（比制裁更严重）
+        -- ================================================================
+        {
+            id = "expedition_intervention",
+            title = "列强武装干预",
+            type = "crisis",
+            priority = EventsData.PRIORITY.MAIN,
+            icon = "⚔",
+            trigger = {
+                min_year = 1910,
+                custom = function(state)
+                    if not state.unlocked_features or not state.unlocked_features["expedition"] then
+                        return false
+                    end
+                    local agg = state.expeditions and state.expeditions.aggression_counter or 0
+                    local Balance = require("data.balance")
+                    return agg >= Balance.EXPEDITION.intervention_threshold
+                end,
+                cooldown = 12,
+            },
+            chance = 1.0,
+            desc = "你在巴尔干的持续军事扩张已经触怒了所有列强。奥匈帝国宣布派遣正规军进入波斯尼亚，联合多国对你的武装力量发起围剿。这是一场生死存亡的危机！",
+            options = {
+                {
+                    text = "全面撤退，放弃部分占领地",
+                    desc = "失去一半占领国，侵略值清零，避免直接军事冲突",
+                    effects = {
+                        custom = function(state)
+                            local occ = state.expeditions.occupied_countries
+                            local releaseCount = math.ceil(#occ / 2)
+                            for i = 1, releaseCount do
+                                local released = table.remove(occ, #occ)
+                                if released then
+                                    local EuropeData = require("data.europe_data")
+                                    EuropeData.ChangeSovereignty(state, released.country_id, "independent")
+                                end
+                            end
+                            state.expeditions.aggression_counter = 0
+                            state.expeditions.under_sanction = true
+                            state.expeditions.sanction_remaining = 6
+                            local GameState = require("game_state")
+                            GameState.AddLog(state, "⚔ 列强武装干预！被迫放弃"
+                                .. releaseCount .. "个占领地，侵略值清零")
+                        end,
+                    },
+                },
+                {
+                    text = "誓死抵抗列强干预",
+                    desc = "一场大战不可避免——将损失大量护卫和现金，但保住占领地",
+                    effects = {
+                        custom = function(state)
+                            local m = state.military
+                            local guardLoss = math.ceil(m.guards * 0.3)
+                            m.guards = math.max(0, m.guards - guardLoss)
+                            local Equipment = require("systems.equipment")
+                            Equipment.OnGuardsLost(state, guardLoss)
+                            local cashLoss = math.floor(state.cash * 0.3)
+                            state.cash = math.max(0, state.cash - cashLoss)
+                            m.morale = math.max(0, m.morale - 25)
+                            state.expeditions.aggression_counter =
+                                math.max(0, state.expeditions.aggression_counter - 4)
+                            local GameState = require("game_state")
+                            GameState.AddLog(state, string.format(
+                                "⚔ 抵抗列强干预！损失%d护卫、%d克朗，士气-25",
+                                guardLoss, cashLoss))
+                        end,
+                    },
+                },
+            },
         },
     }
 end
@@ -3683,6 +3810,8 @@ function EventsData.GetDisasterEventTemplates()
                 },
             },
         },
+
+
     }
 end
 

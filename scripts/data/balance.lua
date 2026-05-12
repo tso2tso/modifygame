@@ -121,9 +121,6 @@ Balance.MILITARY = {
     -- 战斗力计算
     guard_base_power = 1.0,   -- 每名护卫基础战力
     morale_multiplier = 0.01, -- 士气对战力的乘数 (70 士气 = ×0.7)
-    -- 补给
-    supply_per_guard = 3,     -- 每名护卫每季消耗补给
-    supply_cost      = 2,     -- 每单位补给价格
     -- 士气
     base_morale      = 70,
     morale_decay     = -2,    -- 每季自然衰减
@@ -138,8 +135,8 @@ Balance.MILITARY = {
 -- ============================================================================
 Balance.ECONOMY = {
     -- 税率（基础，受事件修正）
-    base_tax_rate    = 0.03,  -- 3% 财富税（降低开局压力，防止新手 6 季破产）
-    war_tax_rate     = 0.12,  -- 战时税率
+    base_tax_rate    = 0.08,  -- 8% 收入税（改为按季度总收入征税，原 3% 财产税）
+    war_tax_rate     = 0.25,  -- 战时收入税率（原 12% 财产税）
     -- 利率
     loan_interest    = 0.06,  -- 贷款季利率
     -- 维护费
@@ -162,14 +159,13 @@ Balance.VICTORY = {
         ai_military_power_multiplier = 0.12,
         dominance_requires_positive_track = true,
     },
-    -- 经济胜利：每季增量 = (floor(cash/2000) + min(floor(gold*0.3), gold_vp_cap) + floor(total_control/15) + floor(total_influence/50)) * war_mod
+    -- 经济胜利：每季增量 = (floor(cash/2000) + min(floor(gold*0.3), gold_vp_cap) + floor(total_control/15)) * war_mod
     economic = {
         threshold       = 1600,  -- 经济胜利点阈值（2000→1600：延长时间线后适度降低）
         cash_divisor    = 2000,  -- 每 2000 现金 +1 点（3000→2000：让现金积累更有效）
         gold_multiplier = 0.3,   -- 每黄金 +0.3 点（0.5→0.3：防止囤金碾压一切策略）
-        gold_vp_cap     = 10,    -- 黄金 VP 贡献上限 10/季（约需 34 金才封顶）
+        gold_vp_cap     = 40,    -- 黄金 VP 贡献上限 40/季（让黄金策略成为可行路线）
         control_divisor = 15,    -- 每 15 总控制度 +1 点（20→15：区域控制更有价值）
-        influence_divisor = 50,  -- 每 50 总影响力 +1 点（60→50：文化投入更有回报）
         war_mod         = 0.6,   -- 战时乘数（战争拖慢经济胜利）
         gate_year       = 1930,  -- 章节门控：经济线要到 1930 年后才结算
         -- 快照验证：达到阈值瞬间必须满足以下条件，否则视为无效
@@ -192,6 +188,9 @@ Balance.VICTORY = {
         equip_score_cap         = 4,    -- 装备分上限
         equip_tier_multiplier   = 0.8,  -- 每 (tier-1) × 0.8
         veterancy_score_cap     = 2,    -- 老兵分上限（王牌编队数 × 1）
+        -- 威慑分：维持军力但不打仗也有回报（保守军事路线补偿）
+        deterrence_guard_min    = 15,   -- 威慑分所需最低卫队数
+        deterrence_bonus        = 1,    -- 每季威慑 VP
         -- 快照验证
         snapshot = {
             min_guards        = 25,     -- 降低快照门槛
@@ -199,24 +198,34 @@ Balance.VICTORY = {
             min_total_control = 100,
         },
     },
+    -- 统治胜利：征服路线的终极目标
+    domination = {
+        type = "domination",
+        label = "巴尔干霸主",
+        desc = "占领巴尔干半岛全部小国（黑山、塞尔维亚、保加利亚、罗马尼亚、希腊）",
+        required_countries = { "montenegro", "serbia", "bulgaria", "romania", "greece" },
+        min_total_control = 100,
+    },
+    -- 全面统治：征服所有可达国家
+    world_domination = {
+        type = "world_domination",
+        label = "全面统治",
+        desc = "占领所有可达国家",
+        required_countries = "all_reachable",  -- 动态计算
+        min_total_control = 100,
+    },
 }
 
 -- ============================================================================
--- 影响力 (Influence) 系统
+-- 控制度里程碑（总控制度 = 各地区 control 之和，最大 500）
 -- ============================================================================
-Balance.INFLUENCE = {
-    decay_per_season = -1,   -- 每季自然衰减 -1（除非本季执行了文化行动）
-    -- 行动消耗
-    cost_treaty      = 30,   -- 签订协议消耗影响力
-    -- cost_bribe 已移除（v2 简化）
-    cost_infiltrate  = 20,   -- 政治渗透消耗影响力
-    -- 阈值被动效果
+Balance.CONTROL_MILESTONES = {
     thresholds = {
-        { min = 30,  label = "地方认可",     desc = "地区安全 +1" },
-        { min = 70,  label = "舆论优势",     desc = "招募费 -10%" },
-        { min = 120, label = "政治联盟",     desc = "AP 上限 +1" },
-        { min = 200, label = "文化霸权",     desc = "科技研发 -1 季" },
-        { min = 300, label = "不朽影响力",   desc = "经济/军事双线各 +5/季" },
+        { min = 80,  label = "地方认可",     desc = "地区安全 +1" },
+        { min = 150, label = "舆论优势",     desc = "招募费 -10%" },
+        { min = 200, label = "政治联盟",     desc = "AP 上限 +1" },
+        { min = 300, label = "区域霸权",     desc = "科技研发 -1 季" },
+        { min = 400, label = "绝对统治",     desc = "经济/军事双线各 +5/季" },
     },
 }
 
@@ -231,6 +240,7 @@ Balance.AI = {
         aggression       = 0.3,   -- 攻击倾向
         expand_threshold = 600,   -- 资产超过此值开始扩张
         cash_cap         = 8000,  -- 现金上限（防止复利爆炸）
+        power_decay_rate = 0.01,  -- 每季 power 内耗衰减 1%（防雪球）
     },
     -- 外国资本
     foreign_capital = {
@@ -240,6 +250,7 @@ Balance.AI = {
         expand_threshold = 1000,
         war_flee_threshold = 0.6, -- 战争风险 > 0.6 时撤资
         cash_cap         = 12000, -- 现金上限（外资更富裕但也有上限）
+        power_decay_rate = 0.015, -- 每季 power 内耗衰减 1.5%（防雪球）
     },
     -- 时代递增：AI 上限随年代提升，避免 1912 年后完全静态
     era_scaling = {
@@ -500,6 +511,293 @@ Balance.TRADE = {
 }
 
 -- ============================================================================
+-- 跨国贸易（Phase 3：幕后执政解锁后激活）
+-- ============================================================================
+Balance.FOREIGN_TRADE = {
+    -- 订单生成
+    peace_order_count = 3,           -- 和平时期每季固定生成订单数（从1提升到3，增加贸易可玩性）
+    war_order_base = 2,              -- 战时基础订单数
+    war_order_per_belligerent = 1,   -- 每个交战大国额外 +1 订单
+    war_order_cap = 5,               -- 战时订单上限
+    order_pool_max = 6,              -- 订单池最大容量（超出的丢弃最旧的）
+    accept_ap_cost = 1,              -- 接受订单消耗 AP
+    ship_ap_cost = 1,                -- 发货消耗 AP
+    quick_fulfill_surcharge = 0.20,  -- 一键履约运费溢价 20%（省 AP 但多花运费）
+
+    -- 路线安全度修正
+    safety_war_penalty = -0.20,      -- 途经国家处于战争时安全度 -20%
+    safety_occupied_penalty = -0.15, -- 途经国家被占领时 -15%
+    safety_diplo_bonus_max = 0.20,   -- 外交分数最大加成 +20%
+    safety_escort_bonus = 0.20,      -- 护送小队基础加成
+    safety_escort_vet_bonus = 0.05,  -- 护送小队每级老兵额外 +5%
+
+    -- 交付结算
+    delivery_turns = 1,              -- 发货后需运输的季度数（近距离1，中距离2，远距离3）
+    delivery_distance_turns = { 1, 1, 2, 3 },  -- 按 distance 索引（1跳=1季, 2跳=1季, 3跳=2季, 4跳=3季）
+    failure_loss_ratio = 0.5,        -- 运输失败时损失已分配装备的比例
+    -- (贸易信誉已合并到统一声誉系统 Balance.REPUTATION)
+
+    -- 外交效果
+    diplo_success_collab = 5,        -- 成功交付 → 买家合作度 +5
+    diplo_success_enemy = -3,        -- 成功交付 → 买家敌人合作度 -3
+    diplo_fail_collab = -3,          -- 交付失败 → 买家合作度 -3
+
+    -- 通胀乘数
+    inflation_price_exponent = 0.5,  -- 订单报酬随通胀增长的指数
+}
+
+-- ============================================================================
+-- 好感度自然衰减（大国 attitude_to_player 每季向0靠拢）
+-- ============================================================================
+Balance.ATTITUDE_DECAY = {
+    rate          = 0.05,   -- 每季衰减5%（向0靠拢）
+    threshold     = 5,      -- 绝对值≤5时停止衰减（微弱关系持久）
+    cap_per_turn  = 3,      -- 单季最大衰减量（防止极高好感快速崩塌）
+}
+
+-- ============================================================================
+-- 远征（跨国军事行动）
+-- ============================================================================
+Balance.EXPEDITION = {
+    -- HP系统
+    hp_per_stability       = 7,      -- 国家HP = stability × 此值（多回合远征需更厚HP池）
+    hp_regen_ratio         = 0.15,   -- 每季恢复 = stability × 此值（远征期间恢复减弱）
+    regen_when_raided_mult = 0,      -- 有活跃远征时完全不恢复
+    sovereign_regen_mult   = 1.5,    -- 被大国保护的小国恢复 ×1.5
+    major_damage_reduction = 0.7,    -- 大国伤害减免（受到 70% 伤害）
+    political_hp_ratio     = 5,      -- 大国政治HP = stability × 此值
+
+    -- 远征发起消耗
+    expedition_ap_cost           = 2,    -- 发起远征消耗AP
+    expedition_cost_per_soldier  = 40,   -- 每名士兵40₿（受通胀影响）
+    expedition_reinforce_ap      = 1,    -- 增援消耗AP
+    expedition_withdraw_ap       = 1,    -- 撤退消耗AP（无金钱消耗）
+
+    -- 每回合伤害公式参数
+    expedition_base_damage_per_turn = 8,    -- 基础每回合伤害
+    expedition_defender_mult        = 2,    -- 防御基数 = stability × 此值
+    expedition_power_scaling        = 0.6,  -- 兵力差距的缩放指数
+
+    -- 完成时结算
+    expedition_success_base         = 0.70,  -- 基础成功率70%
+    expedition_success_power_weight = 0.20,  -- 兵力优势每100%加20%成功率
+    expedition_success_cap          = 0.95,  -- 成功率上限95%
+    expedition_success_floor        = 0.30,  -- 成功率下限30%
+    expedition_loss_base_ratio      = 0.08,  -- 基础损失率8%（部署兵力的比例）
+    expedition_loss_power_reduction = 0.03,  -- 兵力优势每100%减少3%损失
+    expedition_loss_min_ratio       = 0.02,  -- 最低损失率2%
+    expedition_fail_loss_mult       = 1.5,   -- 失败时损失倍率
+    expedition_fail_hp_restore      = 0.3,   -- 失败后目标HP恢复到最大值的此比例
+
+    -- 掠夺（远征成功时）
+    expedition_loot_per_stability   = 80,    -- 每点stability的掠夺基数
+
+    -- 支援作战（保持不变）
+    support_ap_cost        = 2,      -- 支援作战AP
+    support_cash_cost      = 300,    -- 支援作战现金
+    support_reward_min     = 500,    -- 佣兵报酬最小值
+    support_reward_max     = 2000,   -- 佣兵报酬最大值
+    support_base_success   = 0.65,   -- 支援基础成功率
+    support_power_factor   = 0.002,  -- 战力影响系数
+
+    -- 占领行动
+    occupy_ap_cost         = 2,      -- 自行占领AP
+    occupy_cash_cost       = 300,    -- 自行占领现金
+    give_to_faction_ap     = 1,      -- 交给势力AP
+    give_to_faction_relation = 15,   -- 交给势力关系加成
+
+    -- 占领收入/维护
+    occupy_income_minor    = 200,    -- 小国/中等国家每季收入
+    occupy_income_major    = 350,    -- 大国每季收入
+    occupy_maintenance_minor = 120,  -- 小国维护费
+    occupy_maintenance_major = 200,  -- 大国维护费
+
+    -- 侵略制裁
+    aggression_per_expedition = 1,   -- 每次发起远征增加侵略度
+    aggression_per_occupy  = 2,      -- 自行占领增加侵略度
+    aggression_per_give    = 1,      -- 交给势力增加侵略度（比自占低）
+    aggression_decay       = 0.5,    -- 每季自然衰减
+    sanction_threshold     = 5,      -- 制裁触发阈值
+    intervention_threshold = 8,      -- 军事干预触发阈值
+    sanction_duration      = 4,      -- 制裁持续回合
+
+    -- 征服难度系数
+    difficulty_tiers = {
+        { max_count = 2,  mod = 1.00 },  -- 前2个国家正常难度
+        { max_count = 5,  mod = 1.15 },  -- 3-5个 +15%
+        { max_count = 10, mod = 1.35 },  -- 6-10个 +35%
+        { max_count = 99, mod = 1.60 },  -- 11+ +60%
+    },
+
+    -- 前进基地加成
+    forward_base_attack_bonus = 0.20,  -- 邻接已占领国家时攻击力+20%
+}
+
+-- ============================================================================
+-- 商业远征（经济路线的深度渗透玩法）
+-- 前置：称号系统解锁"商业大亨"后激活
+-- ============================================================================
+Balance.VENTURE = {
+    -- 市场壁垒（类似远征HP，基于目标国stability）
+    barrier_per_stability      = 2,      -- 市场壁垒 = stability × 此值
+    barrier_regen_ratio        = 0.10,   -- 撤出后壁垒恢复 = stability × 此值/回合
+    regen_when_active_mult     = 0,      -- 活跃渗透期间壁垒不恢复（与远征一致）
+    major_barrier_bonus        = 1.3,    -- 大国壁垒额外 ×1.3
+    neutral_barrier_bonus      = 1.2,    -- 中立国壁垒额外 ×1.2
+
+    -- 并发限制
+    max_concurrent_ventures    = 2,      -- 最多同时进行2个商业远征
+
+    -- 发起商业远征
+    venture_ap_cost            = 2,      -- 发起渗透消耗AP
+    base_investment_cost       = 300,    -- 每回合基础投资额（受通胀影响）
+    reinforce_ap_cost          = 1,      -- 调整投资等级消耗AP
+    withdraw_ap_cost           = 1,      -- 撤出渗透消耗AP
+
+    -- 投资等级（类似远征兵力，越高渗透越快但花费越多）
+    investment_levels = {
+        { mult = 1.0, cost_mult = 1.0, label = "小额投资" },
+        { mult = 1.8, cost_mult = 2.0, label = "中额投资" },
+        { mult = 2.5, cost_mult = 3.0, label = "大额投资" },
+    },
+
+    -- 渗透公式参数
+    base_penetration_per_turn  = 10,     -- 基础每回合渗透值
+    distance_penalty           = { 0, 0.05, 0.10, 0.20 },  -- 距离1-4的渗透惩罚
+
+    -- 渗透策略（发起时选择，进行中可切换）
+    -- 每种策略有独特效果，形成差异化选择而非纯数值比较
+    strategies = {
+        normal = {
+            label = "常规贸易",
+            icon  = "📦",
+            desc  = "稳扎稳打的传统商路渗透，额外降低紧张度",
+            cost_mult        = 1.0,
+            penetration_mult = 1.0,
+            tension_add      = 0,
+            rep_cost         = 0,
+            requires         = nil,
+            -- 独特效果：每季额外衰减紧张度
+            extra_tension_decay = 0.1,
+        },
+        dumping = {
+            label = "倾销战",
+            icon  = "💰",
+            desc  = "以低价倾销打开市场，渗透极快但紧张度极高；据点收入+30%，削弱目标国稳定度",
+            cost_mult        = 1.5,
+            penetration_mult = 2.0,
+            tension_add      = 0.8,
+            rep_cost         = -3,
+            requires         = nil,
+            -- 独特效果：渗透期间每季削弱目标国稳定度；据点收入加成
+            stability_damage_per_turn = 1,    -- 每季削减目标国稳定度
+            post_income_bonus        = 0.30,  -- 据点收入+30%
+        },
+        bribery = {
+            label = "商业贿赂",
+            icon  = "🤝",
+            desc  = "通过贿赂当地官员绕过壁垒，完成成功率+15%，据点维护费-20%",
+            cost_mult        = 1.3,
+            penetration_mult = 1.2,
+            tension_add      = 0.2,
+            rep_cost         = -2,
+            requires         = { type = "reputation", min = 10 },
+            -- 独特效果：提高完成成功率；降低据点维护费
+            success_rate_bonus    = 0.15,  -- 成功率+15%
+            maintenance_discount  = 0.20,  -- 据点维护费-20%
+        },
+        tech_export = {
+            label = "技术输出",
+            icon  = "⚙️",
+            desc  = "以先进技术换取市场准入，据点每季产科技点，改善外交",
+            cost_mult        = 1.5,
+            penetration_mult = 1.5,
+            tension_add      = 0.1,
+            rep_cost         = 0,
+            requires         = { type = "tech", tech_id = "b4a_trade_route" },
+            -- 独特效果：据点每季产科技点；改善与目标国外交
+            post_tech_per_turn  = 1,    -- 据点每季产 1 科技点
+            diplo_bonus         = 2,    -- 建立据点时改善外交
+        },
+    },
+
+    -- 完成后建立类型（类似远征的占领三选一）
+    establishments = {
+        trading_post = {
+            label = "贸易站",
+            icon  = "🏪",
+            desc  = "轻量级商业据点，低收入低维护",
+            income_minor       = 120,    -- 小国/中等国家每季收入
+            income_major       = 200,    -- 大国每季收入
+            maintenance_minor  = 60,
+            maintenance_major  = 100,
+            tension_add        = 1,
+            diplo_penalty      = -3,     -- 对目标国好感度
+        },
+        joint_venture = {
+            label = "合资商行",
+            icon  = "🏢",
+            desc  = "与当地商人合作经营，中等收入中等维护",
+            income_minor       = 250,
+            income_major       = 400,
+            maintenance_minor  = 140,
+            maintenance_major  = 220,
+            tension_add        = 2,
+            diplo_penalty      = -5,
+        },
+        monopoly = {
+            label = "商业垄断",
+            icon  = "🏰",
+            desc  = "完全控制当地市场，高收入高维护高风险",
+            income_minor       = 400,
+            income_major       = 650,
+            maintenance_minor  = 250,
+            maintenance_major  = 400,
+            tension_add        = 3,
+            diplo_penalty      = -10,
+            requires           = { type = "tech", tech_id = "b11_trade_monopoly" },
+        },
+    },
+
+    -- 市场紧张度（类似远征侵略计数器）
+    tension_per_venture        = 1,      -- 每次发起渗透增加紧张度
+    tension_decay              = 0.3,    -- 每季自然衰减
+    sanction_threshold         = 5,      -- 贸易制裁触发阈值
+    intervention_threshold     = 8,      -- 列强联合抵制触发阈值
+    sanction_duration          = 4,      -- 制裁持续回合
+    sanction_income_mult       = 0.5,    -- 制裁期间商业据点收入减半
+
+    -- 壁垒恢复（撤出或失败后）
+    fail_barrier_restore       = 0.3,    -- 渗透失败后壁垒恢复至最大值的此比例
+
+    -- 渗透完成判定
+    completion_success_base    = 0.80,   -- 壁垒归零后基础成功率80%
+    completion_success_cap     = 0.95,   -- 成功率上限95%
+    completion_success_floor   = 0.40,   -- 成功率下限40%
+    completion_rep_weight      = 0.003,  -- 每点正声誉 +0.3% 成功率
+
+    -- 耦合加成
+    occupied_barrier_mult      = 0.5,    -- 已被远征占领的国家壁垒减半
+    trade_route_bonus          = 0.15,   -- 已有贸易路线时渗透 +15%
+    reputation_bonus_per_10    = 0.05,   -- 每10点正声誉渗透 +5%
+    reputation_bonus_cap       = 0.25,   -- 声誉渗透加成上限25%
+
+    -- 难度递增（已建立的商业据点越多越难）
+    difficulty_tiers = {
+        { max_count = 2,  mod = 1.00 },  -- 前2个据点正常
+        { max_count = 4,  mod = 1.15 },  -- 3-4个 +15%
+        { max_count = 7,  mod = 1.30 },  -- 5-7个 +30%
+        { max_count = 99, mod = 1.50 },  -- 8+ +50%
+    },
+
+    -- 股市联动（东方贸易商行 mu 加成）
+    stock_id                   = "oriental_trading",
+    stock_bonus_per_post       = 0.003,  -- 每个贸易站 → mu +0.3%
+    stock_bonus_per_joint      = 0.005,  -- 每个合资商行 → mu +0.5%
+    stock_bonus_per_monopoly   = 0.008,  -- 每个垄断 → mu +0.8%
+}
+
+-- ============================================================================
 -- 战斗
 -- ============================================================================
 Balance.COMBAT = {
@@ -510,7 +808,7 @@ Balance.COMBAT = {
     player_attack_cash  = 180,   -- 主动突袭的情报/补给准备费
     win_morale          = 10,
     lose_morale         = -14,
-    lose_guards_ratio   = 0.30,  -- 战败损失 30% 护卫
+    lose_guards_ratio   = 0.18,  -- 战败损失 18% 护卫（原 30%，降低级联崩溃风险）
     loot_ratio          = 0.25,  -- 战胜抢夺 AI 25% 现金
 }
 
@@ -540,6 +838,11 @@ Balance.FAMILY = {
     onboarding_bonus_ratio = 0.3,  -- 适应期间仅获得 30% 岗位加成
     -- 下岗冷却
     unassign_cooldown      = 2,    -- 撤下成员进入 2 季度冷却期
+    -- 年龄与退休
+    retirement_age         = 60,   -- 强制退休年龄
+    trainee_age_min        = 20,   -- 新培养成员最小年龄
+    trainee_age_max        = 35,   -- 新培养成员最大年龄
+    retirement_warning_age = 55,   -- 退休预警年龄（UI 提示）
 }
 
 -- ============================================================================
@@ -550,6 +853,15 @@ Balance.BANKRUPTCY_RESCUE = {
     rescue_cash_base   = 800,     -- 注入现金基础值（叠加通胀）
     clear_defaults     = true,    -- 重置连续违约计数
     clear_neg_nw       = true,    -- 重置负净资产计数
+}
+
+-- ============================================================================
+-- 免广告卡（看广告充能，每回合免广告重随）
+-- ============================================================================
+Balance.AD_FREE_CARD = {
+    charge_ads_needed      = 10,  -- 充满需要看的广告次数
+    free_lucky_per_turn    = 3,   -- 每回合免广告领广告金次数（匹配 LUCKY_EVENT.max_per_season）
+    free_rerolls_per_turn  = 10,  -- 每回合免广告重随次数（匹配成员重随上限）
 }
 
 -- ============================================================================
@@ -660,26 +972,76 @@ Balance.PLUNDER = {
 }
 
 -- ============================================================================
--- 声誉系统（掠夺行动的核心平衡机制）
--- 范围 -100 ~ 0，初始 0；越低代价越大
+-- 统一声誉系统（合并原掠夺声誉 + 贸易信誉 + 媒体公信力）
+-- 范围 -100 ~ +100，初始 0
+-- 正面区：贸易价格加成、路线安全加成、操盘成功率高
+-- 负面区：贸易惩罚、AI攻击概率上升、操盘成功率低
 -- ============================================================================
 Balance.REPUTATION = {
     initial           = 0,
     min               = -100,
-    max               = 0,
-    recovery_per_turn = 2,    -- 每季自然恢复 +2（不超过 0）
+    max               = 100,
+    recovery_per_turn = 2,    -- 每季自然恢复（向0靠拢，+2或-2）
+    -- 负面等级阈值
     thresholds = {
         suspicious   = -10,   -- 可疑
         notorious    = -30,   -- 恶名
         infamous     = -50,   -- 臭名昭著
         public_enemy = -80,   -- 公敌
     },
-    -- 各等级交易溢价（索引 1~5 对应清白→公敌）
+    -- 各负面等级贸易溢价（索引 1~5 对应清白→公敌）
     trade_penalty    = { 0, 0.05, 0.15, 0.25, 0.40 },
     -- AI 攻击概率加成
     ai_attack_bonus  = { 0, 0, 0, 0.20, 0.50 },
     -- 公敌级别每季地区控制力衰减
     control_decay    = { 0, 0, 0, 0, 2 },
+    -- 正面声誉效果（替代原贸易信誉）
+    trade_order_bonus  = 0.005, -- 每点正声誉 → 订单报酬 +0.5%（满声誉+50%）
+    trade_safety_bonus = 0.002, -- 每点正声誉 → 路线安全 +0.2%（满声誉+20%）
+    -- 贸易事件对声誉的影响
+    trade_success_bonus  = 1,   -- 贸易交付成功 声誉 +1
+    trade_failure_penalty = -2, -- 贸易失败 声誉 -2
+    -- 操盘公信力映射（替代原 CREDIBILITY）
+    -- 操盘乘数 = floor + (1-floor) × clamp01((rep - min) / (max - min))
+    -- rep=100 → ×1.0, rep=0 → ×0.75, rep=-100 → ×0.5
+    market_multiplier_floor = 0.5,
+    market_cost_pump        = 15,  -- Pump 成功扣减声誉
+    market_cost_dump        = 20,  -- Dump 成功扣减声誉
+    market_cost_coordinated = 30,  -- 联合操盘成功扣减声誉
+    market_cost_fail_mult   = 1.5, -- 失败时扣减 ×1.5
+    -- 新闻社持股加成恢复
+    press_control_recovery_bonus   = 3,  -- 控股额外 +3/季
+    press_influence_recovery_bonus = 1,  -- 重要持股额外 +1/季
+    -- 主动恢复行动
+    actions = {
+        charity = {           -- 公益捐赠
+            ap_cost  = 1,
+            cash_cost = 500,
+            rep_gain = 8,
+            cooldown = 0,     -- 不限冷却，可连续使用
+            label    = "公益捐赠",
+            icon     = "🎗️",
+            desc     = "向萨拉热窝社区捐赠资金，改善民众生活",
+        },
+        public_apology = {    -- 公开道歉
+            ap_cost  = 2,
+            cash_cost = 200,
+            rep_gain = 15,
+            cooldown = 4,     -- 4季冷却（年度）
+            label    = "公开道歉",
+            icon     = "📜",
+            desc     = "在报纸上发表公开声明，承认过往过失并承诺改善",
+        },
+        community_project = { -- 社区建设
+            ap_cost  = 2,
+            cash_cost = 1500,
+            rep_gain = 25,
+            cooldown = 8,     -- 8季冷却（两年）
+            label    = "社区建设",
+            icon     = "🏗️",
+            desc     = "投资建设医院、学校等公共设施，大幅提升声誉",
+        },
+    },
 }
 
 -- ============================================================================
@@ -708,28 +1070,7 @@ Balance.DIRECTION_LOCK = {
     after_dump = 3,  -- Dump 成功后，3 季内不能对该股 Pump
 }
 
--- ============================================================================
--- 媒体公信力（M1: 操盘的消耗性资源，防止无限制操盘）
--- ============================================================================
-Balance.CREDIBILITY = {
-    initial          = 60,
-    max              = 100,
-    -- 操盘消耗（成功/失败都消耗，失败消耗更多）
-    cost_pump        = 15,   -- Pump 成功消耗
-    cost_dump        = 20,   -- Dump 成功消耗
-    cost_coordinated = 30,   -- 联合操盘成功消耗
-    cost_fail_mult   = 1.5,  -- 失败时消耗 ×1.5
-    -- 对成功率的影响
-    -- 实际成功率 = base_success × credibilityMultiplier
-    -- credibilityMult = multiplier_floor + (1 - multiplier_floor) × (credibility / max)
-    -- cred=100 → ×1.0, cred=50 → ×0.75, cred=0 → ×0.5
-    multiplier_floor = 0.5,  -- 最低乘数（公信力=0 时）
-    -- 自然恢复
-    recovery_per_season = 5,  -- 每季恢复 5 点
-    -- 新闻社持股加成恢复（新闻社的新角色：加速恢复而非直接增益）
-    press_control_recovery_bonus = 3,   -- 控股额外 +3/季
-    press_influence_recovery_bonus = 1, -- 重要持股额外 +1/季
-}
+-- (Balance.CREDIBILITY 已合并到 Balance.REPUTATION)
 
 -- ============================================================================
 -- 庄家操盘（市场操纵）
@@ -738,7 +1079,7 @@ Balance.MARKET_MANIPULATION = {
     pump = {
         ap           = 1,
         cost_ratio   = 0.15,    -- 目标股票当前市值 × 15% 的现金
-        min_cash     = 40000,   -- 最低资金门槛
+        min_cash_base = 5000,   -- 基准资金门槛（×通胀因子动态调整，原固定 40000）
         base_success = 0.70,    -- 基础成功率 70%
         cooldown     = 2,       -- 冷却 2 季
         delta_mu     = 0.15,    -- 成功时 delta_mu
@@ -749,7 +1090,7 @@ Balance.MARKET_MANIPULATION = {
     dump = {
         ap           = 1,
         cost_ratio   = 0.20,    -- 目标股票当前市值 × 20% 的现金
-        min_cash     = 60000,   -- 最低资金门槛
+        min_cash_base = 8000,   -- 基准资金门槛（×通胀因子动态调整，原固定 60000）
         base_success = 0.60,    -- 基础成功率 60%
         cooldown     = 3,       -- 冷却 3 季
         delta_mu     = -0.18,   -- 成功时 delta_mu
@@ -763,7 +1104,7 @@ Balance.MARKET_MANIPULATION = {
     },
     coordinated = {
         ap           = 2,
-        fixed_cost   = 100000,  -- 固定 100000 现金
+        fixed_cost_base = 15000, -- 基准成本（×通胀因子动态调整，原固定 100000）
         base_success = 0.50,    -- 基础成功率 50%
         cooldown     = 5,       -- 冷却 5 季
         pump_mu      = 0.20,    -- 做多目标 delta_mu

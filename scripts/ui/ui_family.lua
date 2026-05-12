@@ -8,6 +8,7 @@ local Config = require("config")
 local GameState = require("game_state")
 local FamiliesData = require("data.families_data")
 local Balance = require("data.balance")
+local SaveLoad = require("utils.save_load")
 
 local C = Config.COLORS
 local F = Config.FONT
@@ -23,6 +24,8 @@ local onStateChanged_ = nil
 local uiRoot_ = nil
 ---@type table|nil 当前打开的弹窗
 local currentModal_ = nil
+---@type table|nil 重随子弹窗
+local rerollModal_ = nil
 
 -- 属性条颜色映射
 local ATTR_COLORS = {
@@ -364,11 +367,24 @@ function FamilyPage._CreatePositionCard(state, pos)
                     flexDirection = "column",
                     gap = 3,
                     children = {
-                        UI.Label {
-                            text = occupant.name,
-                            fontSize = F.body,
-                            fontWeight = "bold",
-                            fontColor = C.text_primary,
+                        UI.Panel {
+                            flexDirection = "row",
+                            alignItems = "center",
+                            gap = 6,
+                            children = {
+                                UI.Label {
+                                    text = occupant.name,
+                                    fontSize = F.body,
+                                    fontWeight = "bold",
+                                    fontColor = C.text_primary,
+                                },
+                                occupant.age and UI.Label {
+                                    text = tostring(occupant.age) .. "岁",
+                                    fontSize = F.label,
+                                    fontColor = (occupant.age >= (Balance.FAMILY.retirement_warning_age or 55))
+                                        and C.accent_red or C.text_muted,
+                                } or nil,
+                            },
                         },
                         UI.Panel {
                             flexDirection = "row",
@@ -393,7 +409,7 @@ function FamilyPage._CreatePositionCard(state, pos)
             military_chief  = 0.4,   -- 战力 ×(1+bonus×0.4)
             tech_advisor    = 0.3,   -- 周期 ×(1-bonus×0.3) → 显示为正值加速
             civil_director  = 0.2,   -- 税率 ×(1-bonus×0.2) → 显示为正值减税
-            culture_advisor = 0.5,   -- 影响力 ×(1+bonus×0.5)
+            culture_advisor = 0.5,   -- 控制度 ×(1+bonus×0.5)
             diplomat        = 0.5,   -- 好感 +delta×bonus×0.5
         })[pos.id] or 1.0
         local actualPct = math.floor(bonus * posEffectCoeff * 100)
@@ -406,7 +422,7 @@ function FamilyPage._CreatePositionCard(state, pos)
             military_chief  = "战力",
             tech_advisor    = "研发加速",
             civil_director  = "减税",
-            culture_advisor = "影响力",
+            culture_advisor = "控制度",
             diplomat        = "好感加成",
         })[pos.id] or "加成"
         local signChar = (pos.id == "civil_director" or pos.id == "tech_advisor") and "-" or "+"
@@ -418,7 +434,7 @@ function FamilyPage._CreatePositionCard(state, pos)
         if rating == "excellent" then
             local excellentLabel = ({
                 mine_director   = " | 矿脉洞察",
-                military_chief  = " | 精锐操练 +3士气/季",
+                military_chief  = " | 精锐操练 +3战意/季",
                 tech_advisor    = " | 学术权威 费用-20%",
                 civil_director  = " | 内政洞察",
                 culture_advisor = " | 文化感召 免疫衰减",
@@ -582,6 +598,8 @@ function FamilyPage._CreateIdleSection(state)
     }
 end
 
+
+
 --- 创建待命成员行
 function FamilyPage._CreateIdleMemberRow(member, isDisabled, isCooldown)
     local traitChips = {}
@@ -666,6 +684,12 @@ function FamilyPage._CreateIdleMemberRow(member, isDisabled, isCooldown)
                                 fontWeight = "bold",
                                 fontColor = isDisabled and C.text_muted or C.text_primary,
                             },
+                            member.age and UI.Label {
+                                text = tostring(member.age) .. "岁",
+                                fontSize = F.label,
+                                fontColor = (member.age >= (Balance.FAMILY.retirement_warning_age or 55))
+                                    and C.accent_red or C.text_muted,
+                            } or nil,
                             UI.Chip {
                                 label = statusLabel,
                                 color = statusColor,
@@ -688,7 +712,7 @@ function FamilyPage._CreateIdleMemberRow(member, isDisabled, isCooldown)
             },
             UI.Panel {
                 flexDirection = "row",
-                gap = 6,
+                gap = 4,
                 flexShrink = 0,
                 alignItems = "center",
                 children = {
@@ -707,7 +731,7 @@ function FamilyPage._CreateIdleMemberRow(member, isDisabled, isCooldown)
                         variant = "primary",
                         size = "sm",
                         onClick = Config.ClickGuard(function()
-                            FamilyPage._DoReroll(member)
+                            FamilyPage._ShowRerollModal(member)
                         end),
                     } or nil,
                 },
@@ -876,6 +900,12 @@ function FamilyPage._CreateCandidateRow(member, pos)
                                 fontWeight = "bold",
                                 fontColor = C.text_primary,
                             },
+                            member.age and UI.Label {
+                                text = tostring(member.age) .. "岁",
+                                fontSize = F.label,
+                                fontColor = (member.age >= (Balance.FAMILY.retirement_warning_age or 55))
+                                    and C.accent_red or C.text_muted,
+                            } or nil,
                             UI.Chip {
                                 label = fitLabel,
                                 color = fitColor,
@@ -1015,6 +1045,8 @@ function FamilyPage._ShowMemberDetail(member)
     if member.portraitImage then
         -- 立绘区域：cover 裁切，展示上半身（约 2/3），高度 360px
         -- 名字/身份/特性叠加在立绘底部（渐变遮罩）
+        local ageText = member.age and (tostring(member.age) .. "岁") or nil
+        local ageNearRetire = member.age and member.age >= (Balance.FAMILY.retirement_warning_age or 55)
         local overlayChildren = {
             UI.Label {
                 text = member.name,
@@ -1033,6 +1065,11 @@ function FamilyPage._ShowMemberDetail(member)
                         fontSize = F.body,
                         fontColor = C.text_secondary,
                     },
+                    ageText and UI.Label {
+                        text = ageText,
+                        fontSize = F.body,
+                        fontColor = ageNearRetire and C.accent_red or C.text_muted,
+                    } or nil,
                     table.unpack(traitChips),
                 },
             },
@@ -1115,6 +1152,12 @@ function FamilyPage._ShowMemberDetail(member)
                                     fontSize = F.body,
                                     fontColor = C.text_secondary,
                                 },
+                                member.age and UI.Label {
+                                    text = tostring(member.age) .. "岁",
+                                    fontSize = F.body,
+                                    fontColor = (member.age >= (Balance.FAMILY.retirement_warning_age or 55))
+                                        and C.accent_red or C.text_muted,
+                                } or nil,
                                 table.unpack(traitChips),
                             },
                         },
@@ -1239,24 +1282,17 @@ function FamilyPage._ShowMemberDetail(member)
         })
     end
 
-    -- 6) 重随属性按钮（看广告）
+    -- 6) 重随属性按钮 → 点击弹出子弹窗
     if (member.reroll_available or 0) > 0 then
         table.insert(contentChildren, UI.Divider { color = C.divider })
-        table.insert(contentChildren, UI.Panel {
+        table.insert(contentChildren, UI.Button {
+            text = "🎲 重随属性（" .. member.reroll_available .. " 次）",
+            variant = "outlined",
+            size = "md",
             width = "100%",
-            alignItems = "center",
-            paddingVertical = 4,
-            children = {
-                UI.Button {
-                    text = "🎰 看广告重随属性（" .. member.reroll_available .. "次）",
-                    variant = "primary",
-                    size = "md",
-                    width = "100%",
-                    onClick = Config.ClickGuard(function()
-                        FamilyPage._DoReroll(member)
-                    end),
-                },
-            },
+            onClick = Config.ClickGuard(function()
+                FamilyPage._ShowRerollModal(member)
+            end),
         })
     end
 
@@ -1338,6 +1374,297 @@ function FamilyPage._DoUnassign(memberId, pos)
     end
 end
 
+-- ============================================================================
+-- 重随属性弹窗（参考顶部广告金弹窗风格）
+-- ============================================================================
+
+---@type table|nil 重随弹窗引用的成员
+local rerollMember_ = nil
+
+--- 构建重随弹窗内容
+function FamilyPage._BuildRerollModalContent(member)
+    local cfg = Balance.AD_FREE_CARD
+    local remaining = member.reroll_available or 0
+    local active = stateRef_ and stateRef_.ad_free_card_active or false
+    local freeUsed = stateRef_ and stateRef_.ad_free_reroll_used or 0
+    local freeRemaining = active and (cfg.free_rerolls_per_turn - freeUsed) or 0
+    local charges = stateRef_ and stateRef_.ad_free_card_charges or 0
+
+    local children = {}
+
+    -- === 重随属性区域 ===
+    table.insert(children, UI.Label {
+        text = "🎲 重随属性",
+        fontSize = F.subtitle,
+        fontWeight = "bold",
+        fontColor = C.text_primary,
+    })
+    table.insert(children, UI.Label {
+        text = "剩余 " .. remaining .. " 次",
+        fontSize = F.body_minor,
+        fontColor = remaining > 0 and C.text_secondary or C.text_muted,
+    })
+
+    if remaining > 0 then
+        -- 免广告重随按钮
+        if active and freeRemaining > 0 then
+            table.insert(children, UI.Button {
+                text = "🎰 免广告重随（免广剩 " .. freeRemaining .. " 次）",
+                variant = "success",
+                size = "md",
+                width = "100%",
+                onClick = Config.ClickGuard(function()
+                    FamilyPage._DoFreeReroll(member)
+                end),
+            })
+        end
+        -- 看广告重随按钮
+        table.insert(children, UI.Button {
+            text = "🎬 看广告重随",
+            variant = "primary",
+            size = "md",
+            width = "100%",
+            onClick = Config.ClickGuard(function()
+                FamilyPage._DoReroll(member)
+            end),
+        })
+    else
+        table.insert(children, UI.Label {
+            text = "该成员重随次数已用完",
+            fontSize = F.body_minor,
+            fontColor = C.text_muted,
+        })
+    end
+
+    -- === 分割线 ===
+    table.insert(children, UI.Divider { color = C.divider })
+
+    -- === 免广告卡区域 ===
+    table.insert(children, UI.Label {
+        text = "🃏 免广告卡",
+        fontSize = F.subtitle,
+        fontWeight = "bold",
+        fontColor = C.text_primary,
+    })
+
+    if active then
+        local freeRerollAll = cfg.free_rerolls_per_turn - freeUsed
+        table.insert(children, UI.Panel {
+            width = "100%",
+            backgroundColor = "#4CAF5018",
+            borderRadius = 6,
+            padding = 8,
+            flexDirection = "column",
+            gap = 4,
+            children = {
+                UI.Label {
+                    text = "✅ 已激活",
+                    fontSize = F.body,
+                    fontColor = "#4CAF50",
+                    fontWeight = "bold",
+                },
+                UI.Label {
+                    text = "重随：本回合免广剩 " .. freeRerollAll
+                        .. "/" .. cfg.free_rerolls_per_turn .. " 次",
+                    fontSize = F.body_minor,
+                    fontColor = C.text_secondary,
+                },
+            },
+        })
+    else
+        -- 未激活：充能进度 + 充能按钮
+        local progress = charges / cfg.charge_ads_needed
+        table.insert(children, UI.Label {
+            text = "看 " .. cfg.charge_ads_needed .. " 次广告激活，激活后每回合可免广告使用广告金和重随",
+            fontSize = F.body_minor,
+            fontColor = C.text_muted,
+            whiteSpace = "normal",
+        })
+        -- 进度条
+        table.insert(children, UI.Panel {
+            width = "100%",
+            height = 8,
+            backgroundColor = "#333333",
+            borderRadius = 4,
+            overflow = "hidden",
+            children = {
+                UI.Panel {
+                    width = math.floor(progress * 100) .. "%",
+                    height = "100%",
+                    backgroundColor = "#F0A030",
+                    borderRadius = 4,
+                },
+            },
+        })
+        table.insert(children, UI.Button {
+            text = "🎬 看广告充能（" .. charges .. "/" .. cfg.charge_ads_needed .. "）",
+            variant = "outlined",
+            size = "md",
+            width = "100%",
+            onClick = Config.ClickGuard(function()
+                FamilyPage._ChargeAdFreeCardFromReroll()
+            end),
+        })
+    end
+
+    return UI.ScrollView {
+        width = "100%",
+        maxHeight = 380,
+        children = {
+            UI.Panel {
+                width = "100%",
+                flexDirection = "column",
+                gap = 8,
+                padding = 4,
+                children = children,
+            },
+        },
+    }
+end
+
+--- 刷新重随弹窗内容
+function FamilyPage._RefreshRerollModal()
+    if not rerollModal_ or not rerollMember_ then return end
+    local content = FamilyPage._BuildRerollModalContent(rerollMember_)
+    rerollModal_:ClearContent()
+    rerollModal_:AddContent(content)
+end
+
+--- 显示重随属性弹窗
+function FamilyPage._ShowRerollModal(member)
+    -- 关闭已有的重随弹窗
+    if rerollModal_ then
+        rerollModal_:Close()
+        rerollModal_ = nil
+    end
+    rerollMember_ = member
+
+    rerollModal_ = UI.Modal {
+        title = "🎲 重随属性",
+        size = "sm",
+        closeOnOverlay = true,
+        closeOnEscape = true,
+        showCloseButton = true,
+        onClose = function()
+            Config.ConsumeTap()
+            rerollModal_ = nil
+            rerollMember_ = nil
+        end,
+    }
+    rerollModal_:AddContent(FamilyPage._BuildRerollModalContent(member))
+    if uiRoot_ then
+        uiRoot_:AddChild(rerollModal_)
+    end
+    rerollModal_:Open()
+end
+
+--- 看广告为免广告卡充能（重随弹窗版本）
+function FamilyPage._ChargeAdFreeCardFromReroll()
+    if not stateRef_ then return end
+    local cfg = Balance.AD_FREE_CARD
+    if stateRef_.ad_free_card_active then
+        UI.Toast.Show("免广告卡已激活", { variant = "info", duration = 1.5 })
+        return
+    end
+
+    local ok, err = pcall(function()
+        ---@diagnostic disable-next-line: undefined-global
+        sdk:ShowRewardVideoAd(function(result)
+            if not result.success then
+                if result.msg == "embed manual close" then
+                    UI.Toast.Show("需完整观看广告才能获得奖励",
+                        { variant = "warning", duration = 1.5 })
+                else
+                    UI.Toast.Show("广告播放失败: " .. (result.msg or "未知错误"),
+                        { variant = "error", duration = 1.5 })
+                end
+                return
+            end
+
+            local ok2, err2 = pcall(function()
+                stateRef_.ad_free_card_charges = (stateRef_.ad_free_card_charges or 0) + 1
+                if stateRef_.ad_free_card_charges >= cfg.charge_ads_needed then
+                    stateRef_.ad_free_card_active = true
+                    stateRef_.ad_free_lucky_used = 0
+                    stateRef_.ad_free_reroll_used = 0
+                    UI.Toast.Show("免广告卡已激活！\n重随每回合免广 "
+                        .. cfg.free_rerolls_per_turn .. " 次",
+                        { variant = "success", duration = 3.0 })
+                    GameState.AddLog(stateRef_, "免广告卡激活")
+                else
+                    UI.Toast.Show("充能 " .. stateRef_.ad_free_card_charges
+                        .. "/" .. cfg.charge_ads_needed,
+                        { variant = "info", duration = 1.5 })
+                end
+
+                SaveLoad.Save(stateRef_, SaveLoad.SLOT_AUTO)
+                FamilyPage._RefreshRerollModal()
+                if onStateChanged_ then onStateChanged_() end
+            end)
+            if not ok2 then
+                print("[免广告卡充能-重随] 回调异常: " .. tostring(err2))
+            end
+        end)
+    end)
+    if not ok then
+        print("[免广告卡充能-重随] SDK 调用异常: " .. tostring(err))
+        UI.Toast.Show("广告服务暂不可用", { variant = "error", duration = 1.5 })
+    end
+end
+
+--- 重随成功后的通用处理
+function FamilyPage._ApplyReroll(member)
+    FamiliesData.RerollMemberAttrs(member)
+    member.reroll_available = (member.reroll_available or 0) - 1
+    if member.reroll_available < 0 then member.reroll_available = 0 end
+
+    local attrSum = 0
+    for _, v in pairs(member.attrs) do attrSum = attrSum + v end
+    UI.Toast.Show(member.name .. " 属性已重随（总和 " .. attrSum .. "）",
+        { variant = "success", duration = 2.0 })
+
+    -- 重随后立即存档，防止闪退导致进度丢失
+    SaveLoad.Save(stateRef_, SaveLoad.SLOT_AUTO)
+
+    -- 如果重随弹窗打开，刷新内容而不是关闭
+    if rerollModal_ then
+        FamilyPage._RefreshRerollModal()
+        -- 如果次数用完，关闭重随弹窗
+        if (member.reroll_available or 0) <= 0 then
+            rerollModal_:Close()
+            rerollModal_ = nil
+            rerollMember_ = nil
+        end
+    else
+        FamilyPage._CloseModal()
+    end
+    if onStateChanged_ then onStateChanged_() end
+end
+
+--- 检查免广告卡是否可用于本次重随
+function FamilyPage._CanUseAdFreeCard()
+    if not stateRef_ then return false end
+    if not stateRef_.ad_free_card_active then return false end
+    local cfg = Balance.AD_FREE_CARD
+    local used = stateRef_.ad_free_reroll_used or 0
+    return used < cfg.free_rerolls_per_turn
+end
+
+--- 免广告重随（使用免广告卡配额）
+function FamilyPage._DoFreeReroll(member)
+    if not stateRef_ then return end
+    if (member.reroll_available or 0) <= 0 then
+        UI.Toast.Show("该成员没有重随机会", { variant = "warning", duration = 1.5 })
+        return
+    end
+    if not FamilyPage._CanUseAdFreeCard() then
+        UI.Toast.Show("本回合免广告次数已用完", { variant = "warning", duration = 1.5 })
+        return
+    end
+    stateRef_.ad_free_reroll_used = (stateRef_.ad_free_reroll_used or 0) + 1
+    FamilyPage._ApplyReroll(member)
+end
+
 --- 看广告重随属性
 function FamilyPage._DoReroll(member)
     if not stateRef_ then return end
@@ -1346,35 +1673,49 @@ function FamilyPage._DoReroll(member)
         return
     end
 
-    ---@diagnostic disable-next-line: undefined-global
-    sdk:ShowRewardVideoAd(function(result)
-        if not result.success then
-            if result.msg == "embed manual close" then
-                UI.Toast.Show("需完整观看广告才能获得奖励",
-                    { variant = "warning", duration = 1.5 })
-            else
-                UI.Toast.Show("广告播放失败: " .. (result.msg or "未知错误"),
-                    { variant = "error", duration = 1.5 })
+    local ok, err = pcall(function()
+        ---@diagnostic disable-next-line: undefined-global
+        sdk:ShowRewardVideoAd(function(result)
+            if not result.success then
+                if result.msg == "embed manual close" then
+                    UI.Toast.Show("需完整观看广告才能获得奖励",
+                        { variant = "warning", duration = 1.5 })
+                else
+                    UI.Toast.Show("广告播放失败: " .. (result.msg or "未知错误"),
+                        { variant = "error", duration = 1.5 })
+                end
+                return
             end
-            return
-        end
 
-        -- 广告成功：重随属性
-        FamiliesData.RerollMemberAttrs(member)
-        member.reroll_available = (member.reroll_available or 1) - 1
+            -- 回调中二次检查，防止广告播放期间状态变化
+            if (member.reroll_available or 0) <= 0 then
+                UI.Toast.Show("重随次数已用完", { variant = "warning", duration = 1.5 })
+                return
+            end
 
-        local attrSum = 0
-        for _, v in pairs(member.attrs) do attrSum = attrSum + v end
-        UI.Toast.Show(member.name .. " 属性已重随（总和 " .. attrSum .. "）",
-            { variant = "success", duration = 2.0 })
-
-        FamilyPage._CloseModal()
-        if onStateChanged_ then onStateChanged_() end
+            local ok2, err2 = pcall(function()
+                FamilyPage._ApplyReroll(member)
+            end)
+            if not ok2 then
+                print("[看广告重随] 回调异常: " .. tostring(err2))
+            end
+        end)
     end)
+    if not ok then
+        print("[看广告重随] SDK 调用异常: " .. tostring(err))
+        UI.Toast.Show("广告服务暂不可用", { variant = "error", duration = 1.5 })
+    end
 end
+
+
 
 --- 关闭当前弹窗
 function FamilyPage._CloseModal()
+    if rerollModal_ then
+        rerollModal_:Close()
+        rerollModal_ = nil
+        rerollMember_ = nil
+    end
     if currentModal_ then
         currentModal_:Close()
         currentModal_ = nil

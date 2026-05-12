@@ -9,6 +9,7 @@ local Config = require("config")
 local Balance = require("data.balance")
 local GameState = require("game_state")
 local StockEngine = require("systems.stock_engine")
+local TradePanel = require("ui.ui_trade")
 
 local C = Config.COLORS
 local F = Config.FONT
@@ -63,19 +64,33 @@ function MarketPage._BuildContent(state)
     local era = Config.GetEraByYear(state.year)
     local accent = era.accent
 
-    -- 标签页定义
+    -- 标签页定义（贸易始终显示，未解锁时标记 locked）
+    local tradeUnlocked = state.unlocked_features
+        and state.unlocked_features["foreign_trade"]
+    -- 容错：科技已研发但 unlocked_features 未同步（存档迁移/刷新时序问题）
+    if not tradeUnlocked and state.tech and state.tech.researched then
+        if state.tech.researched["b4a_trade_route"] or state.tech.researched["b4b_smuggling"] then
+            if not state.unlocked_features then state.unlocked_features = {} end
+            state.unlocked_features["foreign_trade"] = true
+            tradeUnlocked = true
+        end
+    end
     local tabs = {
         { id = "stocks", label = "股票" },
         { id = "loans",  label = "贷款" },
         { id = "goods",  label = "商品" },
+        { id = "trade",  label = "贸易", locked = not tradeUnlocked },
     }
 
     -- 标签行
     local tabWidgets = {}
     for _, tab in ipairs(tabs) do
         local isActive = (activeTab_ == tab.id)
+        local displayLabel = tab.locked and ("🔒 " .. tab.label) or tab.label
+        local fontColor = tab.locked and C.text_tertiary
+            or (isActive and accent or C.text_muted)
         table.insert(tabWidgets, MarketPage._TabUnderline(
-            tab.label, isActive, accent, tab.id))
+            displayLabel, isActive, accent, tab.id, fontColor))
     end
 
     -- 根据当前标签构建内容
@@ -84,6 +99,22 @@ function MarketPage._BuildContent(state)
         tabContent = MarketPage._StocksTabContent(state, accent)
     elseif activeTab_ == "loans" then
         tabContent = MarketPage._LoansTabContent(state, accent)
+    elseif activeTab_ == "trade" then
+        if tradeUnlocked then
+            tabContent = TradePanel.Build(state, {
+                onStateChanged = onStateChanged_,
+                onLightRefresh = onLightRefresh_,
+            })
+        else
+            tabContent = MarketPage._BuildLockedPanel(
+                "跨国贸易",
+                "研发科技解锁",
+                {
+                    "研发「巴尔干贸易路线」或「走私网络」",
+                    "前置科技：复式记账 → 现代会计学 → 电报网络",
+                }
+            )
+        end
     else
         tabContent = MarketPage._GoodsTabContent(state, accent)
     end
@@ -1358,13 +1389,15 @@ end
 -- ============================================================================
 -- 标签页下划线
 -- ============================================================================
-function MarketPage._TabUnderline(label, active, accent, tabId)
+function MarketPage._TabUnderline(label, active, accent, tabId, fontColorOverride)
+    local fc = fontColorOverride or (active and accent or C.text_muted)
     return UI.Panel {
-        flexGrow = 1, flexBasis = 0,
+        flexGrow = 1, flexShrink = 1, flexBasis = 0,
         paddingVertical = 10,
         justifyContent = "center", alignItems = "center",
         borderBottomWidth = active and 2 or 0,
         borderBottomColor = accent,
+        overflow = "hidden",
         pointerEvents = "auto",
         onPointerUp = Config.TapGuard(function(self)
             if tabId and activeTab_ ~= tabId then
@@ -1377,7 +1410,7 @@ function MarketPage._TabUnderline(label, active, accent, tabId)
                 text = label,
                 fontSize = F.body,
                 fontWeight = active and "bold" or "normal",
-                fontColor = active and accent or C.text_muted,
+                fontColor = fc,
                 pointerEvents = "none",
             },
         },
@@ -1458,9 +1491,9 @@ function MarketPage._OpenTradeModal(state, stock, accent)
         showCloseButton = true,
         onClose = function(self)
             Config.ConsumeTap()
-            UI.ClearFocus()                        -- 清焦点 → TextField:OnBlur
-            input:SetScreenKeyboardVisible(false)  -- 保底：确保键盘一定关闭
-            modalCloseTime_ = time:GetElapsedTime() -- 记录关闭时刻，防穿透
+            UI.ClearFocus()
+            Config.SuppressKeyboard()
+            modalCloseTime_ = time:GetElapsedTime()
             tradeModal_ = nil
             self:Destroy()
         end,
@@ -1866,6 +1899,38 @@ function MarketPage._OnTakeLoan(state, opt, calcAmount, effectiveRate)
     UI.Toast.Show(string.format("借入 %s 克朗", Config.FormatNumber(calcAmount)),
         { variant = "success", duration = 1.5 })
     if onStateChanged_ then onStateChanged_() end
+end
+
+--- 构建锁定面板（未解锁的 tab 展示）
+function MarketPage._BuildLockedPanel(title, subtitle, conditions)
+    local condRows = {}
+    for _, cond in ipairs(conditions) do
+        table.insert(condRows, UI.Label {
+            text = "• " .. cond, fontSize = F.body, fontColor = C.text_secondary,
+        })
+    end
+    local condChildren = {}
+    table.insert(condChildren, UI.Label {
+        text = "解锁条件", fontSize = F.body_minor, fontWeight = "bold", fontColor = C.text_muted,
+    })
+    for _, row in ipairs(condRows) do
+        table.insert(condChildren, row)
+    end
+    return UI.Panel {
+        width = "100%", flexGrow = 1,
+        justifyContent = "center", alignItems = "center",
+        paddingHorizontal = 32, paddingVertical = 48, gap = 12,
+        children = {
+            UI.Label { text = "🔒", fontSize = 48 },
+            UI.Label { text = title, fontSize = F.title, fontWeight = "bold", fontColor = C.text_primary },
+            UI.Label { text = subtitle, fontSize = F.body, fontColor = C.text_muted, textAlign = "center" },
+            UI.Panel {
+                width = "80%", backgroundColor = C.paper_dark, borderRadius = S.radius_card,
+                padding = S.card_padding, gap = 6, flexDirection = "column",
+                children = condChildren,
+            },
+        },
+    }
 end
 
 function MarketPage.Refresh(root, state)

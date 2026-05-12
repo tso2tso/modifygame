@@ -538,6 +538,23 @@ function MenuPage._ApplyCheat(state)
         state.tech.researched[tid] = true
     end
 
+    -- 5.5. 遍历已研发科技，应用 unlock_* 类特殊效果（避免遗漏新增解锁）
+    state.unlocked_features = state.unlocked_features or {}
+    for _, tid in ipairs(techPicks) do
+        local tech = TechData.GetById(tid)
+        if tech and tech.effects then
+            for _, eff in ipairs(tech.effects) do
+                if eff.kind == "unlock_foreign_trade" then
+                    state.unlocked_features["foreign_trade"] = true
+                elseif eff.kind == "unlock_venture" then
+                    state.unlocked_features["venture"] = true
+                elseif eff.kind == "unlock_local_coal_mine" then
+                    state.local_coal_mine_unlocked = true
+                end
+            end
+        end
+    end
+
     -- 6. 科技派生加成拉满
     state.mine_output_base_bonus = 10
     state.mine_output_mult_bonus = 1.0
@@ -546,18 +563,15 @@ function MenuPage._ApplyCheat(state)
     state.research_speed_bonus = 3
     state.trade_passive_income = 200
     state.finance_passive_income = 200
-    state.finance_supply_discount = 0.20
     state.gold_price_bonus = 0.3
     state.hire_cost_discount = -0.3
-    state.supply_reduction_bonus = 0.3
     state.accident_rate_mod = -0.5
-    state.passive_influence = 20
+    state.passive_control = 20
     state.prospect_success_bonus = 0.3
 
     -- 7. 军事拉满
     state.military.guards = 200
     state.military.morale = 100
-    state.military.supply = 9999
     state.military.factory = { level = 3 }
     -- 创建满编精英小队
     state.military.squads = {}
@@ -580,7 +594,6 @@ function MenuPage._ApplyCheat(state)
     -- 9. 地区拉满
     for _, r in ipairs(state.regions) do
         r.control = 100
-        r.influence = 500
         r.security = 5
         r.development = 5
         r.ai_presence.local_clan = 0
@@ -638,28 +651,120 @@ function MenuPage._ApplyCheat(state)
     -- 17. 声誉归零（默认中立，方便测试正负两端）
     state.reputation = 0
 
-    -- 18. 称号全解锁
+    -- 18. 称号全解锁 + 应用称号奖励（modifier + unlock_features）
     local TitlesData = require("data.titles_data")
+    local Expedition = require("systems.expedition")
+    local Trade = require("systems.trade")
     state.titles_unlocked = state.titles_unlocked or {}
+    state.unlocked_features = state.unlocked_features or {}
     local newlyUnlocked = {}
     for _, title in ipairs(TitlesData.TITLES) do
         if not state.titles_unlocked[title.id] then
             state.titles_unlocked[title.id] = state.turn_count or 1
             table.insert(newlyUnlocked, { id = title.id })
         end
+        -- 应用称号奖励（幂等：modifier 重复插入无大碍，unlock_features 是 set）
+        if title.rewards then
+            if title.rewards.unlock_features then
+                for _, feat in ipairs(title.rewards.unlock_features) do
+                    state.unlocked_features[feat] = true
+                end
+            end
+            if title.rewards.modifiers then
+                for _, mod in ipairs(title.rewards.modifiers) do
+                    local modId = "title_" .. title.id .. "_" .. mod.key
+                    -- 避免重复添加
+                    local exists = false
+                    for _, m in ipairs(state.modifiers or {}) do
+                        if m.id == modId then exists = true; break end
+                    end
+                    if not exists then
+                        GameState.AddModifier(state, modId, mod.key, mod.value, 0)
+                    end
+                end
+            end
+        end
     end
     if #newlyUnlocked > 0 then
         state.titles_new = newlyUnlocked
     end
 
-    -- 19. 重算 AP 上限
+    -- 19. 远征系统初始化（解锁后必须初始化国家HP）
+    if state.unlocked_features["expedition"] then
+        Expedition.InitCountryHP(state)
+        -- 确保远征数据结构存在
+        state.expeditions = state.expeditions or {
+            active = {},
+            occupied_countries = {},
+            aggression_counter = 0,
+            under_sanction = false,
+            sanction_remaining = 0,
+            history = {
+                raids_won = 0, raids_lost = 0,
+                support_missions = 0, total_loot = 0,
+                countries_conquered = 0,
+            },
+        }
+    end
+
+    -- 20. 贸易系统初始化（解锁后生成订单池）
+    if state.unlocked_features["foreign_trade"] then
+        state.trade = state.trade or {}
+        state.trade.order_pool = state.trade.order_pool or {}
+        state.trade.active_orders = state.trade.active_orders or {}
+        state.trade.routes = state.trade.routes or {}
+        state.trade.route_unlocks = state.trade.route_unlocks or {}
+        state.trade.completed_count = state.trade.completed_count or 0
+        state.trade.failed_count = state.trade.failed_count or 0
+        state.trade.total_revenue = state.trade.total_revenue or 0
+        -- (trade.reputation 已合并到统一声誉 state.reputation)
+        state.trade.last_quarter_revenue = state.trade.last_quarter_revenue or 0
+        -- 生成订单池
+        Trade.GenerateOrders(state)
+    end
+
+    -- 20.5. 商业远征系统初始化（解锁后初始化市场壁垒）
+    if state.unlocked_features["venture"] then
+        local Venture = require("systems.venture")
+        Venture.InitMarketBarriers(state)
+        -- 确保远征数据结构存在
+        state.ventures = state.ventures or {
+            active = {},
+            awaiting_decision = {},
+            commercial_posts = {},
+            market_tension = 0,
+            under_trade_sanction = false,
+            trade_sanction_remaining = 0,
+            history = {
+                ventures_launched = 0, ventures_completed = 0,
+                ventures_failed = 0, posts_established = 0,
+                total_trade_income = 0, total_invested = 0,
+            },
+        }
+    end
+
+    -- 21. 外国矿产操作数据结构
+    state.foreign_ops = state.foreign_ops or {
+        scouted = {},
+        scouting = nil,
+        active = {},
+    }
+
+    -- 22. 军事库存：给每个编队补充备用装备
+    state.military.inventory = state.military.inventory or {}
+    for _, eid in ipairs({ "rifle", "improved_rifle", "mg", "mortar", "motorized", "elite_kit" }) do
+        table.insert(state.military.inventory, { equip_id = eid, condition = 100 })
+        table.insert(state.military.inventory, { equip_id = eid, condition = 100 })
+    end
+
+    -- 23. 重算 AP 上限
     state.ap.max = GameState.CalcMaxAP(state)
     state.ap.current = state.ap.max
 
-    -- 20. 存档
+    -- 24. 存档
     SaveLoad.Save(state, SaveLoad.SLOT_AUTO)
 
-    print("[CHEAT] 所有属性已拉满！（含称号全解锁、统计数据拉满）")
+    print("[CHEAT] 所有属性已拉满！（含称号+功能解锁+远征HP+贸易订单+装备库存）")
 end
 
 --- 处理统计标题点击（连续 6 次触发作弊）

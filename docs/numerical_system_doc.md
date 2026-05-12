@@ -601,8 +601,8 @@ effective_mu = stock.mu + Σ(event_mod.delta_mu for all active mods)
 | b1_bookkeeping | 簿记系统 | 200 | 2 | 无 | — | tax_reduction -0.01 |
 | b2_accounting | 现代会计学 | 350 | 3 | b1 | — | tax_reduction -0.02 |
 | b3_telegraph | 电报网络 | 450 | 3 | b2 | — | ap_bonus +1 |
-| **b4a_trade_route** | 贸易路线 | 500 | 4 | b3 | b4b | trade_income +30 |
-| **b4b_smuggling** | 走私网络 | 500 | 3 | b3 | b4a | trade_income +50（+ shadow_income 风险） |
+| **b4a_trade_route** | 巴尔干贸易路线 | 650 | 5 | b3 | b4b | **unlock_foreign_trade**, trade_income +50, tax_reduction -0.01 |
+| **b4b_smuggling** | 走私网络 | 500 | 4 | b3 | b4a | **unlock_foreign_trade**, trade_income +80, passive_control_gain -1 |
 | b5_finance_net | 金融网络 | 600 | 4 | b4a\|b4b | — | finance_network +40 |
 | b6_stock_exchange | 证券交易所 | 700 | 4 | b5 | — | stock_boost_all +0.005 |
 | **b7a_intl_trade** | 国际贸易 | 800 | 5 | b6 | b7b | trade_income +60, influence_gain +3 |
@@ -2075,7 +2075,7 @@ AI dominance 有额外加成来自 `totalPresence/2`（后期约 95/2 = 47）和
 
 | 参数 | 值 |
 |------|-----|
-| 称号总数 | 18 |
+| 称号总数 | 21 |
 | 类别数 | 5 |
 | 检查时机 | 每回合结算 Phase 8.9 |
 | 是否可失去 | 否 |
@@ -2099,7 +2099,7 @@ AI dominance 有额外加成来自 `totalPresence/2`（后期约 95/2 = 47）和
 | `balkan_wolf` | 巴尔干之狼 | `stats.plunder_successes` | ≥ 15 | 后期 |
 | `infamous` | 臭名昭著 | `state.reputation` | ≤ -80 | 后期 |
 
-#### 经济类 💰（4个）
+#### 经济类 💰（5个）
 
 | ID | 名称 | 条件字段 | 阈值 | 难度 |
 |----|------|---------|------|------|
@@ -2107,6 +2107,7 @@ AI dominance 有额外加成来自 `totalPresence/2`（后期约 95/2 = 47）和
 | `financial_titan` | 金融巨鳄 | `state.cash` | ≥ 30,000 | 后期 |
 | `debt_emperor` | 债务帝王 | `#state.loans` + `state.bankrupt` | loans ≥ 5 且非破产 | 中后期 |
 | `inflation_survivor` | 通胀幸存者 | `state.inflation_factor` + `state.cash` | factor ≥ 2.0 且 cash ≥ 5,000 | 后期 |
+| `trade_novice` | 商业新秀 | `state.cash` + `#state.mines` | cash ≥ 20,000 且 mines ≥ 2 | 中后期 |
 
 #### 证券类 📈（4个）
 
@@ -2117,13 +2118,15 @@ AI dominance 有额外加成来自 `totalPresence/2`（后期约 95/2 = 47）和
 | `master_trader` | 操盘圣手 | `stats.trades_completed` | ≥ 60 | 后期 |
 | `short_hunter` | 空头猎人 | `stats.short_profit_total` | ≥ 10,000 | 后期 |
 
-#### 综合类 🏛️（3个）
+#### 综合类 🏛️（5个）
 
 | ID | 名称 | 条件字段 | 阈值 | 难度 |
 |----|------|---------|------|------|
-| `tech_pioneer` | 科技先驱 | `state.tech.researched`（pairs 计数） | ≥ 10 | 中期 |
+| `intel_network` | 情报网络 | 地区控制度总和 | ≥ 60 | 入门 |
+| `tech_pioneer` | 科技先驱 | `state.tech.researched`（pairs 计数） | ≥ 18 | 中期 |
 | `family_prosperity` | 家族兴旺 | `state.family.members` | ≥ 6 且全部 active+在岗 | 后期 |
-| `witness_of_ages` | 时代见证者 | `state.turn_count` | ≥ 60 | 中期 |
+| `witness_of_ages` | 时代见证者 | `state.turn_count` | ≥ 120 且未破产 | 后期 |
+| `shadow_ruler` | 幕后执政 | 三区域控制度 + 总控制度 + 武装 | 各区域 ≥ 70，总控 ≥ 200，武装 ≥ 15 | 后期 |
 
 ### 统计计数器（state.stats）
 
@@ -2148,6 +2151,9 @@ AI dominance 有额外加成来自 `totalPresence/2`（后期约 95/2 = 47）和
 | 金融巨鳄 | 第 3-4 章 | 取决于经营效率 |
 | 操盘圣手 | 第 4-5 章 | 60 笔交易需长期活跃 |
 | 铁壁防线 | 第 4-5 章 | 需 60+ 护卫 + 获取 T6 精锐套装（通过军事科技树或装备系统） |
+| 商业新秀 | 第 3-4 章 | 现金 ≥ 20,000 且 ≥ 2 座矿山 |
+| 情报网络 | 第 2 章 | 地区总控制度 ≥ 60，较易达成 |
+| 幕后执政 | 第 4-5 章 | 三区域控制度均 ≥ 70 + 武装 ≥ 15 |
 | 家族兴旺 | 第 4-5 章 | 6 人且全在岗需精心管理 |
 
 ---

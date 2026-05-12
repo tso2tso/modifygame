@@ -170,7 +170,7 @@ function StockEngine._GetSectorBonus(state, stock)
         local GameState = require("game_state")
         local diplomatBonus = GameState.GetPositionBonus(state, "diplomat")
         local hasDP = diplomatBonus > 0
-        local influence = (state.passive_influence or 0)
+        local influence = (state.passive_control or 0)
         local atWar = state.flags and state.flags.at_war
         return (hasDP and 0.15 or 0)
             + math.min(0.30, influence / 1000)
@@ -356,13 +356,18 @@ function StockEngine.ApplyOperationalDrift(state, report)
     add("austro_bank_trust", financeIncome - leverage * 0.018 - regulation * 0.012,
         "operational_finance")
 
-    -- 贸易：贸易被动收入、外贸/铁路畅通、黑市压力。
+    -- 贸易：贸易被动收入、外贸/铁路畅通、黑市压力 + 商业远征加成。
     local tradeIncome = (state.trade_passive_income or 0) / 10000
-    add("oriental_trading", tradeIncome + (blocked and -0.012 or 0.004) - regulation * 0.006,
+    local ventureBonus = 0
+    if state.ventures and state.ventures.commercial_posts then
+        local Venture = require("systems.venture")
+        ventureBonus = Venture.CalcStockBonus(state)
+    end
+    add("oriental_trading", tradeIncome + ventureBonus + (blocked and -0.012 or 0.004) - regulation * 0.006,
         "operational_trade")
 
     -- 媒体/新闻：影响力、外交总监、新闻社持股。
-    local passiveInfluence = (state.passive_influence or 0) / 800
+    local passiveInfluence = (state.passive_control or 0) / 800
     local diplomatBonus = GameState.GetPositionBonus(state, "diplomat")
     local pressLevel = StockEngine.GetHoldingLevel(state, "balkan_press")
     local pressHoldingBonus = (pressLevel == "control" and 0.012)
@@ -952,8 +957,11 @@ function StockEngine.MarketPump(state, stockId)
     local baseCost = math.ceil(marketCap * cfg.cost_ratio)
     local actualCost = calcManipulationCost(state, baseCost, "pump")
 
-    if state.cash < math.max(cfg.min_cash, actualCost) then
-        return false, string.format("资金不足（需要 %d）", math.max(cfg.min_cash, actualCost))
+    -- S4: 操纵门槛跟通胀
+    local inflation = GameState.GetInflationFactor(state)
+    local minCash = math.floor((cfg.min_cash_base or cfg.min_cash or 5000) * inflation)
+    if state.cash < math.max(minCash, actualCost) then
+        return false, string.format("资金不足（需要 %d）", math.max(minCash, actualCost))
     end
 
     -- 消耗 AP + 资金
@@ -977,9 +985,9 @@ function StockEngine.MarketPump(state, stockId)
         -- M1: 消耗公信力
         StockEngine.ConsumeCredibility(state, "pump", true)
         GameState.AddLog(state, string.format(
-            "📈 做多操盘成功：%s delta_mu +%.2f 持续 %d 季（投入 %d，公信力 %d）",
+            "📈 做多操盘成功：%s delta_mu +%.2f 持续 %d 季（投入 %d，声誉 %d）",
             stock.name or stockId, cfg.delta_mu, cfg.duration, actualCost,
-            state.press_credibility or 0))
+            state.reputation or 0))
         -- M4: AI 对手盘反制
         StockEngine.TryAICounterparty(state, stockId, "pump")
         return true, string.format("操盘成功！%s 将受到做多推动（投入 %d）",
@@ -992,8 +1000,8 @@ function StockEngine.MarketPump(state, stockId)
         -- M1: 失败也消耗公信力（且消耗更多）
         StockEngine.ConsumeCredibility(state, "pump", false)
         GameState.AddLog(state, string.format(
-            "📉 做多操盘失败：%s 操盘被识破，额外损失 %d（公信力 %d）",
-            stock.name or stockId, lostExtra, state.press_credibility or 0))
+            "📉 做多操盘失败：%s 操盘被识破，额外损失 %d（声誉 %d）",
+            stock.name or stockId, lostExtra, state.reputation or 0))
         return false, string.format("操盘失败！被市场识破，额外损失 %d", lostExtra)
     end
 end
@@ -1040,8 +1048,11 @@ function StockEngine.MarketDump(state, stockId)
     local baseCost = math.ceil(marketCap * cfg.cost_ratio)
     local actualCost = calcManipulationCost(state, baseCost, "dump")
 
-    if state.cash < math.max(cfg.min_cash, actualCost) then
-        return false, string.format("资金不足（需要 %d）", math.max(cfg.min_cash, actualCost))
+    -- S4: 操纵门槛跟通胀
+    local inflation = GameState.GetInflationFactor(state)
+    local minCash = math.floor((cfg.min_cash_base or cfg.min_cash or 8000) * inflation)
+    if state.cash < math.max(minCash, actualCost) then
+        return false, string.format("资金不足（需要 %d）", math.max(minCash, actualCost))
     end
 
     -- 消耗 AP + 资金
@@ -1066,9 +1077,9 @@ function StockEngine.MarketDump(state, stockId)
         -- M1: 消耗公信力
         StockEngine.ConsumeCredibility(state, "dump", true)
         GameState.AddLog(state, string.format(
-            "📉 做空操盘成功：%s delta_mu %.2f 持续 %d 季（投入 %d，公信力 %d）",
+            "📉 做空操盘成功：%s delta_mu %.2f 持续 %d 季（投入 %d，声誉 %d）",
             stock.name or stockId, cfg.delta_mu, cfg.duration, actualCost,
-            state.press_credibility or 0))
+            state.reputation or 0))
         -- M4: AI 对手盘反制
         StockEngine.TryAICounterparty(state, stockId, "dump")
         return true, string.format("操盘成功！%s 将受到做空打压（投入 %d）",
@@ -1082,8 +1093,8 @@ function StockEngine.MarketDump(state, stockId)
         -- M1: 失败也消耗公信力（且消耗更多）
         StockEngine.ConsumeCredibility(state, "dump", false)
         GameState.AddLog(state, string.format(
-            "📈 做空操盘失败：%s 反向上涨，额外损失 %d（公信力 %d）",
-            stock.name or stockId, lostExtra, state.press_credibility or 0))
+            "📈 做空操盘失败：%s 反向上涨，额外损失 %d（声誉 %d）",
+            stock.name or stockId, lostExtra, state.reputation or 0))
         return false, string.format("操盘失败！%s 反向上涨，额外损失 %d",
             stock.name or stockId, lostExtra)
     end
@@ -1141,14 +1152,16 @@ function StockEngine.CoordinatedOp(state, pumpStockId, dumpStockId)
     if not pumpStock then return false, "做多目标不存在" end
     if not dumpStock then return false, "做空目标不存在" end
 
-    -- 固定资金
-    if state.cash < cfg.fixed_cost then
-        return false, string.format("资金不足（需要 %d）", cfg.fixed_cost)
+    -- S4: 联合操盘固定费用跟通胀
+    local inflation = GameState.GetInflationFactor(state)
+    local fixedCost = math.floor((cfg.fixed_cost_base or cfg.fixed_cost or 15000) * inflation)
+    if state.cash < fixedCost then
+        return false, string.format("资金不足（需要 %d）", fixedCost)
     end
 
     -- 消耗 AP + 资金
     GameState.SpendAP(state, cfg.ap)
-    state.cash = state.cash - cfg.fixed_cost
+    state.cash = state.cash - fixedCost
 
     -- 成功率
     local successRate = calcManipulationSuccess(state, cfg.base_success)
@@ -1169,9 +1182,9 @@ function StockEngine.CoordinatedOp(state, pumpStockId, dumpStockId)
         -- M1: 联合操盘消耗更多公信力
         StockEngine.ConsumeCredibility(state, "coordinated", true)
         GameState.AddLog(state, string.format(
-            "⚡ 联合操盘成功：%s ↑ / %s ↓ 持续 %d 季（投入 %d，公信力 %d）",
+            "⚡ 联合操盘成功：%s ↑ / %s ↓ 持续 %d 季（投入 %d，声誉 %d）",
             pumpStock.name or pumpStockId, dumpStock.name or dumpStockId,
-            cfg.duration, cfg.fixed_cost, state.press_credibility or 0))
+            cfg.duration, fixedCost, state.reputation or 0))
         -- M4: AI 对手盘反制（对做多和做空目标分别尝试）
         StockEngine.TryAICounterparty(state, pumpStockId, "pump")
         StockEngine.TryAICounterparty(state, dumpStockId, "dump")
@@ -1179,15 +1192,15 @@ function StockEngine.CoordinatedOp(state, pumpStockId, dumpStockId)
             pumpStock.name or pumpStockId, dumpStock.name or dumpStockId)
     else
         -- 失败：资金损失 + 声誉惩罚
-        local lostExtra = math.floor(cfg.fixed_cost * cfg.fail_loss)
+        local lostExtra = math.floor(fixedCost * cfg.fail_loss)
         state.cash = state.cash - math.min(lostExtra, state.cash)
         state.reputation = (state.reputation or 0) + cfg.fail_rep
         state.manipulation_cooldowns.coordinated = cfg.cooldown
         -- M1: 失败也消耗公信力（且消耗更多）
         StockEngine.ConsumeCredibility(state, "coordinated", false)
         GameState.AddLog(state, string.format(
-            "💥 联合操盘失败：操盘败露，额外损失 %d，声誉 %d（公信力 %d）",
-            lostExtra, cfg.fail_rep, state.press_credibility or 0))
+            "💥 联合操盘失败：操盘败露，额外损失 %d，声誉 %d（当前声誉 %d）",
+            lostExtra, cfg.fail_rep, state.reputation or 0))
         return false, string.format("联合操盘失败！损失 %d，声誉 %d", lostExtra, cfg.fail_rep)
     end
 end
@@ -1206,47 +1219,24 @@ end
 -- M1: 媒体公信力（操盘消耗性资源）
 -- ============================================================================
 
---- 获取公信力对成功率的乘数
+--- 获取声誉对操盘成功率的乘数（代理到统一声誉系统）
 ---@param state table
----@return number multiplier [multiplier_floor, 1.0]
+---@return number multiplier [market_multiplier_floor, 1.0]
 function StockEngine.GetCredibilityMultiplier(state)
-    local Bal = require("data.balance")
-    local C = Bal.CREDIBILITY
-    local cred = state.press_credibility or C.initial
-    local floor = C.multiplier_floor
-    return floor + (1.0 - floor) * (cred / C.max)
+    local GameState = require("game_state")
+    return GameState.GetMarketManipulationMultiplier(state)
 end
 
---- 消耗公信力
+--- 消耗声誉（操盘代价，代理到统一声誉系统）
 ---@param state table
 ---@param costKey string "pump"|"dump"|"coordinated"
 ---@param success boolean 是否操盘成功
 function StockEngine.ConsumeCredibility(state, costKey, success)
-    local Bal = require("data.balance")
-    local C = Bal.CREDIBILITY
-    local baseCost = C["cost_" .. costKey] or 15
-    local cost = success and baseCost or math.ceil(baseCost * C.cost_fail_mult)
-    state.press_credibility = math.max(0, (state.press_credibility or C.initial) - cost)
+    local GameState = require("game_state")
+    GameState.ConsumeMarketReputation(state, costKey, success)
 end
 
---- 每季恢复公信力（含新闻社持股加成）
----@param state table
-function StockEngine.TickCredibility(state)
-    local Bal = require("data.balance")
-    local C = Bal.CREDIBILITY
-    if not state.press_credibility then
-        state.press_credibility = C.initial
-    end
-    local recovery = C.recovery_per_season
-    -- 新闻社持股加速恢复
-    local pressLevel = StockEngine.GetHoldingLevel(state, "balkan_press")
-    if pressLevel == "control" then
-        recovery = recovery + C.press_control_recovery_bonus
-    elseif pressLevel == "influence" then
-        recovery = recovery + C.press_influence_recovery_bonus
-    end
-    state.press_credibility = math.min(C.max, state.press_credibility + recovery)
-end
+-- TickCredibility 已移除：声誉恢复统一由 turn_engine 的 phase 4.6 处理
 
 -- ============================================================================
 -- M2: 方向互斥锁（同一股票买/空方向冷却）

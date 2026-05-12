@@ -76,6 +76,7 @@ local SOVEREIGN_COLORS = {
     yugoslavia      = {  70, 105, 145 },
     turkey          = { 155, 130,  70 },
     tito_yugoslavia = {  85, 115, 140 },
+    bosnia          = {  60, 160, 120 },  -- 玩家占领色（翠绿，区别于其他大国）
 }
 
 -- ============================================================================
@@ -393,8 +394,18 @@ function MapWidget:_GetHexControlColor(tile, isSelected, isHovered)
         local a = isSelected and 180 or (isHovered and 150 or 110)
         return fc[1], fc[2], fc[3], a
     end
-    -- 外国 tile：用主权着色（如被占领）
-    local sc = SOVEREIGN_COLORS[tile.controller] or COUNTRY_COLORS[tile.country_id]
+    -- 外国 tile：优先用 europeState 中的 sovereign（反映占领状态），fallback 到静态 controller
+    local sovereign = tile.controller
+    if self.europeState_ and self.europeState_[tile.country_id] then
+        sovereign = self.europeState_[tile.country_id].sovereign or sovereign
+    end
+    -- 已占领（sovereign="bosnia"）的外国地块使用玩家色，保持视觉一致
+    if sovereign == "bosnia" then
+        local fc = FACTION_COLORS.player
+        local a = isSelected and 200 or (isHovered and 170 or 130)
+        return fc[1], fc[2], fc[3], a
+    end
+    local sc = SOVEREIGN_COLORS[sovereign] or COUNTRY_COLORS[tile.country_id]
     if not sc then sc = { 90, 85, 75 } end
     local a = isSelected and 160 or (isHovered and 130 or 80)
     return sc[1], sc[2], sc[3], a
@@ -500,9 +511,15 @@ function MapWidget:_DrawHexFills(nvg, mx, my, mw, mh, theme)
         if self.europeState_ and tile.country_id ~= "bosnia" then
             local cs = self.europeState_[tile.country_id]
             if cs then
-                local sc = SOVEREIGN_COLORS[cs.sovereign]
-                if sc then
-                    r, g, b = sc[1], sc[2], sc[3]
+                if cs.sovereign == "bosnia" then
+                    -- 玩家占领的外国地块：底层也用玩家色，保持视觉一致
+                    local fc = FACTION_COLORS.player
+                    r, g, b = fc[1], fc[2], fc[3]
+                else
+                    local sc = SOVEREIGN_COLORS[cs.sovereign]
+                    if sc then
+                        r, g, b = sc[1], sc[2], sc[3]
+                    end
                 end
                 if cs.sovereign ~= cs.original then
                     alpha = math.min(255, (theme.hexAlpha or 42) + 40)

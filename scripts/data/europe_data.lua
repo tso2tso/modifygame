@@ -94,7 +94,7 @@ local COUNTRIES = {
         sovereign = "serbia",
         stability = 70,
         resistance = 0,
-        adjacency = { "austria_hungary", "montenegro", "bulgaria", "romania", "ottoman" },
+        adjacency = { "austria_hungary", "montenegro", "bulgaria", "romania", "ottoman", "greece" },
     },
     {
         id = "romania",
@@ -124,7 +124,7 @@ local COUNTRIES = {
         sovereign = "greece",
         stability = 55,
         resistance = 0,
-        adjacency = { "ottoman", "bulgaria" },
+        adjacency = { "ottoman", "bulgaria", "montenegro", "serbia" },
     },
     {
         id = "montenegro",
@@ -134,7 +134,7 @@ local COUNTRIES = {
         sovereign = "montenegro",
         stability = 65,
         resistance = 0,
-        adjacency = { "austria_hungary", "serbia" },
+        adjacency = { "austria_hungary", "serbia", "greece" },
     },
     {
         id = "lowlands",

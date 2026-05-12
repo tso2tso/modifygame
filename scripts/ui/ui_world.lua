@@ -15,6 +15,18 @@ local PlayerActionsGP = require("systems.player_actions_gp")
 local ForeignOps = require("systems.foreign_ops")
 local EuropeData = require("data.europe_data")
 local ActionModals = require("ui.ui_action_modals")
+-- TradePanel 已迁移至市场页（ui_market.lua）
+local ExpeditionPanel = require("ui.ui_expedition")
+local Trade = require("systems.trade")
+local Expedition = require("systems.expedition")
+local TradeRoutesData = require("data.trade_routes_data")
+local BE = Balance.EXPEDITION
+
+local FactionsPanel = require("ui.ui_factions")
+local ReportPanel = require("ui.ui_report")
+local VenturePanel = require("ui.ui_venture")
+local Venture = require("systems.venture")
+local BV = Balance.VENTURE
 
 -- 构建国家ID→中文名映射表
 local _countryLabels = {}
@@ -60,51 +72,55 @@ local contentRoot_ = nil
 local tabContentPanel_ = nil
 ---@type table
 local drawerPanel_ = nil
----@type table|nil UI 根节点引用（Modal 需要）
-local uiRoot_ = nil
----@type table|nil 当前称号详情弹窗
-local currentTitleModal_ = nil
 ---@type string
 local activeSubTab_ = "map"
 ---@type string|nil
 local selectedNodeId_ = nil
----@type string 当前称号分支
-local activeTitleCategoryId_ = "military"
 
--- ── 势力页缓存：避免每次切 Tab 都重新计算 ──
----@type table|nil
-local cachedPrecomputed_ = nil
----@type boolean
-local precomputedDirty_ = true
-
---- 设置 UI 根节点（称号详情 Modal 必须 AddChild 到 UI 树才能渲染）
+--- 设置 UI 根节点（报告页 Modal 需要挂载到 UI 树）
 function WorldPage.SetRoot(root)
-    uiRoot_ = root
+    ReportPanel.SetRoot(root)
 end
 
 --- 标记势力预计算数据为脏（在 onStateChanged / 页面重建时调用）
 function WorldPage.InvalidatePrecomputed()
-    precomputedDirty_ = true
-    cachedPrecomputed_ = nil
+    FactionsPanel.InvalidatePrecomputed()
 end
 
 --- 新游戏/读档时重置页面状态（清除选中节点和子标签）
 function WorldPage.Reset()
     selectedNodeId_ = nil
     activeSubTab_ = "map"
-    activeTitleCategoryId_ = "military"
-    if currentTitleModal_ then
-        currentTitleModal_:Close()
-        currentTitleModal_ = nil
-    end
+    FactionsPanel.Reset()
+    ReportPanel.Reset()
 end
 
--- 子 Tab 定义（关系+势力合并为"势力与外交"）
+-- 子 Tab 定义（远征始终显示，贸易已迁移至市场页）
 local SUB_TABS = {
-    { id = "map",       label = "地图" },
-    { id = "factions",  label = "势力" },
-    { id = "report",    label = "报告" },
+    { id = "map",        label = "地图" },
+    { id = "factions",   label = "势力" },
+    { id = "report",     label = "报告" },
+    { id = "expedition", label = "远征" },
+    { id = "venture",    label = "商路" },
 }
+
+--- 构建当前可见的子标签列表（远征始终显示，未解锁时标记 locked）
+---@param state table
+---@return table[]
+local function _GetVisibleSubTabs(state)
+    local unlocked = state.unlocked_features or {}
+    local tabs = {}
+    for _, t in ipairs(SUB_TABS) do
+        local entry = { id = t.id, label = t.label }
+        if t.id == "expedition" and not unlocked["expedition"] then
+            entry.locked = true
+        elseif t.id == "venture" and not unlocked["venture"] then
+            entry.locked = true
+        end
+        table.insert(tabs, entry)
+    end
+    return tabs
+end
 
 -- ============================================================================
 -- 入口
@@ -167,14 +183,18 @@ end
 -- ============================================================================
 
 function WorldPage._CreateSubTabBar()
+    local visibleTabs = _GetVisibleSubTabs(stateRef_ or {})
     local tabButtons = {}
-    for _, tab in ipairs(SUB_TABS) do
+    for _, tab in ipairs(visibleTabs) do
         local isActive = (tab.id == activeSubTab_)
+        local isLocked = tab.locked
+        local displayLabel = isLocked and ("🔒 " .. tab.label) or tab.label
         table.insert(tabButtons, UI.Button {
-            text = tab.label,
+            text = displayLabel,
             fontSize = F.body,
             fontWeight = isActive and "bold" or "normal",
-            fontColor = isActive and C.accent_gold or C.text_muted,
+            fontColor = isLocked and C.text_tertiary
+                or (isActive and C.accent_gold or C.text_muted),
             backgroundColor = isActive and C.bg_elevated or { 0, 0, 0, 0 },
             borderRadius = S.radius_btn,
             paddingHorizontal = 14,
@@ -212,6 +232,70 @@ function WorldPage._RefreshTabBar()
 end
 
 -- ============================================================================
+-- 锁定占位面板（功能未解锁时显示）
+-- ============================================================================
+
+---@param title string 功能名称
+---@param subtitle string 解锁途径简述
+---@param conditions string[] 具体解锁条件列表
+---@return table widget
+function WorldPage._BuildLockedPanel(title, subtitle, conditions)
+    local condRows = {}
+    for _, cond in ipairs(conditions) do
+        table.insert(condRows, UI.Label {
+            text = "• " .. cond,
+            fontSize = F.body,
+            fontColor = C.text_secondary,
+        })
+    end
+    return UI.Panel {
+        width = "100%",
+        flexGrow = 1,
+        justifyContent = "center",
+        alignItems = "center",
+        paddingHorizontal = 32,
+        paddingVertical = 48,
+        gap = 12,
+        children = {
+            UI.Label { text = "🔒", fontSize = 48 },
+            UI.Label {
+                text = title,
+                fontSize = F.title,
+                fontWeight = "bold",
+                fontColor = C.text_primary,
+            },
+            UI.Label {
+                text = subtitle,
+                fontSize = F.body,
+                fontColor = C.text_muted,
+                textAlign = "center",
+            },
+            UI.Panel {
+                width = "80%",
+                backgroundColor = C.paper_dark,
+                borderRadius = S.radius_card,
+                padding = S.card_padding,
+                gap = 6,
+                flexDirection = "column",
+                children = (function()
+                    local c = {}
+                    table.insert(c, UI.Label {
+                        text = "解锁条件",
+                        fontSize = F.body_minor,
+                        fontWeight = "bold",
+                        fontColor = C.text_muted,
+                    })
+                    for _, row in ipairs(condRows) do
+                        table.insert(c, row)
+                    end
+                    return c
+                end)(),
+            },
+        },
+    }
+end
+
+-- ============================================================================
 -- 子 Tab 切换
 -- ============================================================================
 
@@ -222,9 +306,40 @@ function WorldPage._SwitchSubTab(state, tabId)
     if tabId == "map" then
         WorldPage._BuildMapTab(state)
     elseif tabId == "factions" then
-        WorldPage._BuildFactionsTab(state)
+        tabContentPanel_:AddChild(FactionsPanel.Build(state, callbacksRef_))
     elseif tabId == "report" then
-        WorldPage._BuildReportTab(state)
+        tabContentPanel_:AddChild(ReportPanel.Build(state, callbacksRef_))
+    elseif tabId == "expedition" then
+        local unlocked = state.unlocked_features
+            and state.unlocked_features["expedition"]
+        if unlocked then
+            local panel = ExpeditionPanel.Build(state, callbacksRef_)
+            tabContentPanel_:AddChild(panel)
+        else
+            tabContentPanel_:AddChild(WorldPage._BuildLockedPanel(
+                "军事远征",
+                "获得称号「幕后执政」后解锁",
+                {
+                    "三大区域控制度均 ≥ 70",
+                    "武装力量 ≥ 15 人",
+                }
+            ))
+        end
+    elseif tabId == "venture" then
+        local unlocked = state.unlocked_features
+            and state.unlocked_features["venture"]
+        if unlocked then
+            local panel = VenturePanel.Build(state, callbacksRef_)
+            tabContentPanel_:AddChild(panel)
+        else
+            tabContentPanel_:AddChild(WorldPage._BuildLockedPanel(
+                "商业远征",
+                "研究科技后解锁",
+                {
+                    "研究「金融网络」科技（经济B线第5层）",
+                }
+            ))
+        end
     end
 end
 
@@ -301,6 +416,7 @@ function WorldPage._BuildMapTab(state)
         flexDirection = "column",
         gap = S.card_gap,
         paddingTop = S.card_gap,
+        paddingBottom = 12,
         children = {
             mapWidget_,
             drawerPanel_,
@@ -365,7 +481,7 @@ function WorldPage._CreateNodeDrawer(state, region, tile)
             population = tile.population or 0,
             development = tile.development or 1,
             culture = tile.culture or 0,
-            influence = tile.influence or 0,
+            -- influence 已合并到 control
             resources = {},
             ai_presence = aiPresence,
         }
@@ -518,9 +634,23 @@ function WorldPage._CreateNodeDrawer(state, region, tile)
         end
     end
 
+    -- ── 外国 tile 占领状态检测（提前到操作按钮前，供后续使用）──
+    local isForeignTile = tile and tile.country_id and tile.country_id ~= "bosnia"
+    local isOccupied = false
+    local occupationInfo = nil  -- { income_per_turn, maintenance, since_turn, ... }
+    if isForeignTile and state.expeditions and state.expeditions.occupied_countries then
+        for _, occ in ipairs(state.expeditions.occupied_countries) do
+            if occ.country_id == tile.country_id then
+                isOccupied = true
+                occupationInfo = occ
+                break
+            end
+        end
+    end
+
     -- 操作按钮
     local actionChildren = {}
-    if region.type == "mine" or region.type == "industrial" then
+    if (region.type == "mine" or region.type == "industrial") and not isForeignTile then
         table.insert(actionChildren, UI.Button {
             text = "前往产业页管理",
             fontSize = F.label,
@@ -540,16 +670,13 @@ function WorldPage._CreateNodeDrawer(state, region, tile)
         })
     end
     if (not tile) or tile.region_id then
-        local infCost = Balance.INFLUENCE.cost_infiltrate
-        local totalInfluence = GameState.CalcTotalInfluence(state)
         local infiltrateAP = 2  -- TODO: 提取到 Balance 配置（当前硬编码）
         local alreadyFull = (region.control or 0) >= 100
         local canInfiltrate = not alreadyFull
             and (state.ap.current + (state.ap.temp or 0)) >= infiltrateAP
-            and totalInfluence >= infCost
         local btnText = alreadyFull
             and string.format("%s 已完全控制", region.name)
-            or string.format("渗透%s（%dAP+%d影响力）", region.name, infiltrateAP, infCost)
+            or string.format("渗透%s（%dAP）", region.name, infiltrateAP)
         table.insert(actionChildren, UI.Button {
             text = btnText,
             fontSize = F.label,
@@ -621,9 +748,13 @@ function WorldPage._CreateNodeDrawer(state, region, tile)
         end
 
         if isScouted and not isActive then
+            local exploitBtnText = string.format("开采矿产（%dAP+%d₿）",
+                BFO.exploit_ap, BFO.exploit_cash)
+            if not canExploit and exploitReason then
+                exploitBtnText = exploitBtnText .. " - " .. exploitReason
+            end
             table.insert(actionChildren, UI.Button {
-                text = string.format("开采矿产（%dAP+%d₿）",
-                    BFO.exploit_ap, BFO.exploit_cash),
+                text = exploitBtnText,
                 fontSize = F.label,
                 fontColor = canExploit and C.accent_green or C.text_muted,
                 backgroundColor = canExploit and C.bg_elevated or C.paper_dark,
@@ -692,6 +823,839 @@ function WorldPage._CreateNodeDrawer(state, region, tile)
         end
     end
 
+    -- ── 远征行动区（多回合并发远征版）──
+    local expeditionSection = nil
+    if tile and tile.country_id ~= "bosnia"
+       and state.unlocked_features and state.unlocked_features["expedition"]
+       and Expedition.CanDoExpedition(state) then
+        local countryId = tile.country_id
+        -- 确保HP已初始化（幂等）
+        if state.europe then
+            Expedition.InitCountryHP(state)
+        end
+        -- 确保 ExpeditionPanel 模块回调就绪（供 _ShowDeployDialog 使用）
+        ExpeditionPanel.EnsureInit(state, callbacksRef_)
+
+        local cs = state.europe and state.europe[countryId]
+        if cs and cs.current_hp then
+            local summary = Expedition.GetSummary(state)
+            local hpPct = cs.max_hp > 0 and (cs.current_hp / cs.max_hp) or 0
+            local hpColor = hpPct > 0.5 and C.accent_green
+                or (hpPct > 0.2 and C.accent_amber or C.accent_red)
+            local isMajor = cs.tier == "major"
+            local aggression = summary.aggression or 0
+
+            -- 检查该国是否有活跃远征
+            local activeRecord = state.expeditions
+                and state.expeditions.active
+                and state.expeditions.active[countryId]
+            -- 检查该国是否待占领
+            local awaitingOcc = nil
+            if summary.awaiting_occupation then
+                for _, aw in ipairs(summary.awaiting_occupation) do
+                    if aw.country_id == countryId then awaitingOcc = aw; break end
+                end
+            end
+
+            local expChildren = {
+                UI.Divider { color = C.divider },
+                UI.Panel {
+                    width = "100%",
+                    flexDirection = "row",
+                    justifyContent = "space-between",
+                    alignItems = "center",
+                    children = {
+                        UI.Label {
+                            text = "⚔ 远征行动",
+                            fontSize = F.body_minor,
+                            fontWeight = "bold",
+                            fontColor = C.accent_red,
+                        },
+                        UI.Label {
+                            text = string.format("进行中 %d  侵略度 %.1f",
+                                summary.active_count or 0, aggression),
+                            fontSize = F.label,
+                            fontColor = aggression >= (BE.sanction_threshold or 10)
+                                and C.accent_red or C.text_secondary,
+                        },
+                    },
+                },
+                -- 军事HP血条
+                UI.Panel {
+                    width = "100%",
+                    flexDirection = "row",
+                    alignItems = "center",
+                    gap = 6,
+                    children = {
+                        UI.Label {
+                            text = "军事HP",
+                            fontSize = F.label,
+                            fontColor = C.text_secondary,
+                            width = 50,
+                        },
+                        UI.ProgressBar {
+                            value = hpPct,
+                            flexGrow = 1,
+                            height = 6,
+                            borderRadius = 3,
+                            trackColor = C.bg_surface,
+                            fillColor = hpColor,
+                        },
+                        UI.Label {
+                            text = string.format("%d/%d", cs.current_hp, cs.max_hp),
+                            fontSize = F.label,
+                            fontColor = C.text_secondary,
+                            width = 55,
+                            textAlign = "right",
+                        },
+                    },
+                },
+            }
+
+            -- 大国政治HP
+            if isMajor and cs.political_hp and cs.max_political_hp then
+                local polPct = cs.max_political_hp > 0
+                    and (cs.political_hp / cs.max_political_hp) or 0
+                local polColor = polPct > 0.5 and { 100, 149, 237, 255 }
+                    or (polPct > 0.2 and C.accent_amber or C.accent_red)
+                table.insert(expChildren, UI.Panel {
+                    width = "100%",
+                    flexDirection = "row",
+                    alignItems = "center",
+                    gap = 6,
+                    children = {
+                        UI.Label {
+                            text = "政治HP",
+                            fontSize = F.label,
+                            fontColor = C.text_secondary,
+                            width = 50,
+                        },
+                        UI.ProgressBar {
+                            value = polPct,
+                            flexGrow = 1,
+                            height = 6,
+                            borderRadius = 3,
+                            trackColor = C.bg_surface,
+                            fillColor = polColor,
+                        },
+                        UI.Label {
+                            text = string.format("%d/%d", cs.political_hp, cs.max_political_hp),
+                            fontSize = F.label,
+                            fontColor = C.text_secondary,
+                            width = 55,
+                            textAlign = "right",
+                        },
+                    },
+                })
+            end
+
+            -- ── 状态分支：已占领 / 活跃远征 / 待占领 / 可攻击 ──
+            if isOccupied then
+                -- 已占领：显示占领状态
+                table.insert(expChildren, UI.Panel {
+                    width = "100%",
+                    backgroundColor = { 41, 128, 185, 30 },
+                    borderRadius = 4,
+                    padding = 6,
+                    alignItems = "center",
+                    children = {
+                        UI.Label {
+                            text = "已纳入版图，无需继续军事行动",
+                            fontSize = F.label,
+                            fontColor = C.accent_blue,
+                        },
+                    },
+                })
+            elseif activeRecord then
+                -- 有活跃远征：显示进度 + 增援/撤军按钮
+                local deployedPower = math.floor(Expedition.CalcDeployedPower(state, activeRecord))
+                local deployedSoldiers = math.floor(Expedition.CalcDeployedSoldiers(state, activeRecord))
+                local turnDmg = math.floor(Expedition.CalcTurnDamage(state, activeRecord))
+                local estTurns = Expedition.EstimateTurns(state, activeRecord)
+                local successRate = Expedition.CalcSuccessRate(state, activeRecord)
+                local successPct = math.floor(successRate * 100)
+                local successColor = successPct >= 70 and C.accent_green
+                    or (successPct >= 40 and C.accent_amber or C.accent_red)
+
+                table.insert(expChildren, UI.Panel {
+                    width = "100%",
+                    backgroundColor = { 180, 60, 60, 25 },
+                    borderRadius = 4,
+                    padding = 6,
+                    gap = 3,
+                    children = {
+                        UI.Label {
+                            text = string.format("远征进行中（第 %d 回合）",
+                                activeRecord.turns_elapsed or 0),
+                            fontSize = F.label,
+                            fontWeight = "bold",
+                            fontColor = C.accent_red,
+                        },
+                        UI.Label {
+                            text = string.format(
+                                "兵力 %d人 | 战力 %d | 每回合伤害 %d",
+                                deployedSoldiers, deployedPower, turnDmg),
+                            fontSize = F.label,
+                            fontColor = C.text_secondary,
+                        },
+                        UI.Panel {
+                            width = "100%",
+                            flexDirection = "row",
+                            justifyContent = "space-between",
+                            children = {
+                                UI.Label {
+                                    text = string.format("成功率 %d%%", successPct),
+                                    fontSize = F.label,
+                                    fontColor = successColor,
+                                },
+                                UI.Label {
+                                    text = string.format("预计 %s 回合",
+                                        estTurns == math.huge and "∞" or tostring(estTurns)),
+                                    fontSize = F.label,
+                                    fontColor = C.text_secondary,
+                                },
+                            },
+                        },
+                    },
+                })
+
+                -- 增援 / 撤军按钮
+                local totalAP = (state.ap.current or 0) + (state.ap.temp or 0)
+                local canReinforce = totalAP >= (BE.expedition_reinforce_ap or 1)
+                local canWithdraw = totalAP >= (BE.expedition_withdraw_ap or 1)
+                table.insert(expChildren, UI.Panel {
+                    width = "100%",
+                    flexDirection = "row",
+                    gap = 6,
+                    children = {
+                        UI.Button {
+                            text = string.format("增援 %dAP", BE.expedition_reinforce_ap or 1),
+                            fontSize = F.label,
+                            fontColor = canReinforce and C.text_primary or C.text_muted,
+                            backgroundColor = canReinforce and { 60, 120, 60, 50 } or C.bg_surface,
+                            borderRadius = S.radius_btn,
+                            borderWidth = 1,
+                            borderColor = canReinforce and C.accent_green or C.border_soft,
+                            paddingVertical = 5,
+                            paddingHorizontal = 8,
+                            flexGrow = 1,
+                            disabled = not canReinforce,
+                            onClick = Config.ClickGuard(function(self)
+                                ExpeditionPanel._ShowDeployDialog(state, countryId, "reinforce")
+                            end),
+                        },
+                        UI.Button {
+                            text = string.format("撤军 %dAP", BE.expedition_withdraw_ap or 1),
+                            fontSize = F.label,
+                            fontColor = canWithdraw and C.text_primary or C.text_muted,
+                            backgroundColor = canWithdraw and { 180, 60, 60, 40 } or C.bg_surface,
+                            borderRadius = S.radius_btn,
+                            borderWidth = 1,
+                            borderColor = canWithdraw and C.accent_red or C.border_soft,
+                            paddingVertical = 5,
+                            paddingHorizontal = 8,
+                            flexGrow = 1,
+                            disabled = not canWithdraw,
+                            onClick = Config.ClickGuard(function(self)
+                                ExpeditionPanel._ShowWithdrawDialog(state, countryId)
+                            end),
+                        },
+                    },
+                })
+            elseif awaitingOcc then
+                -- 待占领：显示占领决策按钮
+                table.insert(expChildren, UI.Panel {
+                    width = "100%",
+                    backgroundColor = { 41, 128, 185, 35 },
+                    borderRadius = 4,
+                    padding = 6,
+                    gap = 4,
+                    children = {
+                        UI.Label {
+                            text = (function()
+                                local elapsed = (state.turn_count or 0) - (awaitingOcc.defeated_turn or 0)
+                                local remaining = math.max(0, 2 - elapsed)
+                                if remaining > 0 then
+                                    return string.format("🏴 军事HP归零，可执行占领！（剩余 %d 回合窗口期）", remaining)
+                                else
+                                    return "🏴 军事HP归零，可执行占领！（窗口期即将结束）"
+                                end
+                            end)(),
+                            fontSize = F.label,
+                            fontWeight = "bold",
+                            fontColor = C.accent_blue,
+                        },
+                        UI.Panel {
+                            width = "100%",
+                            flexDirection = "row",
+                            gap = 4,
+                            children = {
+                                UI.Button {
+                                    text = string.format("自行占领 %dAP+%d₿",
+                                        BE.occupy_ap_cost or 2, BE.occupy_cash_cost or 300),
+                                    fontSize = F.label,
+                                    fontColor = C.text_primary,
+                                    backgroundColor = { 41, 128, 185, 60 },
+                                    borderRadius = S.radius_btn,
+                                    paddingVertical = 5,
+                                    paddingHorizontal = 6,
+                                    flexGrow = 1,
+                                    onClick = Config.ClickGuard(function(self)
+                                        local ok, msg = Expedition.OccupySelf(state, countryId)
+                                        if ok then
+                                            UI.Toast.Show(msg, { variant = "success", duration = 2.0 })
+                                        else
+                                            UI.Toast.Show(msg, { variant = "error", duration = 2.0 })
+                                        end
+                                        if callbacksRef_ and callbacksRef_.onStateChanged then
+                                            callbacksRef_.onStateChanged()
+                                        end
+                                    end),
+                                },
+                                UI.Button {
+                                    text = string.format("交给盟友 %dAP",
+                                        BE.give_to_faction_ap or 1),
+                                    fontSize = F.label,
+                                    fontColor = C.text_primary,
+                                    backgroundColor = { 60, 120, 60, 50 },
+                                    borderRadius = S.radius_btn,
+                                    paddingVertical = 5,
+                                    paddingHorizontal = 6,
+                                    flexGrow = 1,
+                                    onClick = Config.ClickGuard(function(self)
+                                        -- 选择关系最好的势力
+                                        local bestFaction, bestRel = nil, -999
+                                        for fid, fdata in pairs(state.factions or {}) do
+                                            local rel = fdata.relation or 0
+                                            if rel > bestRel then
+                                                bestFaction = fid; bestRel = rel
+                                            end
+                                        end
+                                        if not bestFaction then
+                                            UI.Toast.Show("无可用盟友势力", { variant = "error", duration = 1.5 })
+                                            return
+                                        end
+                                        local ok, msg = Expedition.OccupyGiveToFaction(
+                                            state, countryId, bestFaction)
+                                        if ok then
+                                            UI.Toast.Show(msg, { variant = "success", duration = 2.0 })
+                                        else
+                                            UI.Toast.Show(msg, { variant = "error", duration = 2.0 })
+                                        end
+                                        if callbacksRef_ and callbacksRef_.onStateChanged then
+                                            callbacksRef_.onStateChanged()
+                                        end
+                                    end),
+                                },
+                            },
+                        },
+                        UI.Button {
+                            text = "放弃占领",
+                            fontSize = F.label,
+                            fontColor = C.text_muted,
+                            backgroundColor = C.bg_surface,
+                            borderRadius = S.radius_btn,
+                            paddingVertical = 4,
+                            width = "100%",
+                            onClick = Config.ClickGuard(function(self)
+                                local ok, msg = Expedition.AbandonOccupation(state, countryId)
+                                if ok then
+                                    UI.Toast.Show(msg, { variant = "success", duration = 2.0 })
+                                else
+                                    UI.Toast.Show(msg, { variant = "error", duration = 2.0 })
+                                end
+                                if callbacksRef_ and callbacksRef_.onStateChanged then
+                                    callbacksRef_.onStateChanged()
+                                end
+                            end),
+                        },
+                    },
+                })
+            else
+                -- 无活跃远征：显示发起远征按钮
+                local diffMod = Expedition.GetConquestDifficultyMod(state, countryId)
+                local fwdBonus = Expedition.GetForwardBaseBonus(state, countryId)
+                local diffLabel = diffMod > 1.2 and "困难" or (diffMod < 0.8 and "容易" or "正常")
+                local diffColor = diffMod > 1.2 and C.accent_red
+                    or (diffMod < 0.8 and C.accent_green or C.text_secondary)
+
+                table.insert(expChildren, UI.Panel {
+                    width = "100%",
+                    flexDirection = "row",
+                    justifyContent = "space-between",
+                    children = {
+                        UI.Label {
+                            text = string.format("难度: %s (×%.2f)", diffLabel, diffMod),
+                            fontSize = F.label,
+                            fontColor = diffColor,
+                        },
+                        fwdBonus > 0 and UI.Label {
+                            text = string.format("前线基地 +%d%%", math.floor(fwdBonus * 100)),
+                            fontSize = F.label,
+                            fontColor = C.accent_green,
+                        } or nil,
+                    },
+                })
+
+                local totalAP = (state.ap.current or 0) + (state.ap.temp or 0)
+                local inflation = GameState.GetInflationFactor
+                    and GameState.GetInflationFactor(state) or 1.0
+                local canLaunch = totalAP >= (BE.expedition_ap_cost or 2)
+                table.insert(expChildren, UI.Button {
+                    text = string.format("发起远征 %dAP + 兵×%d₿",
+                        BE.expedition_ap_cost or 2,
+                        math.floor((BE.expedition_cost_per_soldier or 40) * inflation)),
+                    fontSize = F.label,
+                    fontColor = canLaunch and C.text_primary or C.text_muted,
+                    backgroundColor = canLaunch and { 180, 60, 60, 60 } or C.bg_surface,
+                    borderRadius = S.radius_btn,
+                    borderWidth = 1,
+                    borderColor = canLaunch and C.accent_red or C.border_soft,
+                    paddingVertical = 6,
+                    width = "100%",
+                    disabled = not canLaunch,
+                    onClick = Config.ClickGuard(function(self)
+                        ExpeditionPanel._ShowDeployDialog(state, countryId, "launch")
+                    end),
+                })
+            end
+
+            -- 支援按钮（仅对大国）
+            if isMajor and not isOccupied then
+                local totalAP = (state.ap.current or 0) + (state.ap.temp or 0)
+                local canSupport = totalAP >= (BE.support_ap_cost or 1)
+                    and state.cash >= (BE.support_cash_cost or 100)
+                table.insert(expChildren, UI.Button {
+                    text = string.format("支援作战 %dAP+%d₿",
+                        BE.support_ap_cost or 1, BE.support_cash_cost or 100),
+                    fontSize = F.label,
+                    fontColor = canSupport and { 100, 200, 100, 255 } or C.text_muted,
+                    backgroundColor = canSupport and { 60, 120, 60, 40 } or C.bg_surface,
+                    borderRadius = S.radius_btn,
+                    borderWidth = 1,
+                    borderColor = canSupport and C.accent_green or C.border_soft,
+                    paddingVertical = 5,
+                    width = "100%",
+                    disabled = not canSupport,
+                    onClick = Config.ClickGuard(function(self)
+                        self.props.disabled = true
+                        local ok, msg = Expedition.Support(state, countryId, nil)
+                        if ok then
+                            UI.Toast.Show(msg, { variant = "success", duration = 2.0 })
+                        else
+                            UI.Toast.Show(msg, { variant = "error", duration = 2.0 })
+                        end
+                        if callbacksRef_ and callbacksRef_.onStateChanged then
+                            callbacksRef_.onStateChanged()
+                        end
+                    end),
+                })
+            end
+
+            -- 制裁警告
+            local sanctioned, sanctionReason = Expedition.CheckSanction(state)
+            if sanctioned then
+                local warnText = sanctionReason == "military_intervention"
+                    and "列强军事干预中！"
+                    or string.format("经济制裁中（剩余 %d 季）",
+                        state.expeditions and state.expeditions.sanction_remaining or 0)
+                table.insert(expChildren, UI.Label {
+                    text = "⚠ " .. warnText,
+                    fontSize = F.label,
+                    fontColor = C.accent_red,
+                })
+            end
+
+            expeditionSection = UI.Panel {
+                width = "100%",
+                paddingHorizontal = S.card_padding,
+                paddingBottom = 4,
+                flexDirection = "column",
+                gap = 5,
+                children = expChildren,
+            }
+        end
+    elseif tile and tile.country_id and tile.country_id ~= "bosnia" then
+        -- 外国地块但远征未解锁：显示提示
+        local countryLabel = _countryLabels[tile.country_id] or tile.country_id
+        expeditionSection = UI.Panel {
+            width = "100%",
+            paddingHorizontal = S.card_padding,
+            paddingVertical = 6,
+            flexDirection = "column",
+            gap = 4,
+            children = {
+                UI.Divider { color = C.divider },
+                UI.Label {
+                    text = "🔒 远征行动（未解锁）",
+                    fontSize = F.label,
+                    fontColor = C.text_muted,
+                },
+                UI.Label {
+                    text = "获得「幕后执政」称号后可对" .. countryLabel .. "发起远征行动（需三区域控制度≥70）",
+                    fontSize = F.body_minor,
+                    fontColor = C.text_muted,
+                },
+            },
+        }
+    end
+
+    -- ── 商业远征区 ──
+    local ventureSection = nil
+    if tile and tile.country_id ~= "bosnia"
+       and state.unlocked_features and state.unlocked_features["venture"]
+       and Venture.CanDoVenture(state) then
+        local countryId = tile.country_id
+        Venture.InitMarketBarriers(state)
+        VenturePanel.EnsureInit(state, callbacksRef_)
+
+        local cs = state.europe and state.europe[countryId]
+        if cs and cs.max_market_barrier then
+            local summary = Venture.GetSummary(state)
+            local barrierPct = cs.max_market_barrier > 0
+                and (cs.market_barrier / cs.max_market_barrier) or 0
+            local barrierColor = barrierPct > 0.5 and C.accent_amber
+                or (barrierPct > 0.2 and C.accent_red or C.accent_green)
+
+            -- 检查该国是否有活跃商业远征
+            local activeRecord = (state.ventures.active or {})[countryId]
+            -- 检查该国是否有商业据点
+            local existingPost = (state.ventures.commercial_posts or {})[countryId]
+            -- 检查该国是否待决策
+            local awaitingDec = nil
+            for _, aw in ipairs(state.ventures.awaiting_decision or {}) do
+                if aw.power_id == countryId then awaitingDec = aw; break end
+            end
+
+            local ventChildren = {
+                UI.Divider { color = C.divider },
+                UI.Panel {
+                    width = "100%",
+                    flexDirection = "row",
+                    justifyContent = "space-between",
+                    alignItems = "center",
+                    children = {
+                        UI.Label {
+                            text = "💰 商业远征",
+                            fontSize = F.body_minor,
+                            fontWeight = "bold",
+                            fontColor = C.accent_gold,
+                        },
+                        UI.Label {
+                            text = string.format("进行中 %d/%d  紧张度 %.1f",
+                                summary.active_count or 0,
+                                BV.max_concurrent_ventures or 2,
+                                summary.market_tension or 0),
+                            fontSize = F.label,
+                            fontColor = (summary.market_tension or 0) >= (BV.sanction_threshold or 5)
+                                and C.accent_red or C.text_secondary,
+                        },
+                    },
+                },
+                -- 市场壁垒血条
+                UI.Panel {
+                    width = "100%",
+                    flexDirection = "row",
+                    alignItems = "center",
+                    gap = 6,
+                    children = {
+                        UI.Label {
+                            text = "壁垒",
+                            fontSize = F.label,
+                            fontColor = C.text_secondary,
+                            width = 50,
+                        },
+                        UI.ProgressBar {
+                            value = barrierPct,
+                            flexGrow = 1,
+                            height = 6,
+                            borderRadius = 3,
+                            trackColor = C.bg_surface,
+                            fillColor = barrierColor,
+                        },
+                        UI.Label {
+                            text = string.format("%d/%d",
+                                cs.market_barrier or 0, cs.max_market_barrier or 0),
+                            fontSize = F.label,
+                            fontColor = C.text_secondary,
+                            width = 55,
+                            textAlign = "right",
+                        },
+                    },
+                },
+            }
+
+            if existingPost then
+                -- 已有商业据点：显示据点信息
+                local estDef = BV.establishments[existingPost.type]
+                table.insert(ventChildren, UI.Panel {
+                    width = "100%",
+                    backgroundColor = { 180, 150, 50, 25 },
+                    borderRadius = 4,
+                    padding = 6,
+                    gap = 3,
+                    children = {
+                        UI.Label {
+                            text = string.format("%s %s（已建立）",
+                                estDef and estDef.icon or "🏪",
+                                estDef and estDef.label or existingPost.type),
+                            fontSize = F.label,
+                            fontWeight = "bold",
+                            fontColor = C.accent_gold,
+                        },
+                        UI.Panel {
+                            width = "100%",
+                            flexDirection = "row",
+                            justifyContent = "space-between",
+                            children = {
+                                UI.Label {
+                                    text = string.format("收入 +%d₿/季", existingPost.income_per_turn or 0),
+                                    fontSize = F.label,
+                                    fontColor = C.accent_green,
+                                },
+                                UI.Label {
+                                    text = string.format("维护 -%d₿/季", existingPost.maintenance or 0),
+                                    fontSize = F.label,
+                                    fontColor = C.accent_red,
+                                },
+                            },
+                        },
+                    },
+                })
+            elseif awaitingDec then
+                -- 壁垒已清零，待决策
+                table.insert(ventChildren, UI.Panel {
+                    width = "100%",
+                    backgroundColor = { 180, 150, 50, 35 },
+                    borderRadius = 4,
+                    padding = 6,
+                    gap = 4,
+                    children = {
+                        UI.Label {
+                            text = "🏴 市场壁垒已突破，可建立商业据点！",
+                            fontSize = F.label,
+                            fontWeight = "bold",
+                            fontColor = C.accent_gold,
+                        },
+                        UI.Label {
+                            text = "前往「商路」面板选择据点类型",
+                            fontSize = F.body_minor,
+                            fontColor = C.text_secondary,
+                        },
+                    },
+                })
+            elseif activeRecord then
+                -- 有活跃商业远征：显示进度
+                local detail = Venture.GetVentureDetail(state, countryId)
+                if detail then
+                    local stratDef = BV.strategies[activeRecord.strategy_id or "normal"]
+                    table.insert(ventChildren, UI.Panel {
+                        width = "100%",
+                        backgroundColor = { 180, 150, 50, 25 },
+                        borderRadius = 4,
+                        padding = 6,
+                        gap = 3,
+                        children = {
+                            UI.Label {
+                                text = string.format("渗透进行中（第 %d 回合）",
+                                    detail.turns_active or 0),
+                                fontSize = F.label,
+                                fontWeight = "bold",
+                                fontColor = C.accent_gold,
+                            },
+                            UI.Label {
+                                text = string.format(
+                                    "%s %s | %s | 渗透 %d/回合",
+                                    stratDef and stratDef.icon or "📦",
+                                    detail.strategy_label or "",
+                                    detail.investment_label or "",
+                                    detail.penetration_per_turn or 0),
+                                fontSize = F.label,
+                                fontColor = C.text_secondary,
+                            },
+                            UI.Panel {
+                                width = "100%",
+                                flexDirection = "row",
+                                justifyContent = "space-between",
+                                children = {
+                                    UI.Label {
+                                        text = string.format("费用 %d₿/季", detail.turn_cost or 0),
+                                        fontSize = F.label,
+                                        fontColor = C.accent_amber,
+                                    },
+                                    UI.Label {
+                                        text = string.format("预计 %s 回合",
+                                            (detail.estimated_turns or 0) >= 999
+                                                and "∞" or tostring(detail.estimated_turns or 0)),
+                                        fontSize = F.label,
+                                        fontColor = C.text_secondary,
+                                    },
+                                },
+                            },
+                        },
+                    })
+
+                    -- 调整/撤出按钮
+                    local totalAP = (state.ap.current or 0) + (state.ap.temp or 0)
+                    local canAdjust = totalAP >= (BV.reinforce_ap_cost or 1)
+                    local canWithdraw = totalAP >= (BV.withdraw_ap_cost or 1)
+                    table.insert(ventChildren, UI.Panel {
+                        width = "100%",
+                        flexDirection = "row",
+                        gap = 6,
+                        children = {
+                            UI.Button {
+                                text = string.format("调整投资 %dAP", BV.reinforce_ap_cost or 1),
+                                fontSize = F.label,
+                                fontColor = canAdjust and C.text_primary or C.text_muted,
+                                backgroundColor = canAdjust and { 180, 150, 50, 40 } or C.bg_surface,
+                                borderRadius = S.radius_btn,
+                                borderWidth = 1,
+                                borderColor = canAdjust and C.accent_gold or C.border_soft,
+                                paddingVertical = 5,
+                                paddingHorizontal = 8,
+                                flexGrow = 1,
+                                disabled = not canAdjust,
+                                onClick = Config.ClickGuard(function(self)
+                                    VenturePanel._ShowInvestmentDialog(state, countryId)
+                                end),
+                            },
+                            UI.Button {
+                                text = string.format("撤出 %dAP", BV.withdraw_ap_cost or 1),
+                                fontSize = F.label,
+                                fontColor = canWithdraw and C.text_primary or C.text_muted,
+                                backgroundColor = canWithdraw and { 180, 60, 60, 40 } or C.bg_surface,
+                                borderRadius = S.radius_btn,
+                                borderWidth = 1,
+                                borderColor = canWithdraw and C.accent_red or C.border_soft,
+                                paddingVertical = 5,
+                                paddingHorizontal = 8,
+                                flexGrow = 1,
+                                disabled = not canWithdraw,
+                                onClick = Config.ClickGuard(function(self)
+                                    local ok, msg = Venture.WithdrawVenture(state, countryId)
+                                    if ok then
+                                        UI.Toast.Show(msg, { variant = "success", duration = 2.0 })
+                                    else
+                                        UI.Toast.Show(msg, { variant = "error", duration = 2.0 })
+                                    end
+                                    if callbacksRef_ and callbacksRef_.onStateChanged then
+                                        callbacksRef_.onStateChanged()
+                                    end
+                                    WorldPage._RefreshDrawer(state)
+                                end),
+                            },
+                        },
+                    })
+                end
+            else
+                -- 无活跃远征：显示发起按钮
+                local diffMod = Venture.GetDifficultyMod(state)
+                local diffLabel = diffMod > 1.2 and "困难" or (diffMod < 0.8 and "容易" or "正常")
+                local diffColor = diffMod > 1.2 and C.accent_red
+                    or (diffMod < 0.8 and C.accent_green or C.text_secondary)
+
+                table.insert(ventChildren, UI.Panel {
+                    width = "100%",
+                    flexDirection = "row",
+                    justifyContent = "space-between",
+                    children = {
+                        UI.Label {
+                            text = string.format("难度: %s (×%.2f)", diffLabel, diffMod),
+                            fontSize = F.label,
+                            fontColor = diffColor,
+                        },
+                    },
+                })
+
+                -- 检查是否可以发起（贸易路线、并发限制等）
+                local totalAP = (state.ap.current or 0) + (state.ap.temp or 0)
+                local maxConc = BV.max_concurrent_ventures or 2
+                local atConcLimit = (summary.active_count or 0) >= maxConc
+                local route = TradeRoutesData.GetRouteForBuyer(countryId)
+                local routeUnlocked = route and route.unlocked
+                if not routeUnlocked and route and state.trade and state.trade.route_unlocks then
+                    routeUnlocked = state.trade.route_unlocks[route.id] or false
+                end
+                local canLaunch = totalAP >= (BV.venture_ap_cost or 2)
+                    and not atConcLimit
+                    and routeUnlocked
+                local inflation = GameState.GetInflationFactor
+                    and GameState.GetInflationFactor(state) or 1.0
+
+                local btnText
+                if not routeUnlocked then
+                    btnText = "贸易路线未开通"
+                elseif atConcLimit then
+                    btnText = string.format("并发上限 %d/%d", summary.active_count, maxConc)
+                else
+                    btnText = string.format("发起渗透 %dAP + %d₿起",
+                        BV.venture_ap_cost or 2,
+                        math.floor((BV.base_investment_cost or 300) * inflation))
+                end
+
+                table.insert(ventChildren, UI.Button {
+                    text = btnText,
+                    fontSize = F.label,
+                    fontColor = canLaunch and C.text_primary or C.text_muted,
+                    backgroundColor = canLaunch and { 180, 150, 50, 50 } or C.bg_surface,
+                    borderRadius = S.radius_btn,
+                    borderWidth = 1,
+                    borderColor = canLaunch and C.accent_gold or C.border_soft,
+                    paddingVertical = 6,
+                    width = "100%",
+                    disabled = not canLaunch,
+                    onClick = Config.ClickGuard(function(self)
+                        VenturePanel._ShowLaunchDialog(state, countryId)
+                    end),
+                })
+            end
+
+            -- 制裁警告
+            if summary.under_sanction then
+                table.insert(ventChildren, UI.Label {
+                    text = string.format("⚠ 贸易制裁中（剩余 %d 季）",
+                        summary.sanction_remaining or 0),
+                    fontSize = F.label,
+                    fontColor = C.accent_red,
+                })
+            end
+
+            ventureSection = UI.Panel {
+                width = "100%",
+                paddingHorizontal = S.card_padding,
+                paddingBottom = 4,
+                flexDirection = "column",
+                gap = 5,
+                children = ventChildren,
+            }
+        end
+    elseif tile and tile.country_id and tile.country_id ~= "bosnia"
+        and state.unlocked_features and not state.unlocked_features["venture"] then
+        -- 外国地块但商业远征未解锁：显示提示
+        local countryLabel = _countryLabels[tile.country_id] or tile.country_id
+        ventureSection = UI.Panel {
+            width = "100%",
+            paddingHorizontal = S.card_padding,
+            paddingVertical = 6,
+            flexDirection = "column",
+            gap = 4,
+            children = {
+                UI.Divider { color = C.divider },
+                UI.Label {
+                    text = "🔒 商业远征（未解锁）",
+                    fontSize = F.label,
+                    fontColor = C.text_muted,
+                },
+                UI.Label {
+                    text = "研发「金融网络」科技后可对" .. countryLabel .. "发起商业渗透",
+                    fontSize = F.body_minor,
+                    fontColor = C.text_muted,
+                },
+            },
+        }
+    end
+
     -- 构建控制比例 children
     local controlSectionChildren = {
         UI.Divider { color = C.divider },
@@ -706,6 +1670,248 @@ function WorldPage._CreateNodeDrawer(state, region, tile)
         table.insert(controlSectionChildren, row)
     end
 
+    -- ── 外国 tile：精简布局 ──
+    if isForeignTile then
+        local countryId = tile.country_id
+        local countryLabel = _countryLabels[countryId] or countryId
+        local cs = state.europe and state.europe[countryId]
+        local tierLabels = { major = "列强", minor = "小国", micro = "微国" }
+        local tierText = cs and tierLabels[cs.tier] or "未知"
+
+        -- 边框颜色：占领=蓝色，普通=灰色
+        local foreignBorder = isOccupied and C.accent_blue or C.border_soft
+
+        -- 头部背景色：占领时加深蓝色调
+        local headerBg = isOccupied and { 41, 128, 185, 50 } or C.bg_elevated
+
+        -- 状态 badge
+        local statusBadge = nil
+        if isOccupied then
+            statusBadge = UI.Panel {
+                paddingHorizontal = 6,
+                paddingVertical = 2,
+                backgroundColor = { 41, 128, 185, 80 },
+                borderRadius = S.radius_badge,
+                children = {
+                    UI.Label {
+                        text = "已占领",
+                        fontSize = F.label,
+                        fontWeight = "bold",
+                        fontColor = { 130, 200, 255, 255 },
+                    },
+                },
+            }
+        end
+
+        -- 占领收益信息
+        local occupyInfoSection = nil
+        if isOccupied and occupationInfo then
+            local incomeText = string.format("+%d₿/季", occupationInfo.income_per_turn or 0)
+            local maintText = string.format("-%d₿/季", occupationInfo.maintenance or 0)
+            occupyInfoSection = UI.Panel {
+                width = "100%",
+                paddingHorizontal = S.card_padding,
+                paddingVertical = 6,
+                backgroundColor = { 41, 128, 185, 25 },
+                flexDirection = "column",
+                gap = 4,
+                children = {
+                    UI.Panel {
+                        width = "100%",
+                        flexDirection = "row",
+                        justifyContent = "space-between",
+                        children = {
+                            UI.Label {
+                                text = "占领收入",
+                                fontSize = F.label,
+                                fontColor = C.text_secondary,
+                            },
+                            UI.Label {
+                                text = incomeText,
+                                fontSize = F.label,
+                                fontWeight = "bold",
+                                fontColor = C.accent_green,
+                            },
+                        },
+                    },
+                    UI.Panel {
+                        width = "100%",
+                        flexDirection = "row",
+                        justifyContent = "space-between",
+                        children = {
+                            UI.Label {
+                                text = "维持费用",
+                                fontSize = F.label,
+                                fontColor = C.text_secondary,
+                            },
+                            UI.Label {
+                                text = maintText,
+                                fontSize = F.label,
+                                fontColor = C.accent_red,
+                            },
+                        },
+                    },
+                },
+            }
+        end
+
+        -- 外国属性：精简版（只显示国力等级 + 稳定度）
+        local foreignAttrChildren = {}
+        local stabilityVal = cs and cs.stability or 0
+        local stabColor = stabilityVal >= 60 and C.accent_green
+            or (stabilityVal >= 30 and C.accent_amber or C.accent_red)
+        table.insert(foreignAttrChildren, WorldPage._InfoRow("国力", tierText, C.accent_gold))
+        table.insert(foreignAttrChildren, WorldPage._InfoRow("稳定度", tostring(stabilityVal), stabColor))
+
+        -- 贸易路线状态
+        if TradeRoutesData and TradeRoutesData.ROUTES then
+            for _, route in ipairs(TradeRoutesData.ROUTES) do
+                if route.buyer_power_id == countryId then
+                    local hasActiveOrder = false
+                    if state.trade and state.trade.active_orders then
+                        for _, order in ipairs(state.trade.active_orders) do
+                            if order.buyer_power_id == countryId then
+                                hasActiveOrder = true
+                                break
+                            end
+                        end
+                    end
+                    local tradeText = hasActiveOrder and "贸易进行中"
+                        or (route.unlocked and "路线已开通" or "路线未开通")
+                    local tradeColor = hasActiveOrder and C.accent_green
+                        or (route.unlocked and C.accent_amber or C.text_muted)
+                    table.insert(foreignAttrChildren, WorldPage._InfoRow("贸易", tradeText, tradeColor))
+                    break
+                end
+            end
+        end
+
+        -- 资源区（外国版）
+        local foreignResSection = nil
+        if #resourceRows > 0 then
+            local resChildren = {
+                UI.Divider { color = C.divider },
+                UI.Label {
+                    text = "矿产资源",
+                    fontSize = F.label,
+                    fontWeight = "bold",
+                    fontColor = C.text_secondary,
+                },
+            }
+            for _, row in ipairs(resourceRows) do
+                table.insert(resChildren, row)
+            end
+            foreignResSection = UI.Panel {
+                width = "100%",
+                paddingHorizontal = S.card_padding,
+                paddingBottom = 4,
+                flexDirection = "column",
+                gap = 4,
+                children = resChildren,
+            }
+        end
+
+        -- 动态构建 children（避免 nil 中断渲染）
+        local foreignChildren = {}
+
+        -- 1) 头部
+        local headerNameChildren = {
+            UI.Label {
+                text = countryLabel,
+                fontSize = F.card_title,
+                fontWeight = "bold",
+                fontColor = C.text_primary,
+            },
+        }
+        if statusBadge then
+            table.insert(headerNameChildren, statusBadge)
+        end
+
+        table.insert(foreignChildren, UI.Panel {
+            width = "100%",
+            padding = S.card_padding,
+            backgroundColor = headerBg,
+            borderRadius = S.radius_drawer,
+            flexDirection = "row",
+            alignItems = "center",
+            gap = 8,
+            children = {
+                UI.Label { text = "🏴", fontSize = 22 },
+                UI.Panel {
+                    flexGrow = 1,
+                    flexShrink = 1,
+                    flexDirection = "column",
+                    gap = 2,
+                    children = {
+                        UI.Panel {
+                            flexDirection = "row",
+                            alignItems = "center",
+                            gap = 6,
+                            children = headerNameChildren,
+                        },
+                        UI.Label {
+                            text = displayName .. " · " .. typeBadge,
+                            fontSize = F.label,
+                            fontColor = C.text_secondary,
+                        },
+                    },
+                },
+            },
+        })
+
+        -- 2) 占领收益区
+        if occupyInfoSection then
+            table.insert(foreignChildren, occupyInfoSection)
+        end
+
+        -- 3) 属性区（精简）
+        table.insert(foreignChildren, UI.Panel {
+            width = "100%",
+            padding = S.card_padding,
+            flexDirection = "column",
+            gap = 5,
+            children = foreignAttrChildren,
+        })
+
+        -- 4) 矿产资源区
+        if foreignResSection then
+            table.insert(foreignChildren, foreignResSection)
+        end
+
+        -- 5) 远征行动区
+        if expeditionSection then
+            table.insert(foreignChildren, expeditionSection)
+        end
+
+        -- 5.5) 商业远征区
+        if ventureSection then
+            table.insert(foreignChildren, ventureSection)
+        end
+
+        -- 6) 操作按钮区
+        if #actionChildren > 0 then
+            table.insert(foreignChildren, UI.Panel {
+                width = "100%",
+                padding = S.card_padding,
+                flexDirection = "row",
+                gap = 8,
+                children = actionChildren,
+            })
+        end
+
+        return UI.Panel {
+            width = "100%",
+            backgroundColor = C.paper_dark,
+            borderRadius = S.radius_drawer,
+            borderWidth = isOccupied and 2 or 1,
+            borderColor = foreignBorder,
+            flexDirection = "column",
+            overflow = "hidden",
+            children = foreignChildren,
+        }
+    end
+
+    -- ── 国内 tile：完整布局 ──
     return UI.Panel {
         width = "100%",
         backgroundColor = C.paper_dark,
@@ -715,7 +1921,7 @@ function WorldPage._CreateNodeDrawer(state, region, tile)
         flexDirection = "column",
         overflow = "hidden",
         children = {
-            -- 头部：节点名称 + 类型 Badge + 控制方
+            -- 头部：节点名称 + 类型 Badge + 控制度
             UI.Panel {
                 width = "100%",
                 padding = S.card_padding,
@@ -758,7 +1964,7 @@ function WorldPage._CreateNodeDrawer(state, region, tile)
                                 },
                             },
                             UI.Label {
-                                text = tile and (dominantText .. " · 模块控制: " .. controllerText) or dominantText,
+                                text = dominantText,
                                 fontSize = F.label,
                                 fontColor = C.text_secondary,
                             },
@@ -785,7 +1991,7 @@ function WorldPage._CreateNodeDrawer(state, region, tile)
                 },
             },
 
-            -- 属性区
+            -- 属性区（去掉重复控制度和调试模块行）
             UI.Panel {
                 width = "100%",
                 padding = S.card_padding,
@@ -800,15 +2006,12 @@ function WorldPage._CreateNodeDrawer(state, region, tile)
                         WorldPage._StarRating(region.development, 5), C.accent_gold),
                     WorldPage._InfoRow("文化价值",
                         tostring(region.culture), C.text_primary),
-                    WorldPage._InfoRow("影响力",
-                        tostring(region.influence or 0), C.accent_gold),
-                    tile and WorldPage._InfoRow("模块",
-                        string.format("%s / %s", tile.country_id or "-", tile.id), C.text_secondary) or nil,
                 },
             },
 
-            -- 资源区（如果有）
-            #resourceRows > 0 and (function()
+            -- 资源区
+            (function()
+                if #resourceRows == 0 then return nil end
                 local resChildren = {
                     UI.Divider { color = C.divider },
                     UI.Label {
@@ -842,1801 +2045,14 @@ function WorldPage._CreateNodeDrawer(state, region, tile)
             },
 
             -- 操作按钮区
-            UI.Panel {
+            #actionChildren > 0 and UI.Panel {
                 width = "100%",
                 padding = S.card_padding,
                 flexDirection = "row",
                 gap = 8,
                 children = actionChildren,
-            },
-        },
-    }
-end
-
--- ============================================================================
--- 势力子页 — §8.5 势力子页
--- ============================================================================
-
---- 一次性预计算势力面板所需的所有遍历数据，避免每张卡片重复扫描
----@param state table
----@return table precomputed
-function WorldPage._PrecomputeFactionsData(state)
-    local result = {}
-
-    -- 1. 活跃大国列表（排序后）
-    result.activePowers = GrandPowers.GetActivePowers(state)
-
-    -- 2. 批量计算所有大国的领土和前线（一次遍历 europe）
-    result.territories = {}  -- powerId → { country, ... }
-    result.frontLines = {}   -- powerId → { frontLine, ... }
-
-    -- 领土：一次遍历 europe，按 sovereign 分组
-    if state.europe then
-        for _, country in pairs(state.europe) do
-            local sid = country.sovereign
-            if sid then
-                if not result.territories[sid] then
-                    result.territories[sid] = {}
-                end
-                table.insert(result.territories[sid], country)
-            end
-        end
-    end
-
-    -- 前线：遍历活跃大国的 war_goals
-    for _, power in ipairs(result.activePowers) do
-        result.frontLines[power.id] = GrandPowers.GetFrontLines(state, power.id)
-    end
-
-    -- 3. 可用行动：不再预计算（最大开销项），改为卡片内懒加载
-    result.actions = {}  -- powerId → 按需填充
-
-    -- 3.5 缓存 CalcTotalInfluence（避免里程碑面板重复遍历 regions）
-    result.totalInfluence = GameState.CalcTotalInfluence(state)
-
-    -- 4. 本地势力：一次遍历 regions 建立 ai_presence 索引
-    result.factionNodes = {}  -- factionId → { "地名(xx%)", ... }
-    if state.regions then
-        for _, r in ipairs(state.regions) do
-            if r.ai_presence then
-                for aiId, presence in pairs(r.ai_presence) do
-                    if presence >= 30 then
-                        if not result.factionNodes[aiId] then
-                            result.factionNodes[aiId] = {}
-                        end
-                        table.insert(result.factionNodes[aiId],
-                            r.name .. "(" .. presence .. "%)")
-                    end
-                end
-            end
-        end
-    end
-
-    -- 5. 本地势力：一次遍历 history_log，按 faction 分组最近记录
-    result.factionLogs = {}  -- factionId → { entry, ... } (最多3条)
-    if state.history_log and state.ai_factions then
-        -- 从最新往回扫描，每个 faction 收集到3条就停止
-        local neededCount = {}
-        for _, f in ipairs(state.ai_factions) do
-            neededCount[f.id] = 3
-            result.factionLogs[f.id] = {}
-        end
-        local totalNeeded = #state.ai_factions * 3
-        local scanned = 0
-        for i = #state.history_log, 1, -1 do
-            if totalNeeded <= 0 then break end
-            -- 限制扫描深度避免遍历过长日志
-            scanned = scanned + 1
-            if scanned > 50 then break end
-            local entry = state.history_log[i]
-            if entry.text then
-                for _, f in ipairs(state.ai_factions) do
-                    if neededCount[f.id] > 0 then
-                        if (f.name and string.find(entry.text, f.name, 1, true))
-                            or (f.id and string.find(entry.text, f.id, 1, true)) then
-                            table.insert(result.factionLogs[f.id], entry)
-                            neededCount[f.id] = neededCount[f.id] - 1
-                            totalNeeded = totalNeeded - 1
-                        end
-                    end
-                end
-            end
-        end
-    end
-
-    return result
-end
-
-function WorldPage._BuildFactionsTab(state)
-    -- ══ 预计算（带缓存）：仅在数据变化时重新计算 ══
-    if precomputedDirty_ or not cachedPrecomputed_ then
-        cachedPrecomputed_ = WorldPage._PrecomputeFactionsData(state)
-        precomputedDirty_ = false
-    end
-    local precomputed = cachedPrecomputed_
-
-    local widgets = {
-        UI.Panel {
-            width = "100%",
-            padding = S.card_padding,
-            backgroundColor = C.paper_dark,
-            borderRadius = S.radius_card,
-            flexDirection = "row",
-            alignItems = "center",
-            gap = 8,
-            children = {
-                UI.Label { text = "🤝", fontSize = S.icon_size },
-                UI.Panel {
-                    flexGrow = 1,
-                    flexDirection = "column",
-                    gap = 2,
-                    children = {
-                        UI.Label {
-                            text = "势力与外交",
-                            fontSize = F.card_title,
-                            fontWeight = "bold",
-                            fontColor = C.text_primary,
-                        },
-                        UI.Label {
-                            text = "各方势力档案、外交关系与行动",
-                            fontSize = F.label,
-                            fontColor = C.text_muted,
-                        },
-                    },
-                },
-            },
-        },
-    }
-
-    -- ── 影响力里程碑 ──
-    table.insert(widgets, WorldPage._CreateInfluenceMilestones(state, precomputed))
-
-    -- ── 合作度指示器 ──
-    table.insert(widgets, WorldPage._CreateCollaborationHeader(state))
-
-    -- ── 大国卡片 ──
-    local activePowers = precomputed.activePowers
-    if #activePowers > 0 then
-        table.insert(widgets, WorldPage._SectionDivider("欧洲列强", C.accent_gold))
-        for _, power in ipairs(activePowers) do
-            table.insert(widgets, WorldPage._CreateGrandPowerCard(state, power, precomputed))
-        end
-    end
-
-    -- ── 本地 AI 势力（合并：关系 + 势力详情） ──
-    if state.ai_factions and #state.ai_factions > 0 then
-        table.insert(widgets, WorldPage._SectionDivider("本地势力", C.text_secondary))
-        for _, faction in ipairs(state.ai_factions) do
-            table.insert(widgets, WorldPage._CreateUnifiedFactionCard(state, faction, precomputed))
-        end
-    end
-
-    tabContentPanel_:AddChild(UI.Panel {
-        width = "100%",
-        flexDirection = "column",
-        gap = S.card_gap,
-        paddingTop = S.card_gap,
-        children = widgets,
-    })
-end
-
---- 段落分隔线（复用）
-function WorldPage._SectionDivider(text, color)
-    return UI.Panel {
-        width = "100%",
-        flexDirection = "row",
-        alignItems = "center",
-        gap = 6,
-        paddingTop = 4,
-        children = {
-            UI.Divider { flexGrow = 1, color = C.divider },
-            UI.Label {
-                text = text,
-                fontSize = F.label,
-                fontColor = color,
-                fontWeight = "bold",
-            },
-            UI.Divider { flexGrow = 1, color = C.divider },
-        },
-    }
-end
-
--- ============================================================================
--- 影响力里程碑
--- ============================================================================
-
---- 影响力里程碑卡片：展示当前影响力及各级解锁状态
-function WorldPage._CreateInfluenceMilestones(state, precomputed)
-    local totalInf = (precomputed and precomputed.totalInfluence)
-        or GameState.CalcTotalInfluence(state)
-    local thresholds = Balance.INFLUENCE.thresholds
-
-    -- 找到最高已达成的里程碑索引和下一个目标
-    local reachedIdx = 0
-    for i, t in ipairs(thresholds) do
-        if totalInf >= t.min then reachedIdx = i end
-    end
-    local nextThreshold = thresholds[reachedIdx + 1]
-
-    -- 进度条：到下一个里程碑的进度
-    local progressValue = 0
-    if nextThreshold then
-        local prevMin = reachedIdx > 0 and thresholds[reachedIdx].min or 0
-        local range = nextThreshold.min - prevMin
-        if range > 0 then
-            progressValue = math.min(1, (totalInf - prevMin) / range)
-        end
-    else
-        progressValue = 1  -- 全部达成
-    end
-
-    -- 里程碑行
-    local milestoneRows = {}
-    for i, t in ipairs(thresholds) do
-        local reached = totalInf >= t.min
-        local isCurrent = (i == reachedIdx + 1)  -- 下一个要达成的
-
-        local icon = reached and "✅" or (isCurrent and "🔜" or "🔒")
-        local labelColor = reached and C.accent_green
-            or (isCurrent and C.accent_gold or C.text_muted)
-        local valueColor = reached and C.accent_green or C.text_muted
-
-        table.insert(milestoneRows, UI.Panel {
-            width = "100%",
-            flexDirection = "row",
-            alignItems = "center",
-            gap = 6,
-            opacity = reached and 1.0 or 0.7,
-            children = {
-                UI.Label { text = icon, fontSize = 14, width = 20 },
-                UI.Label {
-                    text = t.label,
-                    fontSize = F.body_minor,
-                    fontWeight = reached and "bold" or "normal",
-                    fontColor = labelColor,
-                    width = 80,
-                },
-                UI.Label {
-                    text = t.desc,
-                    fontSize = F.label,
-                    fontColor = valueColor,
-                    flexGrow = 1,
-                    flexShrink = 1,
-                },
-                UI.Label {
-                    text = tostring(t.min),
-                    fontSize = F.label,
-                    fontColor = reached and C.accent_green or C.text_muted,
-                    width = 30,
-                    textAlign = "right",
-                },
-            },
-        })
-    end
-
-    -- 下一目标提示
-    local nextHint = nextThreshold
-        and string.format("下一目标：%s（还需 %d）", nextThreshold.label, nextThreshold.min - totalInf)
-        or "已达成全部里程碑"
-
-    -- 构建 children（避免 table.unpack 陷阱）
-    local cardChildren = {
-        -- 标题行
-        UI.Panel {
-            width = "100%",
-            flexDirection = "row",
-            justifyContent = "space-between",
-            alignItems = "center",
-            children = {
-                UI.Panel {
-                    flexDirection = "row",
-                    alignItems = "center",
-                    gap = 6,
-                    children = {
-                        UI.Label { text = "🌐", fontSize = S.icon_size },
-                        UI.Label {
-                            text = "影响力里程碑",
-                            fontSize = F.subtitle,
-                            fontWeight = "bold",
-                            fontColor = C.text_primary,
-                        },
-                    },
-                },
-                UI.Label {
-                    text = "当前：" .. totalInf,
-                    fontSize = F.body,
-                    fontWeight = "bold",
-                    fontColor = C.accent_blue,
-                },
-            },
-        },
-        -- 总进度条
-        UI.ProgressBar {
-            value = progressValue,
-            width = "100%",
-            height = 6,
-            borderRadius = 3,
-            trackColor = C.bg_surface,
-            fillColor = C.accent_blue,
-        },
-        -- 下一目标提示
-        UI.Label {
-            text = nextHint,
-            fontSize = F.label,
-            fontColor = C.text_muted,
-        },
-        UI.Divider { color = C.divider },
-    }
-    -- 追加里程碑行
-    for _, row in ipairs(milestoneRows) do
-        table.insert(cardChildren, row)
-    end
-
-    return UI.Panel {
-        width = "100%",
-        backgroundColor = C.paper_dark,
-        borderRadius = S.radius_card,
-        borderWidth = 1,
-        borderColor = C.border_card,
-        padding = S.card_padding,
-        flexDirection = "column",
-        gap = 6,
-        children = cardChildren,
-    }
-end
-
--- ============================================================================
--- 合作度指示器
--- ============================================================================
-
---- 合作度指示条
-function WorldPage._CreateCollaborationHeader(state)
-    local score = state.collaboration_score or 0
-    local label, labelColor = PlayerActionsGP.GetCollaborationLabel(score)
-
-    -- 把合作度映射到 0-100 范围条 (-50 ~ +50 → 0 ~ 100)
-    local barValue = math.max(0, math.min(100, score + 50))
-    -- 颜色：负分偏绿（抵抗），正分偏红（合作）
-    local barColor = score >= 0 and C.accent_red or C.accent_green
-
-    return UI.Panel {
-        width = "100%",
-        backgroundColor = C.bg_elevated,
-        borderRadius = S.radius_card,
-        borderWidth = 1,
-        borderColor = C.border_card,
-        padding = S.card_padding,
-        flexDirection = "column",
-        gap = 6,
-        children = {
-            UI.Panel {
-                width = "100%",
-                flexDirection = "row",
-                justifyContent = "space-between",
-                alignItems = "center",
-                children = {
-                    UI.Label {
-                        text = "合作立场",
-                        fontSize = F.subtitle,
-                        fontWeight = "bold",
-                        fontColor = C.text_primary,
-                    },
-                    UI.Panel {
-                        flexDirection = "row",
-                        alignItems = "center",
-                        gap = 6,
-                        children = {
-                            UI.Label {
-                                text = label,
-                                fontSize = F.body,
-                                fontWeight = "bold",
-                                fontColor = labelColor,
-                            },
-                            UI.Label {
-                                text = "(" .. (score >= 0 and "+" or "") .. score .. ")",
-                                fontSize = F.body_minor,
-                                fontColor = C.text_secondary,
-                            },
-                        },
-                    },
-                },
-            },
-            -- 双向进度条（中间是 0，左侧抵抗，右侧合作）
-            UI.Panel {
-                width = "100%",
-                flexDirection = "row",
-                alignItems = "center",
-                gap = 4,
-                children = {
-                    UI.Label { text = "抵抗", fontSize = F.label, fontColor = C.accent_green, width = 28 },
-                    UI.ProgressBar {
-                        value = barValue / 100,
-                        flexGrow = 1,
-                        height = 6,
-                        borderRadius = 3,
-                        trackColor = C.bg_surface,
-                        fillColor = barColor,
-                    },
-                    UI.Label { text = "合作", fontSize = F.label, fontColor = C.accent_red, width = 28 },
-                },
-            },
-            UI.Label {
-                text = "你的合作立场将影响战后清算结局",
-                fontSize = F.label,
-                fontColor = C.text_muted,
-            },
-        },
-    }
-end
-
--- ============================================================================
--- 大国卡片 + 玩家行动
--- ============================================================================
-
---- 大国势力标签颜色映射
-local FACTION_COLORS = {
-    central  = { 160, 50, 20, 255 },   -- 同盟国 铁锈色
-    entente  = { 58, 107, 138, 255 },  -- 协约国 钢蓝
-    axis     = { 140, 40, 40, 255 },   -- 轴心国 暗红
-    allies   = { 74, 124, 89, 255 },   -- 同盟国(WWII) 暗绿
-    neutral  = { 168, 152, 128, 255 }, -- 中立 灰棕
-    communist = { 192, 57, 43, 255 },  -- 共产 红
-}
-
-local FACTION_LABELS = {
-    central  = "同盟国",
-    entente  = "协约国",
-    axis     = "轴心国",
-    allies   = "盟军",
-    neutral  = "中立",
-    communist = "东方阵营",
-}
-
---- 姿态图标与标签
-local STANCE_META = {
-    collaborate = { icon = "🤝", label = "合作", color = { 212, 129, 10, 255 } },
-    join        = { icon = "⚔️",  label = "加入", color = { 192, 57, 43, 255 } },
-    counter     = { icon = "🛡️", label = "制衡", color = { 58, 107, 138, 255 } },
-    resist      = { icon = "🔥", label = "抵抗", color = { 74, 124, 89, 255 } },
-}
-
---- 创建大国详细卡片（军事/经济/厌战 + 阵营标签 + 行动按钮）
-function WorldPage._CreateGrandPowerCard(state, power, precomputed)
-    local attColor = power.attitude_to_player >= 10 and C.accent_green
-        or (power.attitude_to_player >= -10 and C.accent_amber or C.accent_red)
-
-    local attText = power.attitude_to_player >= 0
-        and ("+" .. power.attitude_to_player) or tostring(power.attitude_to_player)
-
-    -- 阵营标签
-    local factionLabel = FACTION_LABELS[power.faction] or "未知"
-    local factionColor = FACTION_COLORS[power.faction] or C.text_muted
-
-    -- 使用预计算的领土和前线数据
-    local territories = precomputed.territories[power.id] or {}
-    local frontLines = precomputed.frontLines[power.id] or {}
-
-    -- 属性行
-    local statRows = {
-        WorldPage._ControlBar("军事", math.floor(power.military), C.accent_red),
-        WorldPage._ControlBar("经济", math.floor(power.economy), C.accent_gold),
-        WorldPage._ControlBar("厌战", math.floor(power.war_fatigue), C.accent_amber),
-        WorldPage._InfoRow("对我方态度", attText, attColor),
-    }
-
-    -- 控制领土
-    if #territories > 0 then
-        local names = {}
-        for i, t in ipairs(territories) do
-            if i <= 4 then
-                table.insert(names, t.label)
-            end
-        end
-        local suffix = #territories > 4 and ("…等" .. #territories .. "国") or ""
-        table.insert(statRows, WorldPage._InfoRow(
-            "控制领土", table.concat(names, "、") .. suffix, C.text_secondary))
-    end
-
-    -- 活跃前线
-    if #frontLines > 0 then
-        local targets = {}
-        for _, fl in ipairs(frontLines) do
-            if fl.status == "active" then
-                table.insert(targets, "→" .. fl.target_label)
-            end
-        end
-        if #targets > 0 then
-            table.insert(statRows, WorldPage._InfoRow(
-                "前线", table.concat(targets, " "), C.accent_red))
-        end
-    end
-
-    -- ── 行动按钮区域（懒加载：点击后才计算 + 创建按钮） ──
-    local actionContainer = UI.Panel {
-        width = "100%",
-        flexDirection = "column",
-        gap = 0,
-    }
-
-    local actionsExpanded = false
-
-    local expandBtn = UI.Button {
-        text = "📋 查看行动",
-        fontSize = F.body_minor,
-        fontColor = C.accent_gold,
-        backgroundColor = { 0, 0, 0, 0 },
-        paddingVertical = 6,
-        alignSelf = "center",
-        textAlign = "center",
-        onClick = Config.ClickGuard(function(self)
-            if actionsExpanded then
-                -- ── 收起 ──
-                actionsExpanded = false
-                self:SetText("📋 查看行动")
-                actionContainer:ClearChildren()
-                return
-            end
-
-            -- ── 展开：懒加载计算可用行动并创建按钮 ──
-            actionsExpanded = true
-            self:SetText("📋 收起行动")
-            local actions = PlayerActionsGP.GetAvailableActions(state, power.id)
-            local stanceOrder = { "collaborate", "join", "counter", "resist" }
-            local actionWidgets = {}
-
-            for _, stanceId in ipairs(stanceOrder) do
-                local group = actions[stanceId]
-                if group and #group > 0 then
-                    local meta = STANCE_META[stanceId]
-                    local btnRow = {}
-                    for _, act in ipairs(group) do
-                        local enabled = act.available and (state.ap.current + (state.ap.temp or 0)) >= act.ap_cost
-                        local btnColor = enabled and meta.color or C.text_muted
-
-                        table.insert(btnRow, UI.Button {
-                            text = act.icon .. " " .. act.label,
-                            fontSize = F.label,
-                            fontColor = enabled and C.text_primary or C.text_muted,
-                            backgroundColor = enabled and { btnColor[1], btnColor[2], btnColor[3], 60 } or C.bg_surface,
-                            borderRadius = S.radius_btn,
-                            borderWidth = 1,
-                            borderColor = enabled and { btnColor[1], btnColor[2], btnColor[3], 120 } or C.border_soft,
-                            paddingHorizontal = 8,
-                            paddingVertical = 5,
-                            flexShrink = 1,
-                            onClick = Config.ClickGuard(function(btn)
-                                btn.props.disabled = true
-                                if not enabled then
-                                    local reason = act.reason or "行动点不足"
-                                    UI.Toast.Show(reason, { variant = "error", duration = 1.5 })
-                                    return
-                                end
-                                local ok, msg = PlayerActionsGP.ExecuteAction(state, power.id, act.id)
-                                if ok then
-                                    UI.Toast.Show(msg, { variant = "success", duration = 2 })
-                                else
-                                    UI.Toast.Show(msg, { variant = "error", duration = 1.5 })
-                                end
-                                if callbacksRef_ and callbacksRef_.onStateChanged then
-                                    callbacksRef_.onStateChanged()
-                                end
-                                WorldPage._RefreshDrawer(state)
-                            end),
-                        })
-                    end
-
-                    table.insert(actionWidgets, UI.Panel {
-                        width = "100%",
-                        flexDirection = "column",
-                        gap = 3,
-                        children = {
-                            UI.Label {
-                                text = meta.icon .. " " .. meta.label,
-                                fontSize = F.label,
-                                fontWeight = "bold",
-                                fontColor = meta.color,
-                            },
-                            UI.Panel {
-                                width = "100%",
-                                flexDirection = "row",
-                                flexWrap = "wrap",
-                                gap = 4,
-                                children = btnRow,
-                            },
-                        },
-                    })
-                end
-            end
-
-            if #actionWidgets > 0 then
-                actionContainer:AddChild(WorldPage._BuildActionSection(state, actionWidgets))
-            else
-                actionContainer:AddChild(UI.Label {
-                    text = "暂无可用行动",
-                    fontSize = F.label,
-                    fontColor = C.text_muted,
-                    padding = S.card_padding,
-                })
-            end
-        end),
-    }
-
-    return UI.Panel {
-        width = "100%",
-        backgroundColor = C.paper_dark,
-        borderRadius = S.radius_card,
-        borderWidth = 1,
-        borderColor = C.border_card,
-        flexDirection = "column",
-        overflow = "hidden",
-        children = {
-            -- 标题栏
-            UI.Panel {
-                width = "100%",
-                padding = S.card_padding,
-                backgroundColor = C.bg_elevated,
-                flexDirection = "row",
-                alignItems = "center",
-                gap = 8,
-                children = {
-                    -- 阵营标签
-                    UI.Panel {
-                        backgroundColor = { factionColor[1], factionColor[2], factionColor[3], 50 },
-                        borderRadius = 4,
-                        paddingHorizontal = 6,
-                        paddingVertical = 2,
-                        children = {
-                            UI.Label {
-                                text = factionLabel,
-                                fontSize = F.label,
-                                fontWeight = "bold",
-                                fontColor = factionColor,
-                            },
-                        },
-                    },
-                    -- 名称
-                    UI.Panel {
-                        flexGrow = 1,
-                        flexShrink = 1,
-                        flexDirection = "column",
-                        gap = 1,
-                        children = {
-                            UI.Label {
-                                text = power.label,
-                                fontSize = F.card_title,
-                                fontWeight = "bold",
-                                fontColor = C.text_primary,
-                            },
-                        },
-                    },
-                    -- 军事值大数字
-                    UI.Panel {
-                        flexDirection = "column",
-                        alignItems = "center",
-                        children = {
-                            UI.Label {
-                                text = tostring(math.floor(power.military)),
-                                fontSize = F.data_mid,
-                                fontWeight = "bold",
-                                fontColor = C.accent_red,
-                            },
-                            UI.Label {
-                                text = "军事",
-                                fontSize = F.label,
-                                fontColor = C.text_muted,
-                            },
-                        },
-                    },
-                },
-            },
-
-            -- 属性区
-            UI.Panel {
-                width = "100%",
-                padding = S.card_padding,
-                flexDirection = "column",
-                gap = 5,
-                children = statRows,
-            },
-
-            -- 分隔线 + 展开按钮
-            UI.Divider { color = C.divider },
-            expandBtn,
-
-            -- 行动区容器（懒加载后填充）
-            actionContainer,
-        },
-    }
-end
-
---- 行动区段（避免 table.unpack 不在最后位置的展开问题）
-function WorldPage._BuildActionSection(state, actionChildren)
-    local sectionChildren = {
-        UI.Divider { color = C.divider },
-        UI.Label {
-            text = "可用行动 (AP:" .. (state.ap.current + (state.ap.temp or 0)) .. ")",
-            fontSize = F.body_minor,
-            fontWeight = "bold",
-            fontColor = C.text_secondary,
-        },
-    }
-    for _, child in ipairs(actionChildren) do
-        table.insert(sectionChildren, child)
-    end
-    return UI.Panel {
-        width = "100%",
-        padding = S.card_padding,
-        paddingTop = 0,
-        flexDirection = "column",
-        gap = 6,
-        children = sectionChildren,
-    }
-end
-
---- 统一势力卡片：合并关系 + 势力详情为一体
-function WorldPage._CreateUnifiedFactionCard(state, faction, precomputed)
-    if faction.defeated then
-        return UI.Panel {
-            width = "100%",
-            padding = S.card_padding,
-            backgroundColor = { 35, 35, 38, 255 },
-            borderRadius = S.radius_card,
-            borderWidth = 1,
-            borderColor = { 95, 95, 95, 255 },
-            flexDirection = "column",
-            gap = 6,
-            opacity = 0.78,
-            children = {
-                UI.Label {
-                    text = (faction.icon or "×") .. " " .. faction.name .. "（已击败）",
-                    fontSize = F.card_title,
-                    fontWeight = "bold",
-                    fontColor = C.text_muted,
-                },
-                UI.Label {
-                    text = "该势力已失去主要地盘和行动能力，相关模块转入玩家或地方代理控制。",
-                    fontSize = F.body_minor,
-                    fontColor = C.text_secondary,
-                    whiteSpace = "normal",
-                    lineHeight = 1.4,
-                },
-            },
-        }
-    end
-    -- ── 瘫痪状态：显示特殊卡片 ──
-    if faction.collapsed then
-        local colCfg = Balance.COLLAPSE or (Balance.AI and Balance.AI.collapse)
-            or { recovery_seasons = 6 }
-        local remaining = math.max(0,
-            (colCfg.recovery_seasons or 6) - (faction.collapsed_seasons or 0))
-        return UI.Panel {
-            width = "100%",
-            backgroundColor = { 40, 40, 45, 255 },
-            borderRadius = S.radius_card,
-            borderWidth = 1,
-            borderColor = { 80, 80, 80, 255 },
-            flexDirection = "column",
-            overflow = "hidden",
-            opacity = 0.75,
-            children = {
-                -- 头部：灰色调
-                UI.Panel {
-                    width = "100%",
-                    padding = S.card_padding,
-                    backgroundColor = { 50, 50, 55, 255 },
-                    flexDirection = "row",
-                    alignItems = "center",
-                    gap = 8,
-                    children = {
-                        UI.Label {
-                            text = "💀",
-                            fontSize = S.icon_size,
-                        },
-                        UI.Panel {
-                            flexGrow = 1,
-                            flexShrink = 1,
-                            flexDirection = "column",
-                            gap = 2,
-                            children = {
-                                UI.Panel {
-                                    flexDirection = "row",
-                                    alignItems = "center",
-                                    gap = 6,
-                                    children = {
-                                        UI.Label {
-                                            text = faction.name,
-                                            fontSize = F.card_title,
-                                            fontWeight = "bold",
-                                            fontColor = { 160, 160, 160, 255 },
-                                        },
-                                        UI.Panel {
-                                            paddingHorizontal = 6,
-                                            paddingVertical = 2,
-                                            backgroundColor = { 180, 50, 50, 60 },
-                                            borderRadius = S.radius_badge,
-                                            children = {
-                                                UI.Label {
-                                                    text = "已瘫痪",
-                                                    fontSize = F.label,
-                                                    fontWeight = "bold",
-                                                    fontColor = C.accent_red,
-                                                },
-                                            },
-                                        },
-                                    },
-                                },
-                                UI.Label {
-                                    text = faction.desc or "",
-                                    fontSize = F.label,
-                                    fontColor = { 120, 120, 120, 255 },
-                                    whiteSpace = "normal",
-                                    lineHeight = 1.3,
-                                },
-                            },
-                        },
-                    },
-                },
-                -- 瘫痪状态详情
-                UI.Panel {
-                    width = "100%",
-                    padding = S.card_padding,
-                    flexDirection = "column",
-                    gap = 6,
-                    children = {
-                        UI.Label {
-                            text = "势力已崩溃，组织结构瓦解",
-                            fontSize = F.body_minor,
-                            fontColor = { 160, 120, 100, 255 },
-                            whiteSpace = "normal",
-                        },
-                        UI.Panel {
-                            width = "100%",
-                            flexDirection = "row",
-                            justifyContent = "space-between",
-                            children = {
-                                WorldPage._InfoRow("残余势力",
-                                    tostring(faction.power or 0), { 160, 160, 160, 255 }),
-                                WorldPage._InfoRow("残余资金",
-                                    tostring(faction.cash or 0), { 160, 160, 160, 255 }),
-                            },
-                        },
-                        UI.Panel {
-                            width = "100%",
-                            flexDirection = "row",
-                            alignItems = "center",
-                            gap = 6,
-                            children = {
-                                UI.Label {
-                                    text = "⏳",
-                                    fontSize = 14,
-                                },
-                                UI.Label {
-                                    text = remaining > 0
-                                        and string.format("预计 %d 季后可能重组", remaining)
-                                        or "即将恢复活动",
-                                    fontSize = F.label,
-                                    fontColor = C.accent_amber,
-                                },
-                            },
-                        },
-                        -- 地区存在度衰减提示
-                        UI.Label {
-                            text = "📉 控制区域正在收缩，地区存在度持续下降",
-                            fontSize = F.label,
-                            fontColor = { 140, 140, 140, 255 },
-                            whiteSpace = "normal",
-                        },
-                    },
-                },
-            },
-        }
-    end
-
-    local att = faction.attitude or 0
-    local attColor = att >= 10 and C.accent_green
-        or (att >= -10 and C.accent_amber or C.accent_red)
-    local attText = att >= 40 and "同盟"
-        or (att >= 20 and "友善"
-        or (att >= 0 and "中立"
-        or (att >= -20 and "警惕"
-        or "敌对")))
-    local attIcon = att >= 40 and "🤝"
-        or (att >= 20 and "😊"
-        or (att >= 0 and "😐"
-        or (att >= -20 and "😠"
-        or "⚔️")))
-
-    -- 关系值标准化到 0-1（-100 → 0, +100 → 1）
-    local normalizedAtt = (att + 100) / 200
-    local barColor = att >= 0 and C.accent_green or C.accent_red
-
-    -- ── 势力属性行 ──
-    local statRows = {}
-
-    -- 使用预计算的控制区域数据
-    local controlledNodes = precomputed.factionNodes[faction.id] or {}
-    if #controlledNodes > 0 then
-        table.insert(statRows, WorldPage._InfoRow("控制区域",
-            table.concat(controlledNodes, "、"), C.accent_amber))
-    end
-
-    -- 行动重心推测
-    local focusText = "情报不足，无法判断"
-    local focusColor = C.text_muted
-    if faction.power then
-        if faction.power >= 120 then
-            focusText = "积极扩张"; focusColor = C.accent_red
-        elseif faction.power >= 80 then
-            focusText = "稳固发展"; focusColor = C.accent_amber
-        else
-            focusText = "保守防御"; focusColor = C.accent_green
-        end
-    end
-    table.insert(statRows, WorldPage._InfoRow("行动倾向", focusText, focusColor))
-
-    -- 使用预计算的近期日志数据
-    local recentLogs = precomputed.factionLogs[faction.id] or {}
-
-    local logChildren = {}
-    if #recentLogs > 0 then
-        for _, entry in ipairs(recentLogs) do
-            table.insert(logChildren, UI.Label {
-                text = string.format("[%d %s] %s",
-                    entry.year, Config.QUARTER_NAMES[entry.quarter] or "", entry.text),
-                fontSize = F.label,
-                fontColor = C.text_muted,
-                whiteSpace = "normal",
-                lineHeight = 1.3,
-            })
-        end
-    else
-        table.insert(logChildren, UI.Label {
-            text = "暂无近期互动记录",
-            fontSize = F.label,
-            fontColor = C.text_muted,
-        })
-    end
-
-    -- ── 构建近期动向 section children ──
-    local logSectionChildren = {
-        UI.Label {
-            text = "近期动向",
-            fontSize = F.label,
-            fontWeight = "bold",
-            fontColor = C.text_secondary,
-        },
-    }
-    for _, c in ipairs(logChildren) do
-        table.insert(logSectionChildren, c)
-    end
-
-    return UI.Panel {
-        width = "100%",
-        backgroundColor = C.paper_dark,
-        borderRadius = S.radius_card,
-        borderWidth = 1,
-        borderColor = C.border_card,
-        flexDirection = "column",
-        overflow = "hidden",
-        children = {
-            -- 头部：图标 + 名称描述 + 势力值大数字
-            UI.Panel {
-                width = "100%",
-                padding = S.card_padding,
-                backgroundColor = C.bg_elevated,
-                flexDirection = "row",
-                alignItems = "center",
-                gap = 8,
-                children = {
-                    UI.Label { text = faction.icon or "🏴", fontSize = S.icon_size },
-                    UI.Panel {
-                        flexGrow = 1,
-                        flexShrink = 1,
-                        flexDirection = "column",
-                        gap = 2,
-                        children = {
-                            UI.Label {
-                                text = faction.name,
-                                fontSize = F.card_title,
-                                fontWeight = "bold",
-                                fontColor = C.text_primary,
-                            },
-                            UI.Label {
-                                text = faction.desc or "",
-                                fontSize = F.label,
-                                fontColor = C.text_muted,
-                                whiteSpace = "normal",
-                                lineHeight = 1.3,
-                            },
-                        },
-                    },
-                    -- 势力值大数字
-                    UI.Panel {
-                        flexDirection = "column",
-                        alignItems = "center",
-                        children = {
-                            UI.Label {
-                                text = tostring(faction.power or 0),
-                                fontSize = F.data_mid,
-                                fontWeight = "bold",
-                                fontColor = C.text_primary,
-                            },
-                            UI.Label {
-                                text = "势力值",
-                                fontSize = F.label,
-                                fontColor = C.text_muted,
-                            },
-                        },
-                    },
-                },
-            },
-
-            -- 外交关系行：态度图标 + Badge + 关系值进度条
-            UI.Panel {
-                width = "100%",
-                paddingHorizontal = S.card_padding,
-                paddingTop = 6,
-                flexDirection = "column",
-                gap = 4,
-                children = {
-                    UI.Panel {
-                        width = "100%",
-                        flexDirection = "row",
-                        alignItems = "center",
-                        justifyContent = "space-between",
-                        children = {
-                            UI.Label {
-                                text = "外交关系",
-                                fontSize = F.label,
-                                fontWeight = "bold",
-                                fontColor = C.text_secondary,
-                            },
-                            UI.Panel {
-                                flexDirection = "row",
-                                alignItems = "center",
-                                gap = 4,
-                                children = {
-                                    UI.Label { text = attIcon, fontSize = 16 },
-                                    UI.Panel {
-                                        paddingHorizontal = 5,
-                                        paddingVertical = 1,
-                                        backgroundColor = { attColor[1], attColor[2], attColor[3], 40 },
-                                        borderRadius = S.radius_badge,
-                                        children = {
-                                            UI.Label {
-                                                text = attText .. " " .. tostring(att),
-                                                fontSize = F.label,
-                                                fontColor = attColor,
-                                            },
-                                        },
-                                    },
-                                },
-                            },
-                        },
-                    },
-                    UI.ProgressBar {
-                        value = normalizedAtt,
-                        width = "100%",
-                        height = 6,
-                        borderRadius = 3,
-                        trackColor = C.bg_surface,
-                        fillColor = barColor,
-                    },
-                },
-            },
-
-            -- 属性区：控制区域、行动倾向
-            #statRows > 0 and UI.Panel {
-                width = "100%",
-                paddingHorizontal = S.card_padding,
-                paddingTop = 6,
-                flexDirection = "column",
-                gap = 5,
-                children = statRows,
             } or nil,
-
-            -- 近期动向
-            UI.Panel {
-                width = "100%",
-                padding = S.card_padding,
-                flexDirection = "column",
-                gap = 3,
-                children = logSectionChildren,
-            },
-
-            -- 外交按钮
-            UI.Panel {
-                width = "100%",
-                paddingHorizontal = S.card_padding,
-                paddingBottom = S.card_padding,
-                children = {
-                    UI.Button {
-                        text = "外交行动（2AP）",
-                        fontSize = F.body_minor,
-                        fontColor = C.accent_gold,
-                        backgroundColor = C.bg_elevated,
-                        borderWidth = 1,
-                        borderColor = C.border_gold,
-                        borderRadius = S.radius_btn,
-                        paddingVertical = 6,
-                        width = "100%",
-                        onClick = Config.ClickGuard(function()
-                            local accent = Config.GetEraAccent(stateRef_)
-                            ActionModals.ShowDiplomacy(stateRef_, accent)
-                        end),
-                    },
-                },
-            },
         },
-    }
-end
-
--- ============================================================================
--- 报告子页 — §8.5 报告子页
--- ============================================================================
-
-function WorldPage._BuildReportTab(state)
-    local widgets = {}
-
-    -- 1. 本季结算摘要
-    table.insert(widgets, WorldPage._CreateSeasonSummary(state))
-
-    -- 1.5. 称号殿堂（常驻）
-    local titlesCard = WorldPage._CreateTitlesCard(state)
-    if titlesCard then
-        table.insert(widgets, titlesCard)
-    end
-
-    -- 2. 全局指标变化
-    table.insert(widgets, WorldPage._CreateGlobalIndicators(state))
-
-    -- 3. 历史日志
-    table.insert(widgets, WorldPage._CreateLogCard(state))
-
-    tabContentPanel_:AddChild(UI.Panel {
-        width = "100%",
-        flexDirection = "column",
-        gap = S.card_gap,
-        paddingTop = S.card_gap,
-        children = widgets,
-    })
-end
-
-local TITLE_BRANCH_COLORS = {
-    military      = { 200, 80, 80, 255 },
-    plunder       = { 120, 110, 100, 255 },
-    economy       = { 218, 165, 32, 255 },
-    stock         = { 58, 107, 138, 255 },
-    comprehensive = { 120, 140, 220, 255 },
-}
-
-local function getTitleBranchColor(catId)
-    return TITLE_BRANCH_COLORS[catId] or C.accent_gold
-end
-
-local function getTitleCategoryById(TitlesData, catId)
-    for _, cat in ipairs(TitlesData.CATEGORIES) do
-        if cat.id == catId then return cat end
-    end
-    return TitlesData.CATEGORIES[1]
-end
-
-local function refreshReportTab()
-    if activeSubTab_ == "report" then
-        WorldPage._SwitchSubTab(stateRef_, "report")
-    end
-end
-
-local function getNewTitleIds(state)
-    local ids = {}
-    for _, item in ipairs(state.titles_new or {}) do
-        local id = type(item) == "table" and item.id or item
-        if id then ids[id] = true end
-    end
-    return ids
-end
-
---- 称号分支 Tab：复用科技研发的分支选择样式
-function WorldPage._CreateTitleBranchTab(state, cat, isActive)
-    local Titles = require("systems.titles")
-    local unlocked, total = Titles.CategoryProgress(state, cat.id)
-    local progress = total > 0 and (unlocked / total) or 0
-    local accent = getTitleBranchColor(cat.id)
-
-    return UI.Panel {
-        flexGrow = 1,
-        flexShrink = 1,
-        flexBasis = 0,
-        minWidth = 70,
-        padding = 6,
-        backgroundColor = isActive and { accent[1], accent[2], accent[3], 55 } or C.bg_elevated,
-        borderRadius = S.radius_card,
-        borderWidth = isActive and 1.5 or 1,
-        borderColor = isActive and accent or { 60, 60, 70, 255 },
-        flexDirection = "column",
-        alignItems = "center",
-        gap = 2,
-        pointerEvents = "auto",
-        onPointerUp = Config.TapGuard(function()
-            if activeTitleCategoryId_ ~= cat.id then
-                activeTitleCategoryId_ = cat.id
-                refreshReportTab()
-            end
-        end),
-        children = {
-            UI.Label {
-                text = (cat.icon or "•") .. " " .. cat.label,
-                fontSize = isActive and F.body or F.body_minor,
-                fontWeight = isActive and "bold" or "medium",
-                fontColor = isActive and accent or C.text_secondary,
-                pointerEvents = "none",
-            },
-            UI.Panel {
-                width = "90%",
-                height = 3,
-                borderRadius = 2,
-                backgroundColor = { 50, 50, 60, 255 },
-                children = {
-                    UI.Panel {
-                        width = string.format("%d%%", math.floor(progress * 100)),
-                        height = "100%",
-                        borderRadius = 2,
-                        backgroundColor = accent,
-                    },
-                },
-            },
-            UI.Label {
-                text = string.format("%d/%d", unlocked, total),
-                fontSize = 10,
-                fontColor = C.text_muted,
-                pointerEvents = "none",
-            },
-        },
-    }
-end
-
-function WorldPage._CreateTitlePortrait(title, isUnlocked, accent, size)
-    local isDetail = (size == "detail")
-    local detailSize = 380
-    local w = isDetail and detailSize or (size or 92)
-    local h = isDetail and detailSize or (size or 92)
-
-    if title.portraitImage then
-        return UI.Panel {
-            width = w,
-            height = h,
-            borderRadius = S.radius_card,
-            backgroundImage = title.portraitImage,
-            backgroundFit = "cover",
-            borderWidth = 1,
-            borderColor = isUnlocked and accent or C.border_card,
-            imageTint = isUnlocked and nil or { 120, 120, 120, 255 },
-            flexShrink = 0,
-        }
-    end
-
-    return UI.Panel {
-        width = isDetail and detailSize or (size or 92),
-        height = isDetail and detailSize or (size or 92),
-        borderRadius = S.radius_card,
-        backgroundColor = C.bg_inset,
-        borderWidth = 1,
-        borderColor = isUnlocked and accent or C.border_soft,
-        justifyContent = "center",
-        alignItems = "center",
-        flexDirection = "column",
-        gap = 3,
-        flexShrink = 0,
-        children = {
-            UI.Label {
-                text = title.icon or "🏅",
-                fontSize = isDetail and 72 or 36,
-                fontColor = isUnlocked and accent or C.text_muted,
-                pointerEvents = "none",
-            },
-        },
-    }
-end
-
-function WorldPage._CloseTitleModal()
-    if currentTitleModal_ then
-        currentTitleModal_:Close()
-        currentTitleModal_ = nil
-    end
-end
-
-function WorldPage._ShowTitleDetail(state, title, cat)
-    WorldPage._CloseTitleModal()
-
-    local isUnlocked = state.titles_unlocked and state.titles_unlocked[title.id]
-    local accent = getTitleBranchColor(cat.id)
-    local statusText = isUnlocked and "已获得" or "未达成"
-    local statusColor = isUnlocked and C.accent_green or C.text_muted
-    local unlockedTurn = isUnlocked and tostring(isUnlocked) or "尚未获得"
-
-    local content = UI.ScrollView {
-        width = "100%",
-        flexGrow = 1,
-        flexBasis = 0,
-        children = {
-            UI.Panel {
-                width = "100%",
-                flexDirection = "column",
-                gap = 10,
-                paddingBottom = 12,
-                children = {
-                    UI.Panel {
-                        width = "100%",
-                        alignItems = "center",
-                        justifyContent = "center",
-                        children = {
-                            WorldPage._CreateTitlePortrait(title, isUnlocked, accent, "detail"),
-                        },
-                    },
-                    UI.Panel {
-                        width = "100%",
-                        backgroundColor = C.paper_dark,
-                        borderRadius = S.radius_card,
-                        borderWidth = 1,
-                        borderColor = accent,
-                        padding = 7,
-                        flexDirection = "column",
-                        gap = 3,
-                        children = {
-                            UI.Panel {
-                                width = "100%",
-                                flexDirection = "row",
-                                justifyContent = "space-between",
-                                alignItems = "center",
-                                children = {
-                                    UI.Panel {
-                                        flexDirection = "row",
-                                        alignItems = "center",
-                                        gap = 8,
-                                        flexShrink = 1,
-                                        children = {
-                                            UI.Label { text = title.icon or "🏅", fontSize = S.icon_size },
-                                            UI.Label {
-                                                text = title.name,
-                                                fontSize = F.card_title,
-                                                fontWeight = "bold",
-                                                fontColor = isUnlocked and C.text_primary or C.text_muted,
-                                                flexShrink = 1,
-                                            },
-                                        },
-                                    },
-                                    UI.Panel {
-                                        paddingHorizontal = 8,
-                                        paddingVertical = 3,
-                                        borderRadius = S.radius_badge,
-                                        backgroundColor = { statusColor[1], statusColor[2], statusColor[3], 45 },
-                                        children = {
-                                            UI.Label {
-                                                text = statusText,
-                                                fontSize = F.label,
-                                                fontWeight = "bold",
-                                                fontColor = statusColor,
-                                            },
-                                        },
-                                    },
-                                },
-                            },
-                            UI.Divider { color = C.divider },
-                            UI.Label {
-                                text = title.desc,
-                                fontSize = F.body,
-                                fontColor = C.text_secondary,
-                                whiteSpace = "normal",
-                                lineHeight = 1.35,
-                            },
-                            WorldPage._InfoRow("所属分支", (cat.icon or "•") .. " " .. cat.label, accent),
-                            WorldPage._InfoRow("获得回合", unlockedTurn, isUnlocked and C.accent_green or C.text_muted),
-                        },
-                    },
-                },
-            },
-        },
-    }
-
-    currentTitleModal_ = UI.Modal {
-        title = title.name,
-        size = "fullscreen",
-        closeOnOverlay = true,
-        closeOnEscape = true,
-        contentPadding = { 0, 12, 12, 12 },
-        onClose = function()
-            Config.ConsumeTap()
-            currentTitleModal_ = nil
-        end,
-    }
-    currentTitleModal_:AddContent(content)
-    if uiRoot_ then
-        uiRoot_:AddChild(currentTitleModal_)
-    end
-    currentTitleModal_:Open()
-end
-
-function WorldPage._CreateTitleNode(state, title, cat, isNew)
-    local isUnlocked = state.titles_unlocked and state.titles_unlocked[title.id]
-    local accent = getTitleBranchColor(cat.id)
-    local statusText = isUnlocked and "已获得" or "未达成"
-    local statusColor = isUnlocked and C.accent_green or C.text_muted
-    if isNew then
-        statusText = "新称号"
-        statusColor = C.accent_gold
-    end
-
-    -- 第一行：图标 + 名称 + 状态标签
-    local topRow = UI.Panel {
-        width = "100%",
-        flexDirection = "row",
-        justifyContent = "space-between",
-        alignItems = "center",
-        pointerEvents = "none",
-        children = {
-            UI.Panel {
-                flexDirection = "row",
-                alignItems = "center",
-                gap = 7,
-                flexShrink = 1,
-                children = {
-                    UI.Label {
-                        text = isUnlocked and (title.icon or "🏅") or "◇",
-                        fontSize = F.body,
-                        fontColor = isUnlocked and accent or C.text_muted,
-                        pointerEvents = "none",
-                    },
-                    UI.Label {
-                        text = title.name,
-                        fontSize = F.body,
-                        fontWeight = isUnlocked and "bold" or "medium",
-                        fontColor = isUnlocked and C.text_primary or C.text_muted,
-                        flexShrink = 1,
-                        pointerEvents = "none",
-                    },
-                },
-            },
-            UI.Panel {
-                paddingHorizontal = 6,
-                paddingVertical = 2,
-                borderRadius = S.radius_badge,
-                backgroundColor = { statusColor[1], statusColor[2], statusColor[3], 38 },
-                children = {
-                    UI.Label {
-                        text = statusText,
-                        fontSize = F.label,
-                        fontWeight = "bold",
-                        fontColor = statusColor,
-                        pointerEvents = "none",
-                    },
-                },
-            },
-        },
-    }
-
-    -- 第二行：解锁条件描述
-    local descRow = UI.Label {
-        text = title.desc,
-        fontSize = F.label,
-        fontColor = C.text_muted,
-        pointerEvents = "none",
-        marginLeft = 21,
-    }
-
-    local nodeChildren = { topRow, descRow }
-
-    return UI.Panel {
-        width = "100%",
-        paddingVertical = 6,
-        paddingHorizontal = 9,
-        backgroundColor = C.paper_dark,
-        borderRadius = S.radius_card,
-        borderLeftWidth = 3,
-        borderLeftColor = isUnlocked and accent or { 60, 60, 70, 255 },
-        borderWidth = 0,
-        flexDirection = "column",
-        gap = 3,
-        pointerEvents = "auto",
-        onPointerUp = (isUnlocked or isNew) and Config.TapGuard(function()
-            WorldPage._ShowTitleDetail(state, title, cat)
-        end) or nil,
-        children = nodeChildren,
-    }
-end
-
---- 称号卡片：常驻展示分支、称号节点与详情
-function WorldPage._CreateTitlesCard(state)
-    local TitlesData = require("data.titles_data")
-    local Titles = require("systems.titles")
-
-    local unlockedCount = Titles.UnlockedCount(state)
-    local totalCount = #TitlesData.TITLES
-    local hasNew = state.titles_new and #state.titles_new > 0
-    local newIds = getNewTitleIds(state)
-    local activeCat = getTitleCategoryById(TitlesData, activeTitleCategoryId_)
-    if not activeCat then
-        activeCat = TitlesData.CATEGORIES[1]
-        activeTitleCategoryId_ = activeCat and activeCat.id or activeTitleCategoryId_
-    end
-    local activeAccent = getTitleBranchColor(activeCat.id)
-    local children = {}
-
-    -- 标题行
-    table.insert(children, UI.Panel {
-        width = "100%",
-        flexDirection = "row",
-        alignItems = "center",
-        justifyContent = "space-between",
-        children = {
-            UI.Panel {
-                flexDirection = "row",
-                alignItems = "center",
-                gap = 8,
-                children = {
-                    UI.Label { text = "🏅", fontSize = S.icon_size },
-                    UI.Label {
-                        text = "称号殿堂",
-                        fontSize = F.card_title,
-                        fontWeight = "bold",
-                        fontColor = C.accent_gold,
-                    },
-                },
-            },
-            UI.Label {
-                text = string.format("%d/%d", unlockedCount, totalCount),
-                fontSize = F.body,
-                fontWeight = "bold",
-                fontColor = unlockedCount > 0 and C.accent_gold or C.text_muted,
-            },
-        },
-    })
-    table.insert(children, UI.Divider { color = C.divider })
-
-    -- 新解锁提示
-    if hasNew then
-        local newNames = {}
-        for _, tid in ipairs(state.titles_new) do
-            local id = type(tid) == "table" and tid.id or tid
-            local t = TitlesData.GetById(id)
-            if t then
-                table.insert(newNames, "「" .. t.name .. "」")
-            end
-        end
-        table.insert(children, UI.Panel {
-            width = "100%",
-            backgroundColor = "#3a2a00",
-            borderRadius = 4,
-            padding = 7,
-            flexDirection = "row",
-            alignItems = "center",
-            gap = 6,
-            children = {
-                UI.Label { text = "✨", fontSize = F.body },
-                UI.Label {
-                    text = "新获得：" .. table.concat(newNames, "  "),
-                    fontSize = F.body,
-                    fontWeight = "bold",
-                    fontColor = "#FFD700",
-                    flexShrink = 1,
-                },
-            },
-        })
-        -- 清除新称号提示（已展示）
-        state.titles_new = {}
-    end
-
-    -- 一级目录：称号分支
-    local tabChildren = {}
-    for _, cat in ipairs(TitlesData.CATEGORIES) do
-        table.insert(tabChildren, WorldPage._CreateTitleBranchTab(state, cat, cat.id == activeCat.id))
-    end
-    table.insert(children, UI.Panel {
-        width = "100%",
-        flexDirection = "row",
-        flexWrap = "wrap",
-        gap = 5,
-        children = tabChildren,
-    })
-
-    -- 二级目录：当前分支称号；三级目录：点击称号展开详情
-    local catTitles = TitlesData.GetByCategory(activeCat.id)
-    local unlockedInCat = 0
-    for _, title in ipairs(catTitles) do
-        if state.titles_unlocked and state.titles_unlocked[title.id] then
-            unlockedInCat = unlockedInCat + 1
-        end
-    end
-
-    table.insert(children, UI.Panel {
-        width = "100%",
-        flexDirection = "row",
-        justifyContent = "space-between",
-        alignItems = "center",
-        paddingHorizontal = 2,
-        children = {
-            UI.Label {
-                text = (activeCat.icon or "•") .. " " .. activeCat.label .. "分支",
-                fontSize = F.subtitle,
-                fontWeight = "bold",
-                fontColor = activeAccent,
-            },
-            UI.Label {
-                text = string.format("解锁后可点击查看详情  (%d/%d)", unlockedInCat, #catTitles),
-                fontSize = F.label,
-                fontColor = C.text_secondary,
-            },
-        },
-    })
-
-    local titleNodes = {}
-    for _, title in ipairs(catTitles) do
-        table.insert(titleNodes, WorldPage._CreateTitleNode(
-            state,
-            title,
-            activeCat,
-            newIds[title.id] == true
-        ))
-    end
-    table.insert(children, UI.Panel {
-        width = "100%",
-        flexDirection = "column",
-        gap = 4,
-        children = titleNodes,
-    })
-
-    return UI.Panel {
-        width = "100%",
-        backgroundColor = C.paper_dark,
-        borderRadius = S.radius_card,
-        borderWidth = 1,
-        borderColor = C.border_gold,
-        padding = S.card_padding,
-        flexDirection = "column",
-        gap = 7,
-        children = children,
-    }
-end
-
---- 本季结算摘要
-function WorldPage._CreateSeasonSummary(state)
-    local quarterName = Config.QUARTER_NAMES[state.quarter] or ""
-    return UI.Panel {
-        width = "100%",
-        backgroundColor = C.paper_dark,
-        borderRadius = S.radius_card,
-        borderWidth = 1,
-        borderColor = C.border_gold,
-        padding = S.card_padding,
-        flexDirection = "column",
-        gap = 6,
-        children = {
-            UI.Panel {
-                flexDirection = "row",
-                alignItems = "center",
-                gap = 8,
-                children = {
-                    UI.Label { text = "📊", fontSize = S.icon_size },
-                    UI.Label {
-                        text = state.year .. "年" .. quarterName .. "季报",
-                        fontSize = F.card_title,
-                        fontWeight = "bold",
-                        fontColor = C.accent_gold,
-                    },
-                },
-            },
-            UI.Divider { color = C.divider },
-            -- 关键指标网格（4列）
-            UI.Panel {
-                width = "100%",
-                flexDirection = "row",
-                gap = 4,
-                children = {
-                    WorldPage._MetricCell("现金",
-                        Config.FormatNumber(state.cash or 0),
-                        C.accent_gold),
-                    WorldPage._MetricCell("黄金",
-                        tostring(state.gold or 0),
-                        C.accent_amber),
-                    WorldPage._MetricCell("影响力",
-                        tostring(GameState.CalcTotalInfluence(state)),
-                        C.accent_blue),
-                    WorldPage._MetricCell("武装",
-                        tostring(state.military and state.military.guards or 0),
-                        C.accent_red),
-                },
-            },
-        },
-    }
-end
-
---- 全局指标变化
-function WorldPage._CreateGlobalIndicators(state)
-    local era = Config.GetEraByYear(state.year)
-    local standing = GameState.GetVictoryStanding(state)
-    local claimText = state.victory and state.victory.claimed and "已宣布" or "未宣布"
-    return UI.Panel {
-        width = "100%",
-        backgroundColor = C.paper_dark,
-        borderRadius = S.radius_card,
-        borderWidth = 1,
-        borderColor = C.border_card,
-        padding = S.card_padding,
-        flexDirection = "column",
-        gap = 6,
-        children = {
-            UI.Label {
-                text = "全局态势",
-                fontSize = F.subtitle,
-                fontWeight = "bold",
-                fontColor = C.text_primary,
-            },
-            UI.Divider { color = C.divider },
-            WorldPage._InfoRow("当前时代", era and era.label or "未知", C.accent_gold),
-            WorldPage._InfoRow("战争状态",
-                state.flags and state.flags.at_war and "⚔️ 战时" or "和平",
-                state.flags and state.flags.at_war and C.accent_red or C.accent_green),
-            WorldPage._InfoRow("地区总控制",
-                WorldPage._CalcTotalControl(state) .. "%", C.text_primary),
-            WorldPage._InfoRow("AI 威胁",
-                WorldPage._CalcThreatLevel(state), C.accent_amber),
-            WorldPage._InfoRow("经济领先",
-                string.format("%+d", standing.lead.economic), standing.lead.economic >= 0 and C.accent_green or C.accent_red),
-            WorldPage._InfoRow("军事领先",
-                string.format("%+d", standing.lead.military), standing.lead.military >= 0 and C.accent_green or C.accent_red),
-            WorldPage._InfoRow("统治领先",
-                string.format("%+d", standing.lead.dominance), standing.lead.dominance >= 0 and C.accent_green or C.accent_red),
-            WorldPage._InfoRow("胜利声明", claimText, state.victory and state.victory.claimed and C.accent_gold or C.text_secondary),
-        },
-    }
-end
-
---- 历史日志
-function WorldPage._CreateLogCard(state)
-    local logChildren = {
-        UI.Label {
-            text = "近期记事",
-            fontSize = F.subtitle,
-            fontWeight = "bold",
-            fontColor = C.text_primary,
-        },
-        UI.Divider { color = C.divider },
-    }
-
-    local hasEntries = false
-    if state.history_log then
-        local start = math.max(1, #state.history_log - 14)
-        for i = #state.history_log, start, -1 do
-            local entry = state.history_log[i]
-            hasEntries = true
-            table.insert(logChildren, UI.Label {
-                text = string.format("[%d %s] %s",
-                    entry.year, Config.QUARTER_NAMES[entry.quarter] or "", entry.text),
-                fontSize = F.label,
-                fontColor = C.text_secondary,
-                whiteSpace = "normal",
-                lineHeight = 1.3,
-            })
-        end
-    end
-
-    if not hasEntries then
-        table.insert(logChildren, UI.Label {
-            text = "暂无记录",
-            fontSize = F.body_minor,
-            fontColor = C.text_muted,
-        })
-    end
-
-    return UI.Panel {
-        width = "100%",
-        backgroundColor = C.paper_dark,
-        borderRadius = S.radius_card,
-        borderWidth = 1,
-        borderColor = C.border_card,
-        padding = S.card_padding,
-        flexDirection = "column",
-        gap = 6,
-        children = logChildren,
     }
 end
 
@@ -2644,9 +2060,8 @@ end
 -- 政治渗透操作
 -- ============================================================================
 
---- 执行政治渗透：花费 2AP + 20影响力，增加玩家对目标地区的控制度 +8，等比减少 AI 势力占比
+--- 执行政治渗透：花费 2AP，增加玩家对目标地区的控制度 +8，等比减少 AI 势力占比
 function WorldPage._DoPoliticalInfiltration(state, region)
-    local infCost = Balance.INFLUENCE.cost_infiltrate
     local infiltrateAP = 2  -- TODO: 提取到 Balance 配置（当前硬编码）
 
     -- 检查 AP
@@ -2655,27 +2070,10 @@ function WorldPage._DoPoliticalInfiltration(state, region)
         return
     end
 
-    -- 检查 Influence
-    local totalInf = GameState.CalcTotalInfluence(state)
-    if totalInf < infCost then
-        UI.Toast.Show(string.format("影响力不足（需要%d，当前%d）", infCost, totalInf),
-            { variant = "error", duration = 1.5 })
-        return
-    end
-
     -- 扣除 AP
     if not GameState.SpendAP(state, infiltrateAP) then
         UI.Toast.Show("行动点不足", { variant = "error", duration = 1.5 })
         return
-    end
-
-    -- 扣除 Influence（按比例从各地区扣减）
-    if totalInf > 0 then
-        for _, r in ipairs(state.regions) do
-            local ratio = (r.influence or 0) / totalInf
-            local loss = math.floor(infCost * ratio + 0.5)
-            r.influence = math.max(0, (r.influence or 0) - loss)
-        end
     end
 
     -- 计算渗透效果
@@ -2707,8 +2105,8 @@ function WorldPage._DoPoliticalInfiltration(state, region)
         end
     end
 
-    -- 增加地区影响力
-    region.influence = (region.influence or 0) + 2
+    -- 渗透同时标记本季有文化行动
+    state.culture_action_this_turn = true
 
     -- 日志
     GameState.AddLog(state, string.format(
@@ -2794,55 +2192,6 @@ function WorldPage._StarRating(level, maxLevel)
         stars = stars .. (i <= level and "★" or "☆")
     end
     return stars
-end
-
---- 指标格子（报告页用）
-function WorldPage._MetricCell(label, value, color)
-    return UI.Panel {
-        flexGrow = 1,
-        flexDirection = "column",
-        alignItems = "center",
-        gap = 2,
-        padding = 4,
-        backgroundColor = C.bg_elevated,
-        borderRadius = S.radius_badge,
-        children = {
-            UI.Label {
-                text = value,
-                fontSize = F.data_small,
-                fontWeight = "bold",
-                fontColor = color or C.text_primary,
-            },
-            UI.Label {
-                text = label,
-                fontSize = F.label,
-                fontColor = C.text_muted,
-            },
-        },
-    }
-end
-
---- 计算地区总控制度
-function WorldPage._CalcTotalControl(state)
-    if not state.regions or #state.regions == 0 then return 0 end
-    local total = 0
-    for _, r in ipairs(state.regions) do
-        total = total + (r.control or 0)
-    end
-    return math.floor(total / #state.regions)
-end
-
---- 计算 AI 威胁等级
-function WorldPage._CalcThreatLevel(state)
-    if not state.ai_factions then return "未知" end
-    local maxPower = 0
-    for _, f in ipairs(state.ai_factions) do
-        if (f.power or 0) > maxPower then maxPower = f.power end
-    end
-    if maxPower >= 150 then return "极高" end
-    if maxPower >= 100 then return "较高" end
-    if maxPower >= 60 then return "中等" end
-    return "较低"
 end
 
 -- ============================================================================

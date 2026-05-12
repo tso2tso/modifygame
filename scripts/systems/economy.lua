@@ -3,6 +3,7 @@
 -- ============================================================================
 
 local Balance = require("data.balance")
+local Config = require("config")
 local GameState = require("game_state")
 local Equipment = require("systems.equipment")
 
@@ -25,7 +26,6 @@ local Economy = {}
 ---@field copper_income number 铜销售收入
 ---@field worker_expense number 工人工资
 ---@field military_expense number 军事开支
----@field supply_expense number 补给开支
 ---@field tax number 税收
 ---@field gold_reserve_interest number 黄金储备利息收入
 ---@field gold_hedge_pct number 黄金通胀对冲百分比
@@ -50,7 +50,6 @@ function Economy.Settle(state)
         gold_hedge_pct = 0,
         worker_expense = 0,
         military_expense = 0,
-        supply_expense = 0,
         tax = 0,
         total_income = 0,
         total_expense = 0,
@@ -58,6 +57,8 @@ function Economy.Settle(state)
         bankrupt = false,
     }
 
+    -- 难度参数
+    local diff = Config.GetDifficulty(state.difficulty)
     -- 通胀影响名义价格；资产价格修正影响矿山/地产等资本品估值
     local inflation = GameState.GetInflationFactor(state)
     local laborCostFactor = GameState.GetLaborCostFactor(state)
@@ -313,12 +314,8 @@ function Economy.Settle(state)
     -- 工人雇佣成本（科技折扣）
     local hireCostMul = 1.0 + (state.hire_cost_discount or 0)  -- discount 为负值
     hireCostMul = math.max(0.5, hireCostMul)  -- 最低 50% 成本
-    report.worker_expense = math.floor(state.workers.hired * state.workers.wage * laborCostFactor * hireCostMul)
-    report.military_expense = math.floor(state.military.guards * state.military.wage * hedgedInflation)
-    local supplyDiscount = 1.0 - (state.finance_supply_discount or 0)
-    local supplyPerGuard = math.max(1, BMI.supply_per_guard - (state.supply_reduction_bonus or 0))
-    report.supply_expense = math.floor(state.military.guards * supplyPerGuard
-        * BMI.supply_cost * hedgedInflation * supplyDiscount * (1 + math.min(0.5, transportRisk)))
+    report.worker_expense = math.floor(state.workers.hired * state.workers.wage * laborCostFactor * hireCostMul * (diff.maintenance_mult or 1.0))
+    report.military_expense = math.floor(state.military.guards * state.military.wage * hedgedInflation * (diff.maintenance_mult or 1.0))
 
     -- 装备维护费 + 兵工厂维护费
     local equipMaint, factoryMaint = Equipment.CalcMaintenanceCost(state)
@@ -332,22 +329,36 @@ function Economy.Settle(state)
         state.cash = state.cash + report.finance_income
     end
 
-    -- 贸易被动收入（科技"贸易路线"等）
-    report.trade_income = state.trade_passive_income or 0
+    -- 贸易收入：外贸解锁后取上季度实际贸易收入，否则取被动收入
+    if state.unlocked_features and state.unlocked_features["foreign_trade"] then
+        report.trade_income = (state.trade and state.trade.last_quarter_revenue) or 0
+    else
+        report.trade_income = state.trade_passive_income or 0
+    end
+    -- 制裁modifier：贸易收入倍率惩罚
+    local tradeIncomeMult = GameState.GetModifierValue(state, "trade_income_mult")
+    if tradeIncomeMult ~= 0 and report.trade_income > 0 then
+        local adjustment = math.floor(report.trade_income * tradeIncomeMult)
+        report.trade_income = math.max(0, report.trade_income + adjustment)
+        report.trade_income_penalty = adjustment
+    end
     if report.trade_income > 0 then
         state.cash = state.cash + report.trade_income
     end
 
-    -- 被动地区影响力增益（科技"印刷宣传"等）
-    local passiveInfl = state.passive_influence or 0
-    -- 文化顾问加成：被动影响力 ×(1+bonus×0.5)（满配 +50%，良好 +25%）
+    -- 被动控制度增益（科技"印刷宣传"等）
+    local passiveCtrl = state.passive_control or 0
+    -- total_control 修正器：事件赋予的额外控制度增益（累加到被动控制）
+    local totalControlMod = GameState.GetModifierValue(state, "total_control")
+    passiveCtrl = passiveCtrl + totalControlMod
+    -- 文化顾问加成：被动控制度 ×(1+bonus×0.5)（满配 +50%，良好 +25%）
     local cultureBonus = GameState.GetPositionBonus(state, "culture_advisor")
-    if cultureBonus > 0 and passiveInfl > 0 then
-        passiveInfl = math.floor(passiveInfl * (1 + cultureBonus * 0.5))
+    if cultureBonus > 0 and passiveCtrl > 0 then
+        passiveCtrl = math.floor(passiveCtrl * (1 + cultureBonus * 0.5))
     end
-    if passiveInfl ~= 0 then
+    if passiveCtrl ~= 0 then
         for _, r in ipairs(state.regions) do
-            r.influence = (r.influence or 0) + passiveInfl
+            r.control = math.min(100, (r.control or 0) + passiveCtrl)
         end
     end
 
@@ -397,6 +408,25 @@ function Economy.Settle(state)
         state.cash = state.cash + report.shadow_income
     end
 
+    -- ============================
+    -- 3.6 资产类修正器收入
+    -- ============================
+    -- total_assets: 事件赋予的总资产变化，按每季现金收入体现
+    report.total_assets_income = 0
+    local totalAssetsMod = GameState.GetModifierValue(state, "total_assets")
+    if totalAssetsMod ~= 0 then
+        report.total_assets_income = math.floor(totalAssetsMod * inflation)
+        state.cash = state.cash + report.total_assets_income
+    end
+    -- foreign_assets: 海外资产，每点每季产生固定被动收入（受通胀影响）
+    report.foreign_assets_income = 0
+    local foreignAssetsMod = GameState.GetModifierValue(state, "foreign_assets")
+    if foreignAssetsMod > 0 then
+        local perAssetIncome = 80  -- 每点海外资产每季 80 基础收入
+        report.foreign_assets_income = math.floor(foreignAssetsMod * perAssetIncome * inflation)
+        state.cash = state.cash + report.foreign_assets_income
+    end
+
     report.transport_penalty = 0
     if transportRisk > 0 then
         local exposedIncome = report.gold_income + report.copper_income + report.region_income + report.shadow_income
@@ -407,6 +437,7 @@ function Economy.Settle(state)
     local grossIncome = report.gold_income + report.copper_income + (report.coal_income or 0)
         + report.gold_reserve_interest
         + report.region_income + report.finance_income + (report.trade_income or 0) + report.shadow_income
+        + (report.total_assets_income or 0) + (report.foreign_assets_income or 0)
     local incomeMod = GameState.GetModifierValue(state, "income_mod")
     if incomeMod ~= 0 then
         incomeMod = math.max(-0.75, math.min(1.00, incomeMod))
@@ -454,7 +485,8 @@ function Economy.Settle(state)
         taxRate = taxRate * (1 - civilBonus * 0.2)
     end
     taxRate = math.max(0, math.min(0.35, taxRate))
-    report.tax = math.max(0, math.floor(state.cash * taxRate))
+    -- E1: 收入税（基于本季总收入而非现金存量）
+    report.tax = math.max(0, math.floor(grossIncome * taxRate * (diff.tax_mult or 1.0)))
 
     -- ============================
     -- 5. 汇总并扣款
@@ -462,7 +494,7 @@ function Economy.Settle(state)
     -- 注意：gold_income / copper_income / region_income 已在步骤 2-3.5 加到 state.cash，此处只减支出
     report.total_income = grossIncome + report.income_mod_adjustment
     report.total_expense = report.worker_expense + report.military_expense
-        + report.supply_expense + report.tax + report.ai_penalty + report.transport_penalty
+        + report.tax + report.ai_penalty + report.transport_penalty
     report.net = report.total_income - report.total_expense
 
     state.cash = state.cash - report.total_expense
@@ -573,6 +605,7 @@ function Economy.GetEstimate(state)
 end
 
 function Economy._GetEstimateImpl(state)
+    local diff = Config.GetDifficulty(state.difficulty)
     local inflation = GameState.GetInflationFactor(state)
     local laborCostFactor = GameState.GetLaborCostFactor(state)
     local income = 0
@@ -583,7 +616,9 @@ function Economy._GetEstimateImpl(state)
         coal_income = 0,
         region_income = 0,
         finance_income = state.finance_passive_income or 0,
-        trade_income = state.trade_passive_income or 0,
+        trade_income = (state.unlocked_features and state.unlocked_features["foreign_trade"])
+            and ((state.trade and state.trade.last_quarter_revenue) or 0)
+            or (state.trade_passive_income or 0),
         shadow_income = 0,
         transport_penalty = 0,
         ai_penalty = 0,
@@ -762,6 +797,18 @@ function Economy._GetEstimateImpl(state)
         details.shadow_income = math.floor(shadowIncome * inflation)
     end
 
+    -- 资产类修正器预估（与 Settle 保持一致）
+    details.total_assets_income = 0
+    local estTotalAssetsMod = GameState.GetModifierValue(state, "total_assets")
+    if estTotalAssetsMod ~= 0 then
+        details.total_assets_income = math.floor(estTotalAssetsMod * inflation)
+    end
+    details.foreign_assets_income = 0
+    local estForeignAssetsMod = GameState.GetModifierValue(state, "foreign_assets")
+    if estForeignAssetsMod > 0 then
+        details.foreign_assets_income = math.floor(estForeignAssetsMod * 80 * inflation)
+    end
+
     -- 黄金储备利息预估
     details.gold_reserve_interest = 0
     local estGoldHeld = (state.gold or 0) + estTotalGoldOut  -- 本季结束后预估黄金持有
@@ -786,6 +833,7 @@ function Economy._GetEstimateImpl(state)
         + details.gold_reserve_interest
         + details.region_income + details.finance_income + details.trade_income + details.shadow_income
         + (details.foreign_gold_income or 0) + (details.foreign_copper_income or 0) + (details.foreign_coal_income or 0)
+        + (details.total_assets_income or 0) + (details.foreign_assets_income or 0)
     local estimateIncomeMod = GameState.GetModifierValue(state, "income_mod")
     if estimateIncomeMod ~= 0 then
         estimateIncomeMod = math.max(-0.75, math.min(1.00, estimateIncomeMod))
@@ -802,17 +850,13 @@ function Economy._GetEstimateImpl(state)
 
     -- 工人工资（含科技折扣，与 Settle 保持一致）
     local estHireCostMul = math.max(0.5, 1.0 + (state.hire_cost_discount or 0))
-    local estSupplyDiscount = 1.0 - (state.finance_supply_discount or 0)
-    local estSupplyPerGuard = math.max(1, BMI.supply_per_guard - (state.supply_reduction_bonus or 0))
     -- 装备维护费 + 工厂维护费
     local estEquipMaint, estFactoryMaint = Equipment.CalcMaintenanceCost(state)
     details.equip_maintenance = estEquipMaint
     details.factory_maintenance = estFactoryMaint
     local estHedgedInflation = inflation * (1 - estGoldHedge)
-    local expenseBeforeTax = math.floor(state.workers.hired * state.workers.wage * laborCostFactor * estHireCostMul)
-        + math.floor(state.military.guards * state.military.wage * estHedgedInflation)
-        + math.floor(state.military.guards * estSupplyPerGuard * BMI.supply_cost * estHedgedInflation
-            * estSupplyDiscount * (1 + math.min(0.5, transportRisk)))
+    local expenseBeforeTax = math.floor(state.workers.hired * state.workers.wage * laborCostFactor * estHireCostMul * (diff.maintenance_mult or 1.0))
+        + math.floor(state.military.guards * state.military.wage * estHedgedInflation * (diff.maintenance_mult or 1.0))
         + details.transport_penalty
         + estEquipMaint + estFactoryMaint
 
@@ -838,7 +882,8 @@ function Economy._GetEstimateImpl(state)
         taxRate = taxRate * (1 - civilBonus * 0.2)
     end
     taxRate = math.max(0, math.min(0.35, taxRate))
-    details.tax = math.floor(math.max(0, state.cash) * taxRate)
+    -- E1: 收入税（与 Settle 保持一致，基于预估收入而非现金存量）
+    details.tax = math.floor(math.max(0, income) * taxRate * (diff.tax_mult or 1.0))
     local expense = expenseBeforeTax + details.tax + details.ai_penalty
 
     return income, expense, details

@@ -312,6 +312,43 @@ function Config.FormatCompact(n)
     end
 end
 
+--- 紧凑数字格式化（千制，用于黄金等国际单位）
+--- 999 以下原样，1000+ → "1k"/"9.9k"，1M+ → "1.2M"
+---@param n number
+---@return string
+function Config.FormatCompactK(n)
+    if n == nil then return "0" end
+    local abs = math.abs(n)
+    local sign = n < 0 and "-" or ""
+    if abs < 1000 then
+        return sign .. tostring(math.floor(abs))
+    elseif abs < 1000000 then
+        local k = abs / 1000
+        if k >= 100 then
+            return sign .. string.format("%dk", math.floor(k))
+        elseif k >= 10 then
+            local r = math.floor(k * 10) / 10
+            if r == math.floor(r) then
+                return sign .. string.format("%dk", math.floor(r))
+            end
+            return sign .. string.format("%.1fk", r)
+        else
+            local r = math.floor(k * 10) / 10
+            if r == math.floor(r) then
+                return sign .. string.format("%dk", math.floor(r))
+            end
+            return sign .. string.format("%.1fk", r)
+        end
+    else
+        local m = abs / 1000000
+        local r = math.floor(m * 10) / 10
+        if r == math.floor(r) then
+            return sign .. string.format("%dM", math.floor(r))
+        end
+        return sign .. string.format("%.1fM", r)
+    end
+end
+
 --- 季度对应月日文本（设计图顶栏显示 XmonthYday 格式）
 Config.QUARTER_DATES = {
     "4月15日",   -- Q1 春
@@ -321,25 +358,121 @@ Config.QUARTER_DATES = {
 }
 
 -- ============================================================================
--- 难度设置
+-- 难度设置（4 级分层）
+-- 维度：事件频率 / AI 行为 / 经济压力 / 战斗损失 / 起始资源 / 胜利门槛
 -- ============================================================================
 Config.DIFFICULTY = {
+    -- 简单 = 当前基线参数（原 hard），所有乘数 1.0
     easy = {
         label = "简单",
-        desc  = "事件触发频率降低，适合休闲体验",
-        event_chance_mult    = 0.5,  -- 随机事件概率 ×0.5
-        drought_threshold_2  = 4,    -- 连续4季无事件才 ×1.5
-        drought_threshold_3  = 5,    -- 连续5季无事件才 ×2.0
+        desc  = "当前基准难度，事件正常触发",
+        -- 事件
+        event_chance_mult    = 1.0,   -- 基线
+        disaster_chance_mult = 1.0,
+        drought_threshold_2  = 2,
+        drought_threshold_3  = 3,
+        early_shield_years   = 1905,
+        -- 经济
+        start_cash_mult      = 1.0,
+        tax_mult             = 1.0,
+        maintenance_mult     = 1.0,
+        inflation_drift_mult = 1.0,
+        loan_interest_mult   = 1.0,
+        -- 战斗
+        combat_loss_mult     = 1.0,
+        combat_pillage_mult  = 1.0,
+        loot_mult            = 1.0,
+        -- AI
+        ai_growth_mult       = 1.0,
+        ai_aggression_mult   = 1.0,
+        ai_cash_cap_mult     = 1.0,
+        ai_spending_mult     = 1.0,
+        -- 胜利
+        victory_threshold_mult = 1.0,
+    },
+    normal = {
+        label = "普通",
+        desc  = "事件更频繁，AI开始展露野心",
+        -- 事件
+        event_chance_mult    = 1.25,
+        disaster_chance_mult = 1.2,
+        drought_threshold_2  = 2,
+        drought_threshold_3  = 3,
+        early_shield_years   = 1905,
+        -- 经济
+        start_cash_mult      = 1.0,
+        tax_mult             = 1.1,
+        maintenance_mult     = 1.1,
+        inflation_drift_mult = 1.1,
+        loan_interest_mult   = 1.1,
+        -- 战斗
+        combat_loss_mult     = 1.15,
+        combat_pillage_mult  = 1.2,
+        loot_mult            = 0.9,
+        -- AI
+        ai_growth_mult       = 1.2,
+        ai_aggression_mult   = 1.3,
+        ai_cash_cap_mult     = 1.2,
+        ai_spending_mult     = 1.2,
+        -- 胜利
+        victory_threshold_mult = 1.1,
     },
     hard = {
         label = "困难",
-        desc  = "当前默认难度，事件频繁考验决策",
-        event_chance_mult    = 1.0,  -- 概率不变
-        drought_threshold_2  = 2,    -- 连续2季 ×1.5
-        drought_threshold_3  = 3,    -- 连续3季 ×2.0
+        desc  = "AI强势扩张，经济紧张，考验决策能力",
+        -- 事件
+        event_chance_mult    = 1.5,
+        disaster_chance_mult = 1.5,
+        drought_threshold_2  = 2,
+        drought_threshold_3  = 2,
+        early_shield_years   = 1905,
+        -- 经济
+        start_cash_mult      = 0.9,
+        tax_mult             = 1.2,
+        maintenance_mult     = 1.2,
+        inflation_drift_mult = 1.25,
+        loan_interest_mult   = 1.2,
+        -- 战斗
+        combat_loss_mult     = 1.35,
+        combat_pillage_mult  = 1.4,
+        loot_mult            = 0.8,
+        -- AI
+        ai_growth_mult       = 1.4,
+        ai_aggression_mult   = 1.6,
+        ai_cash_cap_mult     = 1.4,
+        ai_spending_mult     = 1.5,
+        -- 胜利
+        victory_threshold_mult = 1.2,
+    },
+    historic = {
+        label = "史实",
+        desc  = "残酷的帝国时代，一步之差满盘皆输",
+        -- 事件
+        event_chance_mult    = 1.8,
+        disaster_chance_mult = 2.0,
+        drought_threshold_2  = 1,
+        drought_threshold_3  = 2,
+        early_shield_years   = 1904,   -- 无缓冲期
+        -- 经济
+        start_cash_mult      = 0.75,
+        tax_mult             = 1.35,
+        maintenance_mult     = 1.35,
+        inflation_drift_mult = 1.4,
+        loan_interest_mult   = 1.35,
+        -- 战斗
+        combat_loss_mult     = 1.6,
+        combat_pillage_mult  = 1.7,
+        loot_mult            = 0.65,
+        -- AI
+        ai_growth_mult       = 1.6,
+        ai_aggression_mult   = 2.0,
+        ai_cash_cap_mult     = 1.6,
+        ai_spending_mult     = 1.8,
+        -- 胜利
+        victory_threshold_mult = 1.35,
     },
 }
-Config.DIFFICULTY_ORDER = { "easy", "hard" }
+Config.DIFFICULTY_ORDER = { "easy", "normal", "hard", "historic" }
 Config.DEFAULT_DIFFICULTY = "easy"
 
 --- 获取难度配置
@@ -492,6 +625,36 @@ end
 --- 典型场景：Modal overlay 关闭时调用，防止点击穿透到底层按钮。
 function Config.ConsumeTap()
     lastTapCounter_ = tapDownCounter_
+end
+
+-- ============================================================================
+-- 全局键盘抑制系统
+-- ============================================================================
+-- 根因：UI 框架的 HandlePointerDown 在 widget:OnPointerDown() 返回后，
+-- 仍会执行焦点更新逻辑。当 Modal 的 OnPointerDown 触发 Close/Destroy 并
+-- ClearFocus 后，HandlePointerDown 又将 focusedWidget_ 设为已销毁的 Modal，
+-- 导致后续任何触摸都可能通过残留焦点链路唤出系统键盘。
+--
+-- 解法：模态框关闭时启动时间制全局抑制（0.5 秒），在此窗口期内：
+-- 每帧强制调用 SetScreenKeyboardVisible(false)，压制引擎异步焦点重建带来的
+-- 键盘重弹。调用方需要自行先执行 UI.ClearFocus()（因 config.lua 加载时
+-- UI 模块还未初始化，此处不直接依赖它）。
+-- 这取代了原来分散在各模块中的 kbSuppressFrames_ 帧制方案（3帧≈50ms，太短）。
+-- ============================================================================
+local kbSuppressUntil_ = 0         -- 抑制截止时间（ElapsedTime）
+local KB_SUPPRESS_DURATION = 0.5   -- 抑制窗口 0.5 秒
+
+--- 启动全局键盘抑制（模态框 onClose 统一调用此函数）。
+--- 调用方应先执行 UI.ClearFocus() 清除焦点，再调用本函数。
+function Config.SuppressKeyboard()
+    kbSuppressUntil_ = time:GetElapsedTime() + KB_SUPPRESS_DURATION
+    input:SetScreenKeyboardVisible(false)
+end
+
+--- 查询当前是否处于键盘抑制窗口内（供 main.lua Update 联动 ClearFocus）
+---@return boolean
+function Config.IsKeyboardSuppressed()
+    return time:GetElapsedTime() < kbSuppressUntil_
 end
 
 return Config

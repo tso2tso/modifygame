@@ -30,11 +30,10 @@ local EFFECT_LABELS = {
     tax_reduction     = function(v) return string.format("税率 %d%%", math.floor(v * 100)) end,
     ap_bonus          = function(v) return string.format("行动点上限 +%d", v) end,
     equipment_up      = function(v) return string.format("装备等级 +%d", v) end,
-    supply_reduction  = function(v) return string.format("补给消耗 %d", v) end,
-    finance_network   = function() return "补给成本 -20%，被动收入 +80" end,
+    finance_network   = function() return "被动收入 +80" end,
     stock_boost_all   = function(v) return string.format("股票收益率 +%d%%", math.floor(v * 100)) end,
-    influence_gain    = function(v) return string.format("每季影响力 +%d", v) end,
-    morale_bonus      = function(v) return string.format("士气 +%d", v) end,
+    passive_control_gain = function(v) return string.format("每季控制度 +%d", v) end,
+    morale_bonus      = function(v) return string.format("士气/战意 +%d", v) end,
     guard_power_bonus = function(v) return string.format("护卫战力 +%d%%", math.floor(v * 100)) end,
     research_speed    = function(v) return string.format("研发速度 +%d%%", math.floor(v * 100)) end,
     trade_income      = function(v) return string.format("每季贸易收入 +%d", v) end,
@@ -46,6 +45,9 @@ local EFFECT_LABELS = {
     plunder_loot_mult   = function(v) return string.format("掠夺收益 +%d%%", math.floor(v * 100)) end,
     rep_recovery_bonus  = function(v) return string.format("声誉恢复 +%d/季", v) end,
     plunder_cooldown_reduction = function(v) return string.format("掠夺冷却 -%d 季", v) end,
+    unlock_foreign_trade = function() return "解锁跨国贸易" end,
+    unlock_short_selling = function() return "解锁股票做空" end,
+    unlock_venture       = function() return "解锁商业远征" end,
 }
 
 -- ============================================================================
@@ -123,7 +125,7 @@ local TECH_LANES = {
         id = "d",
         title = "文化",
         icon = "📜",
-        desc = "影响力 / 士气 / 研发",
+        desc = "控制度 / 士气·战意 / 研发",
         accentColor = { 120, 140, 220, 255 },  -- 蓝色
     },
 }

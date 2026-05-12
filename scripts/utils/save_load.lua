@@ -256,6 +256,10 @@ function SaveLoad._SerializeState(state)
     data._branch_yugo_western = state._branch_yugo_western
     data._war_accel_done = state._war_accel_done
 
+    -- 大国行动历史（用于分支触发器和干预惯性机制）
+    data.gp_action_history = state.gp_action_history or {}
+    data._action_streaks = state._action_streaks or {}
+
     -- 事件干旱计数器
     data.event_drought_counter = state.event_drought_counter or 0
 
@@ -283,6 +287,7 @@ function SaveLoad._SerializeState(state)
             bio = m.bio,
             cooldown_turns = m.cooldown_turns or 0,
             reroll_available = m.reroll_available or 0,
+            age = m.age,
         })
     end
 
@@ -301,7 +306,7 @@ function SaveLoad._SerializeState(state)
             policy = r.policy,
             culture = r.culture,
             control = r.control,
-            influence = r.influence or 0,
+            -- influence 已合并到 control
             ai_presence = r.ai_presence,
         })
     end
@@ -368,7 +373,7 @@ function SaveLoad._SerializeState(state)
     data.tech = state.tech or { researched = {}, in_progress = nil, bonus_points = 0 }
 
     -- 被动加成（印刷宣传等）
-    data.passive_influence = state.passive_influence or 0
+    data.passive_control = state.passive_control or 0
     data.derived_effects = {
         mine_output_base_bonus = state.mine_output_base_bonus or 0,
         mine_output_mult_bonus = state.mine_output_mult_bonus or 0,
@@ -377,13 +382,12 @@ function SaveLoad._SerializeState(state)
         research_speed_bonus = state.research_speed_bonus or 0,
         trade_passive_income = state.trade_passive_income or 0,
         finance_passive_income = state.finance_passive_income or 0,
-        finance_supply_discount = state.finance_supply_discount or 0,
         gold_price_bonus = state.gold_price_bonus or 0,
         hire_cost_discount = state.hire_cost_discount or 0,
-        supply_reduction_bonus = state.supply_reduction_bonus or 0,
         accident_rate_mod = state.accident_rate_mod or 0,
         plunder_loot_mult_bonus = state.plunder_loot_mult_bonus or 0,
         rep_recovery_bonus = state.rep_recovery_bonus or 0,
+        rep_action_cooldowns = state.rep_action_cooldowns or {},
         plunder_cooldown_reduction = state.plunder_cooldown_reduction or 0,
         stock_return_bonus = state.stock_return_bonus or 0,
     }
@@ -394,6 +398,12 @@ function SaveLoad._SerializeState(state)
     -- 广告幸运事件
     data.lucky_ad_watched = state.lucky_ad_watched or 0
     data.lucky_ad_decay = state.lucky_ad_decay or 1.0
+
+    -- 免广告卡
+    data.ad_free_card_charges = state.ad_free_card_charges or 0
+    data.ad_free_card_active = state.ad_free_card_active or false
+    data.ad_free_lucky_used = state.ad_free_lucky_used or 0
+    data.ad_free_reroll_used = state.ad_free_reroll_used or 0
 
     -- 破产免死广告
     data.bankrupt_ad_used = state.bankrupt_ad_used or 0
@@ -412,13 +422,13 @@ function SaveLoad._SerializeState(state)
         morale = state.military.morale,
         wage = state.military.wage,
         equipment = state.military.equipment,
-        supply = state.military.supply,
         -- 装备/编队系统
         squads = state.military.squads or {},
         inventory = state.military.inventory or {},
         factory = state.military.factory,
         production_queue = state.military.production_queue or {},
         outsource_slots = state.military.outsource_slots or {},
+
     }
 
     -- AI 势力
@@ -450,7 +460,7 @@ function SaveLoad._SerializeState(state)
     data.plunder_cooldowns = state.plunder_cooldowns
     data.manipulation_cooldowns = state.manipulation_cooldowns
     data.direction_locks = state.direction_locks           -- M2: 方向互斥锁
-    data.press_credibility = state.press_credibility       -- M1: 媒体公信力
+    -- (press_credibility 已合并到统一声誉 state.reputation)
     data.last_ai_counter = state.last_ai_counter           -- M4: 上次AI反制记录
     data.has_seized_veins = state.has_seized_veins
     data.seized_veins = state.seized_veins
@@ -463,6 +473,16 @@ function SaveLoad._SerializeState(state)
     data.stats = state.stats
     data.titles_unlocked = state.titles_unlocked
     data.titles_new      = state.titles_new or {}
+    data.unlocked_features = state.unlocked_features or {}
+
+    -- 远征系统（Phase 2+）
+    data.expeditions = state.expeditions
+
+    -- 商业远征系统（Phase 3+）
+    data.ventures = state.ventures
+
+    -- 贸易系统（Phase 3+）
+    data.trade = state.trade
 
     return data
 end
@@ -473,7 +493,9 @@ end
 function SaveLoad._DeserializeState(data)
     -- 纯数据表，直接返回（加上默认值保护）
     -- 基础字段
-    data.difficulty = data.difficulty or "hard"  -- 旧存档默认困难（保持原有体验）
+    -- 旧存档难度映射：旧 "hard"(1.0x基线) → 新 "easy"，旧 "easy" → 新 "easy"（最接近）
+    local oldDiffMap = { hard = "easy", easy = "easy" }
+    data.difficulty = oldDiffMap[data.difficulty] or data.difficulty or "easy"
     data.year = data.year or 1904
     data.quarter = data.quarter or 1
     data.cash = data.cash or 1000
@@ -509,11 +531,22 @@ function SaveLoad._DeserializeState(data)
             -- 标记已用的池立绘（防止重复分配）
             FamiliesData.MarkPoolPortraitUsed(m.portraitImage)
         end
+        -- 年龄迁移：旧存档没有 age 字段
+        if m.age == nil then
+            -- 根据成员 id 推算初始年龄，再加上已过年数
+            local baseAge = 30  -- 默认
+            if m.id == "patriarch" then baseAge = 42
+            elseif m.id == "eldest_son" then baseAge = 24
+            elseif m.id == "niece" then baseAge = 20
+            end
+            local yearsElapsed = (data.year or 1904) - 1904
+            m.age = baseAge + yearsElapsed
+        end
     end
     data.regions = data.regions or {}
     data.mines = data.mines or {}
     data.workers = data.workers or { hired = 10, wage = 8, morale = 70 }
-    data.military = data.military or { guards = 5, morale = 70, wage = 12, equipment = 1, supply = 20 }
+    data.military = data.military or { guards = 5, morale = 70, wage = 12, equipment = 1 }
     data.ai_factions = data.ai_factions or {}
     data.modifiers = data.modifiers or {}
     data.foreign_ops = data.foreign_ops or { scouted = {}, scouting = nil, active = {} }
@@ -525,7 +558,16 @@ function SaveLoad._DeserializeState(data)
     data.manipulation_cooldowns = data.manipulation_cooldowns
         or { pump = 0, dump = 0, coordinated = 0 }
     data.direction_locks = data.direction_locks or {}                -- M2: 方向互斥锁
-    data.press_credibility = data.press_credibility or 60           -- M1: 媒体公信力（旧档默认初始值）
+    -- 旧存档迁移：press_credibility → 统一声誉
+    if data.press_credibility ~= nil then
+        -- 旧范围 0~100 → 新范围 -100~+100: 线性映射 newRep = oldCred * 2 - 100
+        local migratedRep = math.floor((data.press_credibility or 60) * 2 - 100)
+        -- 仅当声誉还是默认值时才用迁移值覆盖（避免覆盖已有惩罚）
+        if (data.reputation or 0) == 0 and migratedRep ~= 0 then
+            data.reputation = math.max(-100, math.min(100, migratedRep))
+        end
+        data.press_credibility = nil  -- 清除旧字段
+    end
     -- data.last_ai_counter: nil 即无记录，不需要默认值             -- M4
     if data.has_seized_veins == nil then data.has_seized_veins = false end
     data.seized_veins = data.seized_veins or {}
@@ -548,8 +590,157 @@ function SaveLoad._DeserializeState(data)
     }
     data.titles_unlocked = data.titles_unlocked or {}
     data.titles_new      = data.titles_new or {}
+    data.unlocked_features = data.unlocked_features or {}
+
+    -- 远征系统（Phase 2+，旧存档迁移）
+    data.expeditions = data.expeditions or {
+        active = {},
+        occupied_countries = {},
+        aggression_counter = 0,
+        history = {
+            raids_won = 0,
+            raids_lost = 0,
+            support_missions = 0,
+            total_loot = 0,
+            countries_conquered = 0,
+        },
+    }
+    -- 确保子字段完整（增量更新兼容）
+    data.expeditions.active = data.expeditions.active or {}
+    data.expeditions.occupied_countries = data.expeditions.occupied_countries or {}
+    data.expeditions.awaiting_occupation = data.expeditions.awaiting_occupation or {}
+    data.expeditions.aggression_counter = data.expeditions.aggression_counter or 0
+    data.expeditions.under_sanction = data.expeditions.under_sanction or false
+    data.expeditions.sanction_remaining = data.expeditions.sanction_remaining or 0
+    data.expeditions.history = data.expeditions.history or {}
+    -- 旧存档迁移：raids_won/raids_lost → expeditions_won/expeditions_lost
+    if data.expeditions.history.raids_won then
+        data.expeditions.history.expeditions_won = (data.expeditions.history.expeditions_won or 0) + data.expeditions.history.raids_won
+        data.expeditions.history.raids_won = nil
+    end
+    if data.expeditions.history.raids_lost then
+        data.expeditions.history.expeditions_lost = (data.expeditions.history.expeditions_lost or 0) + data.expeditions.history.raids_lost
+        data.expeditions.history.raids_lost = nil
+    end
+    data.expeditions.history.expeditions_launched = data.expeditions.history.expeditions_launched or 0
+    data.expeditions.history.expeditions_won = data.expeditions.history.expeditions_won or 0
+    data.expeditions.history.expeditions_lost = data.expeditions.history.expeditions_lost or 0
+    data.expeditions.history.support_missions = data.expeditions.history.support_missions or 0
+    data.expeditions.history.total_loot = data.expeditions.history.total_loot or 0
+    data.expeditions.history.countries_conquered = data.expeditions.history.countries_conquered or 0
+
+    -- 商业远征系统（Phase 3+，旧存档迁移）
+    data.ventures = data.ventures or {
+        active = {},
+        awaiting_decision = {},
+        commercial_posts = {},
+        market_tension = 0,
+        under_trade_sanction = false,
+        trade_sanction_remaining = 0,
+        history = {
+            ventures_launched = 0,
+            ventures_completed = 0,
+            ventures_failed = 0,
+            total_venture_income = 0,
+            posts_established = 0,
+        },
+    }
+    data.ventures.active = data.ventures.active or {}
+    data.ventures.awaiting_decision = data.ventures.awaiting_decision or {}
+    data.ventures.commercial_posts = data.ventures.commercial_posts or {}
+    data.ventures.market_tension = data.ventures.market_tension or 0
+    data.ventures.under_trade_sanction = data.ventures.under_trade_sanction or false
+    data.ventures.trade_sanction_remaining = data.ventures.trade_sanction_remaining or 0
+    data.ventures.history = data.ventures.history or {}
+    data.ventures.history.ventures_launched = data.ventures.history.ventures_launched or 0
+    data.ventures.history.ventures_completed = data.ventures.history.ventures_completed
+        or data.ventures.history.ventures_won or 0  -- 兼容旧存档字段
+    data.ventures.history.ventures_failed = data.ventures.history.ventures_failed or 0
+    data.ventures.history.total_venture_income = data.ventures.history.total_venture_income
+        or data.ventures.history.total_investment or 0  -- 兼容旧存档字段
+    data.ventures.history.posts_established = data.ventures.history.posts_established or 0
+
+    -- 贸易系统（Phase 3+，旧存档迁移）
+    data.trade = data.trade or {
+        order_pool = {},
+        active_orders = {},
+        completed_count = 0,
+        failed_count = 0,
+        total_revenue = 0,
+        last_quarter_revenue = 0,
+        -- (trade.reputation 已合并到统一声誉 state.reputation)
+    }
+    -- 确保子字段完整（增量更新兼容）
+    data.trade.order_pool = data.trade.order_pool or {}
+    data.trade.active_orders = data.trade.active_orders or {}
+    data.trade.completed_count = data.trade.completed_count or 0
+    data.trade.failed_count = data.trade.failed_count or 0
+    data.trade.total_revenue = data.trade.total_revenue or 0
+    data.trade.last_quarter_revenue = data.trade.last_quarter_revenue or 0
+    -- 旧存档迁移：trade.reputation → 统一声誉
+    if data.trade.reputation then
+        -- 旧范围 -10~+10 → 新范围按比例叠加到统一声誉
+        local oldTradeRep = data.trade.reputation
+        if oldTradeRep ~= 0 then
+            local mapped = math.floor(oldTradeRep * 5)  -- -10~+10 → -50~+50
+            data.reputation = math.max(-100, math.min(100, (data.reputation or 0) + mapped))
+        end
+        data.trade.reputation = nil  -- 清除旧字段
+    end
+
+    -- 旧存档兼容：根据已解锁称号重建 unlocked_features 和 modifiers
+    if next(data.titles_unlocked) and not next(data.unlocked_features) then
+        local TitlesData = require("data.titles_data")
+        local GameState = require("game_state")
+        for titleId, _ in pairs(data.titles_unlocked) do
+            local def = TitlesData.GetById(titleId)
+            if def and def.rewards then
+                if def.rewards.unlock_features then
+                    for _, feat in ipairs(def.rewards.unlock_features) do
+                        data.unlocked_features[feat] = true
+                    end
+                end
+                -- 重建永久 modifier（避免旧存档丢失称号加成）
+                if def.rewards.modifiers then
+                    data.modifiers = data.modifiers or {}
+                    for _, mod in ipairs(def.rewards.modifiers) do
+                        local modId = "title_" .. def.id .. "_" .. mod.key
+                        -- 检查是否已存在，避免重复
+                        local exists = false
+                        for _, existing in ipairs(data.modifiers) do
+                            if existing.id == modId then
+                                exists = true
+                                break
+                            end
+                        end
+                        if not exists then
+                            table.insert(data.modifiers, {
+                                id = modId,
+                                target = mod.key,
+                                value = mod.value,
+                                remaining = 0, -- 永久
+                            })
+                        end
+                    end
+                end
+            end
+        end
+    end
+
     data.phase = data.phase or "action"
     data.turn_count = data.turn_count or 0
+
+    -- 旧存档迁移：shadow_ruler 不再解锁 foreign_trade（改由 trade_novice），
+    -- 但已拥有 shadow_ruler 的玩家应保留 foreign_trade + gp_actions
+    if data.titles_unlocked and data.titles_unlocked["shadow_ruler"] then
+        data.unlocked_features = data.unlocked_features or {}
+        if not data.unlocked_features["foreign_trade"] then
+            data.unlocked_features["foreign_trade"] = true
+        end
+        if not data.unlocked_features["gp_actions"] then
+            data.unlocked_features["gp_actions"] = true
+        end
+    end
 
     -- 新字段兼容旧存档：若不存在则从 Balance 重建
     data.copper = data.copper or 0
@@ -569,7 +760,7 @@ function SaveLoad._DeserializeState(data)
     data.portfolio = data.portfolio or { holdings = {} }
     data.portfolio.holdings = data.portfolio.holdings or {}
     data.portfolio.short_positions = data.portfolio.short_positions or {}
-    data.passive_influence = data.passive_influence or 0
+    data.passive_control = data.passive_control or 0
     data.battle_wins_total = data.battle_wins_total or 0
     data.battle_wins_unclaimed = data.battle_wins_unclaimed or 0
     data.victory.claimed = data.victory.claimed
@@ -581,6 +772,12 @@ function SaveLoad._DeserializeState(data)
     data.loan_consecutive_defaults = data.loan_consecutive_defaults or 0
     data.negative_net_worth_turns = data.negative_net_worth_turns or 0
     if data.bankrupt == nil then data.bankrupt = false end
+
+    -- 免广告卡兼容
+    data.ad_free_card_charges = data.ad_free_card_charges or 0
+    if data.ad_free_card_active == nil then data.ad_free_card_active = false end
+    data.ad_free_lucky_used = data.ad_free_lucky_used or 0
+    data.ad_free_reroll_used = data.ad_free_reroll_used or 0
 
     -- 破产免死广告
     data.bankrupt_ad_used = data.bankrupt_ad_used or 0
@@ -621,6 +818,20 @@ function SaveLoad._DeserializeState(data)
     data.powers = data.powers or {}
     data.fronts = data.fronts or {}
 
+    -- 旧存档迁移：若已解锁远征功能但 europe 缺少 HP 字段，补充初始化
+    if data.unlocked_features and data.unlocked_features["expedition"] then
+        local needsInit = true
+        for _, country in pairs(data.europe) do
+            if country.max_hp then needsInit = false end
+            break
+        end
+        if needsInit then
+            local Expedition = require("systems.expedition")
+            Expedition.InitCountryHP(data)
+            print("[SaveLoad] 旧存档迁移：补充国家HP初始化")
+        end
+    end
+
     -- 大国博弈初始化标志（防止 GrandPowers.Init 破坏已加载的 powers/fronts）
     -- 旧存档无此字段时，若 powers 非空则视为已初始化
     if data._gp_initialized == nil then
@@ -629,6 +840,10 @@ function SaveLoad._DeserializeState(data)
 
     -- 历史分支标志（旧存档迁移：nil 即未触发，保持 nil 语义）
     -- data._branch_war_delayed, _branch_war_accelerated, ... 直接保留
+
+    -- 大国行动历史与惯性计数（旧存档迁移：初始化为空表）
+    if data.gp_action_history == nil then data.gp_action_history = {} end
+    if data._action_streaks == nil then data._action_streaks = {} end
 
     -- 事件干旱计数器
     data.event_drought_counter = data.event_drought_counter or 0
@@ -648,7 +863,7 @@ function SaveLoad._DeserializeState(data)
     data.turn_messages = data.turn_messages or {}
 
     for _, r in ipairs(data.regions) do
-        r.influence = r.influence or 0
+        r.control = r.control or 0
     end
     for _, faction in ipairs(data.ai_factions) do
         faction.victory = faction.victory or { economic = 0, military = 0 }
@@ -676,17 +891,15 @@ function SaveLoad._DeserializeState(data)
     data.research_speed_bonus = derived.research_speed_bonus or data.research_speed_bonus or 0
     data.trade_passive_income = derived.trade_passive_income or data.trade_passive_income or 0
     data.finance_passive_income = derived.finance_passive_income or data.finance_passive_income or 0
-    data.finance_supply_discount = derived.finance_supply_discount or data.finance_supply_discount or 0
     data.gold_price_bonus = derived.gold_price_bonus or data.gold_price_bonus or 0
     data.hire_cost_discount = derived.hire_cost_discount or data.hire_cost_discount or 0
-    data.supply_reduction_bonus = derived.supply_reduction_bonus or data.supply_reduction_bonus or 0
     data.accident_rate_mod = derived.accident_rate_mod or data.accident_rate_mod or 0
     data.plunder_loot_mult_bonus = derived.plunder_loot_mult_bonus or data.plunder_loot_mult_bonus or 0
     data.rep_recovery_bonus = derived.rep_recovery_bonus or data.rep_recovery_bonus or 0
+    data.rep_action_cooldowns = data.rep_action_cooldowns or {}
     data.plunder_cooldown_reduction = derived.plunder_cooldown_reduction or data.plunder_cooldown_reduction or 0
     data.stock_return_bonus = derived.stock_return_bonus or data.stock_return_bonus or 0
     data.derived_effects = nil  -- 清除残留，避免序列化时产生嵌套冗余
-    data.military.supply = data.military.supply or 20
 
     -- 装备/编队系统（v0.5.0 新增）
     data.military.squads = data.military.squads or {}
@@ -694,6 +907,7 @@ function SaveLoad._DeserializeState(data)
     -- data.military.factory 可以为 nil（表示未建造）
     data.military.production_queue = data.military.production_queue or {}
     data.military.outsource_slots = data.military.outsource_slots or {}
+
 
     -- 矿山槽位 + 探矿（v0.4.0 新增）
     data.mine_slots_bonus = data.mine_slots_bonus or 0
@@ -739,14 +953,11 @@ function SaveLoad._DeserializeState(data)
                     elseif eff.kind == "trade_income" then
                         data.trade_passive_income = (data.trade_passive_income or 0) + eff.value
                     elseif eff.kind == "finance_network" then
-                        data.finance_supply_discount = 0.20
                         data.finance_passive_income = 80
                     elseif eff.kind == "gold_price_bonus" then
                         data.gold_price_bonus = (data.gold_price_bonus or 0) + eff.value
                     elseif eff.kind == "hire_cost_reduction" then
                         data.hire_cost_discount = (data.hire_cost_discount or 0) + eff.value
-                    elseif eff.kind == "supply_reduction" then
-                        data.supply_reduction_bonus = (data.supply_reduction_bonus or 0) + math.abs(eff.value)
                     elseif eff.kind == "accident_reduction" then
                         data.accident_rate_mod = (data.accident_rate_mod or 0) + eff.value
                     elseif eff.kind == "mine_slots" then
@@ -763,6 +974,12 @@ function SaveLoad._DeserializeState(data)
                         data.rep_recovery_bonus = (data.rep_recovery_bonus or 0) + eff.value
                     elseif eff.kind == "plunder_cooldown_reduction" then
                         data.plunder_cooldown_reduction = (data.plunder_cooldown_reduction or 0) + eff.value
+                    elseif eff.kind == "unlock_foreign_trade" then
+                        data.unlocked_features = data.unlocked_features or {}
+                        data.unlocked_features["foreign_trade"] = true
+                    elseif eff.kind == "unlock_venture" then
+                        data.unlocked_features = data.unlocked_features or {}
+                        data.unlocked_features["venture"] = true
                     end
                 end
             end
@@ -778,6 +995,12 @@ function SaveLoad._DeserializeState(data)
     -- 广告幸运事件兼容
     data.lucky_ad_watched = data.lucky_ad_watched or 0
     data.lucky_ad_decay = data.lucky_ad_decay or 1.0
+
+    -- 免广告卡兼容（旧存档无此字段）
+    data.ad_free_card_charges = data.ad_free_card_charges or 0
+    if data.ad_free_card_active == nil then data.ad_free_card_active = false end
+    data.ad_free_lucky_used = data.ad_free_lucky_used or 0
+    data.ad_free_reroll_used = data.ad_free_reroll_used or 0
 
     -- 音量设置兼容（旧存档无此字段）
     -- data.audio_settings 可以为 nil，由 AudioManager.LoadSettings 处理

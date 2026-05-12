@@ -554,13 +554,19 @@ function Equipment.OnBattleEnd(state, participatingSquadIds)
                 end
             end
 
-            -- 老兵经验
+            -- 老兵经验（称号modifier：经验加成降低升级门槛）
+            local expBonus = GameState.GetModifierValue(state, "squad_exp_bonus")
             sq.battles = (sq.battles or 0) + 1
             local vet = EquipmentData.VETERANCY
             if sq.veterancy < 3 then
                 local nextLevel = sq.veterancy + 1
                 local nextData = vet[nextLevel]
-                if nextData and sq.battles >= nextData.battles_required then
+                -- 经验加成：等效减少所需战斗次数
+                local reqBattles = nextData and nextData.battles_required or 999
+                if expBonus > 0 then
+                    reqBattles = math.max(1, math.ceil(reqBattles / (1 + expBonus)))
+                end
+                if nextData and sq.battles >= reqBattles then
                     sq.veterancy = nextLevel
                 end
             end

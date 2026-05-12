@@ -112,6 +112,14 @@ function GameState.CreateNew()
         lucky_ad_decay = 1.0,            -- 本季广告奖励衰减系数
 
         -- ============================
+        -- 免广告卡（看广告充能，每回合免费使用广告点）
+        -- ============================
+        ad_free_card_charges = 0,        -- 已充能广告次数（满10激活）
+        ad_free_card_active = false,     -- 免广告卡是否已激活
+        ad_free_lucky_used = 0,          -- 本回合已用免费广告金次数
+        ad_free_reroll_used = 0,         -- 本回合已用免费重随次数
+
+        -- ============================
         -- 破产免死广告（每局限一次）
         -- ============================
         bankrupt_ad_used = 0,            -- 已使用破产免死次数
@@ -139,7 +147,7 @@ function GameState.CreateNew()
         battle_wins_total = 0,            -- 累计战斗胜利场次（用于军事胜利快照/记录）
         battle_wins_unclaimed = 0,        -- 尚未结算进军事胜利点的近期胜场
         emergency_gold_sold = false,      -- 本回合是否触发过紧急变卖黄金（快照验证用）
-        culture_action_this_turn = false,  -- 本季是否执行过文化行动（Influence 衰减豁免）
+        culture_action_this_turn = false,  -- 本季是否执行过文化行动
 
         -- ============================
         -- 回合阶段
@@ -205,7 +213,6 @@ function GameState.CreateNew()
             morale    = BMI.base_morale,
             wage      = BMI.guard_wage,
             equipment = 1,  -- 旧字段保留兼容（新系统不再使用）
-            supply    = 20, -- 补给储备
             -- 编队系统（新）
             squads = {},    -- { id, name, size, equip_id, veterancy, condition, battles }
             inventory = {}, -- 库存装备 { equip_id, condition }（未分配给编队的装备）
@@ -214,6 +221,7 @@ function GameState.CreateNew()
             -- 生产队列
             production_queue = {},  -- { equip_id, progress, total, source="factory" }
             outsource_slots = {},   -- { equip_id, progress, total, source="outsource" }
+
         },
 
         -- ============================
@@ -224,6 +232,68 @@ function GameState.CreateNew()
         powers = {},                          -- 活跃大国AI（Phase 2 填充）
         fronts = {},                          -- 活跃前线（Phase 2 填充）
         _gp_initialized = false,              -- 大国博弈初始化标志
+
+        -- ============================
+        -- 远征系统（幕后执政解锁后激活）
+        -- ============================
+        expeditions = {
+            active = {},               -- 活跃远征 { [country_id] = record }
+            awaiting_occupation = {},  -- 待占领队列 { { country_id, label, defeated_turn } }
+            occupied_countries = {},   -- 已占领国家列表
+            aggression_counter = 0,    -- 侵略计数器（制裁触发）
+            under_sanction = false,    -- 是否处于制裁状态
+            sanction_remaining = 0,    -- 制裁剩余季度
+            history = {
+                expeditions_launched = 0,
+                expeditions_won = 0,
+                expeditions_lost = 0,
+                support_missions = 0,
+                total_loot = 0,
+                countries_conquered = 0,
+            },
+        },
+
+        -- ============================
+        -- 商业远征系统（商业大亨解锁后激活）
+        -- ============================
+        ventures = {
+            active = {},               -- 活跃渗透 { [power_id] = venture_record }
+            -- venture_record = {
+            --   power_id      = string,  -- 目标国家/势力 id
+            --   route_id      = string,  -- 对应贸易路线 id
+            --   city          = string,  -- 目标城市名
+            --   strategy_id   = string,  -- 当前策略 (normal/dumping/bribery/tech_export)
+            --   investment_level = number, -- 投资等级 1-3
+            --   total_invested = number,  -- 累计投资额
+            --   started_turn  = number,   -- 发起时回合数
+            --   turns_active  = number,   -- 已进行回合数
+            -- }
+            awaiting_decision = {},    -- 待决策队列 { { power_id, city, label, completed_turn } }
+            commercial_posts = {},     -- 已建立据点 { [power_id] = { type, city, established_turn } }
+            market_tension = 0,        -- 市场紧张度（类似侵略计数器）
+            under_trade_sanction = false,  -- 是否处于贸易制裁
+            trade_sanction_remaining = 0,  -- 制裁剩余季度
+            history = {
+                ventures_launched  = 0,
+                ventures_completed = 0,
+                ventures_failed    = 0,
+                total_venture_income = 0,
+                posts_established  = 0,
+            },
+        },
+
+        -- ============================
+        -- 贸易系统（外贸解锁后激活）
+        -- ============================
+        trade = {
+            order_pool = {},           -- 可接取订单池
+            active_orders = {},        -- 已接取/运输中订单
+            completed_count = 0,       -- 累计完成订单
+            failed_count = 0,          -- 累计失败订单
+            total_revenue = 0,         -- 累计贸易总收入
+            -- (贸易信誉已合并到统一声誉 state.reputation)
+            last_quarter_revenue = 0,  -- 上季度贸易收入（用于经济结算）
+        },
 
         -- ============================
         -- 事件干旱计数器
@@ -281,7 +351,7 @@ function GameState.CreateNew()
         -- ============================
         -- 掠夺系统（武力掠夺发展路线）
         -- ============================
-        reputation = Balance.REPUTATION.initial,  -- 声誉 (-100 ~ 0)
+        reputation = Balance.REPUTATION.initial,  -- 统一声誉 (-100 ~ +100)
         plunder_cooldowns = {
             raid_caravan   = 0,
             seize_vein     = 0,
@@ -294,8 +364,7 @@ function GameState.CreateNew()
         },
         -- M2: 方向互斥锁 { [stockId] = { no_buy = N, no_short = N } }
         direction_locks = {},
-        -- M1: 媒体公信力（0~100，操盘消耗，自然恢复）
-        press_credibility = Balance.CREDIBILITY.initial,
+        -- (press_credibility 已合并到统一声誉 state.reputation)
         has_seized_veins = false,  -- 是否曾成功夺取过矿脉（科技/事件触发条件）
         seized_veins = {},  -- { { remaining = N, gold_per_turn = M } }
 
@@ -311,7 +380,7 @@ function GameState.CreateNew()
         -- ============================
         -- 被动效果（科技/事件累积）
         -- ============================
-        passive_influence = 0,       -- 被动地区影响力增益/季（科技"印刷宣传"等）
+        passive_control = 0,         -- 被动控制度增益/季（科技"印刷宣传"等）
         regulation_pressure = 0,     -- 监管压力（事件/外交行为累积）
         special_content = {
             quota_active = false,
@@ -330,10 +399,8 @@ function GameState.CreateNew()
         research_speed_bonus = 0,
         trade_passive_income = 0,
         finance_passive_income = 0,
-        finance_supply_discount = 0,
         gold_price_bonus = 0,
         hire_cost_discount = 0,
-        supply_reduction_bonus = 0,
         accident_rate_mod = 0,
         plunder_loot_mult_bonus = 0,    -- 掠夺收益倍率加成（科技累积）
         rep_recovery_bonus = 0,         -- 声誉恢复速度加成（科技累积）
@@ -374,6 +441,10 @@ function GameState.CreateNew()
         titles_new      = {},  -- 本回合新解锁（回合末填充，展示后清空）
     }
 
+    -- 起始资源受难度影响
+    local diff = Config.GetDifficulty(state.difficulty)
+    state.cash = math.floor(state.cash * (diff.start_cash_mult or 1.0))
+
     return state
 end
 
@@ -404,6 +475,9 @@ function GameState.AdvanceQuarter(state)
     -- 重置本季广告次数
     state.lucky_ad_watched = 0
     state.lucky_ad_decay = 1.0
+    -- 重置免广告卡本回合使用次数
+    state.ad_free_lucky_used = 0
+    state.ad_free_reroll_used = 0
 end
 
 --- 计算玩家地区总控制度
@@ -417,30 +491,19 @@ function GameState.CalcTotalControl(state)
     return total
 end
 
---- 计算玩家总影响力（所有地区 influence 之和）
----@param state table
----@return number
-function GameState.CalcTotalInfluence(state)
-    local total = 0
-    for _, r in ipairs(state.regions) do
-        total = total + (r.influence or 0)
-    end
-    return total
-end
-
---- 是否达到某个总影响力阈值
+--- 是否达到某个总控制度里程碑
 ---@param state table
 ---@param threshold number
 ---@return boolean
-function GameState.HasInfluenceThreshold(state, threshold)
-    return GameState.CalcTotalInfluence(state) >= threshold
+function GameState.HasControlMilestone(state, threshold)
+    return GameState.CalcTotalControl(state) >= threshold
 end
 
---- 影响力带来的招募/雇佣折扣
+--- 控制度里程碑带来的招募/雇佣折扣
 ---@param state table
----@return number discount 0..0.25
-function GameState.GetInfluenceRecruitDiscount(state)
-    if GameState.HasInfluenceThreshold(state, 70) then
+---@return number discount 0..0.10
+function GameState.GetControlRecruitDiscount(state)
+    if GameState.HasControlMilestone(state, 150) then
         return 0.10
     end
     return 0
@@ -473,11 +536,10 @@ function GameState.CalcPlayerVictoryScores(state)
     local economic = (state.victory and state.victory.economic) or 0
     local military = (state.victory and state.victory.military) or 0
     local controlBonus = math.floor(GameState.CalcTotalControl(state) / 5)
-    local influenceBonus = math.floor(GameState.CalcTotalInfluence(state) / 10)
     return {
         economic = economic,
         military = military,
-        dominance = economic + military + controlBonus + influenceBonus,
+        dominance = economic + military + controlBonus,
     }
 end
 
@@ -696,7 +758,6 @@ function GameState.GetEndingInfo(state)
     local BVE = Balance.VICTORY.economic
     local BVM = Balance.VICTORY.military
     local totalControl = GameState.CalcTotalControl(state)
-    local totalInfluence = GameState.CalcTotalInfluence(state)
     local totalAssets = GameState.CalcTotalAssets(state)
     local totalDebt = GameState.CalcTotalDebt(state)
     local netWorth = totalAssets - totalDebt
@@ -718,8 +779,7 @@ function GameState.GetEndingInfo(state)
             { label = "现金", value = Config.FormatNumber(state.cash or 0) },
             { label = "黄金库存", value = tostring(state.gold or 0) },
             { label = "净资产", value = Config.FormatNumber(netWorth) },
-            { label = "地区控制", value = tostring(totalControl) },
-            { label = "地区影响力", value = tostring(totalInfluence) },
+            { label = "地区控制度", value = tostring(totalControl) },
             { label = "度过季度", value = tostring(state.turn_count or 0) },
             { label = "胜利声明", value = claimedText },
         },
@@ -921,9 +981,8 @@ function GameState.CalcMaxAP(state)
         end
     end
 
-    -- 影响力里程碑"政治联盟"（>=120 影响力）→ AP +1
-    local totalInfluence = GameState.CalcTotalInfluence(state)
-    if totalInfluence >= 120 then
+    -- 控制度里程碑"政治联盟"（总控制度 >=200）→ AP +1
+    if GameState.HasControlMilestone(state, 200) then
         ap = ap + 1
     end
 
@@ -993,9 +1052,11 @@ function GameState.AssignPosition(state, memberId, positionId)
     for _, m in ipairs(state.family.members) do
         if m.id == memberId then
             if positionId then
-                -- 上岗：设置适应期
+                -- 上岗：设置适应期（称号modifier：适应期缩短）
                 m.position = positionId
-                m.onboarding_remaining = Balance.FAMILY.onboarding_turns or 2
+                local onboardReduction = GameState.GetModifierValue(state, "onboarding_reduction")
+                m.onboarding_remaining = math.max(0,
+                    (Balance.FAMILY.onboarding_turns or 2) - onboardReduction)
                 m.cooldown_turns = 0  -- 上岗清除冷却
             else
                 -- 下岗：即时生效，进入冷却期
@@ -1154,6 +1215,31 @@ function GameState.RemoveFamilyMember(state, memberId)
             local name = m.name
             table.remove(members, i)
             GameState.AddLog(state, string.format("%s 永久离开了家族", name))
+            return true, name
+        end
+    end
+    return false, nil
+end
+
+--- 处理家族成员退休（年满退休年龄）。
+--- 释放岗位、释放立绘，从列表中删除。
+---@param state table
+---@param memberId string
+---@return boolean ok
+---@return string|nil retiredName
+function GameState.RetireFamilyMember(state, memberId)
+    local members = (state.family and state.family.members) or {}
+    for i, m in ipairs(members) do
+        if m.id == memberId then
+            -- 释放池立绘
+            if m.portraitImage then
+                FamiliesData.ReleasePoolPortrait(m.portraitImage)
+            end
+            local name = m.name
+            local age  = m.age or 60
+            table.remove(members, i)
+            GameState.AddLog(state, string.format(
+                "%s 年满 %d 岁，光荣退休，离开家族核心圈", name, age))
             return true, name
         end
     end
@@ -1410,12 +1496,59 @@ function GameState.GetReputationLabel(tier)
     return labels[tier] or "未知"
 end
 
---- 获取声誉导致的交易溢价比例
+--- 获取声誉导致的交易溢价比例（负面声誉时）
 ---@param state table
 ---@return number penalty 0~0.40
 function GameState.GetTradePenalty(state)
     local tier = GameState.GetReputationTier(state)
     return Balance.REPUTATION.trade_penalty[tier] or 0
+end
+
+--- 获取正面声誉带来的贸易订单加成（替代原贸易信誉）
+---@param state table
+---@return number bonus 0~0.5
+function GameState.GetTradeOrderBonus(state)
+    local rep = math.max(0, state.reputation or 0)
+    return rep * Balance.REPUTATION.trade_order_bonus
+end
+
+--- 获取正面声誉带来的路线安全加成（替代原贸易信誉）
+---@param state table
+---@return number bonus 0~0.2
+function GameState.GetTradeSafetyBonus(state)
+    local rep = math.max(0, state.reputation or 0)
+    return rep * Balance.REPUTATION.trade_safety_bonus
+end
+
+--- 获取操盘乘数（替代原公信力系统）
+--- rep=100 → ×1.0, rep=0 → ×0.75, rep=-100 → ×0.5
+---@param state table
+---@return number multiplier [0.5, 1.0]
+function GameState.GetMarketManipulationMultiplier(state)
+    local BR = Balance.REPUTATION
+    local rep = state.reputation or 0
+    local floor = BR.market_multiplier_floor
+    local normalized = (rep - BR.min) / (BR.max - BR.min)  -- 0~1
+    return floor + (1.0 - floor) * math.max(0, math.min(1, normalized))
+end
+
+--- 操盘消耗声誉（替代原公信力消耗）
+---@param state table
+---@param costKey string "pump"|"dump"|"coordinated"
+---@param success boolean
+function GameState.ConsumeMarketReputation(state, costKey, success)
+    local BR = Balance.REPUTATION
+    local baseCost = BR["market_cost_" .. costKey] or 15
+    local cost = success and baseCost or math.ceil(baseCost * BR.market_cost_fail_mult)
+    state.reputation = math.max(BR.min, (state.reputation or 0) - cost)
+end
+
+--- 修改声誉值（统一入口，自动 clamp）
+---@param state table
+---@param delta number
+function GameState.ModifyReputation(state, delta)
+    local BR = Balance.REPUTATION
+    state.reputation = math.max(BR.min, math.min(BR.max, (state.reputation or 0) + delta))
 end
 
 return GameState

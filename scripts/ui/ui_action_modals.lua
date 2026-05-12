@@ -212,42 +212,25 @@ function ActionModals.ShowIntelligence(state, accent)
     ActionModals._ShowList("👁️ 情报行动", rows)
 end
 
---- 检查是否负担得起（AP + 现金×通胀 + 可选 influence）
+--- 检查是否负担得起（AP + 现金×通胀）
 ---@param state table
 ---@param cfg table { ap, cash }
----@param influenceCost number|nil 额外的影响力消耗（可选）
-function ActionModals._CanAfford(state, cfg, influenceCost)
+function ActionModals._CanAfford(state, cfg)
     local inflation = GameState.GetInflationFactor(state)
     if state.cash < math.floor((cfg.cash or 0) * inflation) then return false end
     if (state.ap.current + (state.ap.temp or 0)) < (cfg.ap or 0) then return false end
-    if influenceCost and influenceCost > 0 then
-        local totalInfluence = GameState.CalcTotalInfluence(state)
-        if totalInfluence < influenceCost then return false end
-    end
     return true
 end
 
---- 原子扣费：同时扣 AP、现金×通胀、可选 influence
+--- 原子扣费：同时扣 AP、现金×通胀
 ---@param state table
 ---@param cfg table
----@param influenceCost number|nil
-function ActionModals._Spend(state, cfg, influenceCost)
-    if not ActionModals._CanAfford(state, cfg, influenceCost) then return false end
+function ActionModals._Spend(state, cfg)
+    if not ActionModals._CanAfford(state, cfg) then return false end
     local apOk = GameState.SpendAP(state, cfg.ap or 0)
     if not apOk then return false end
     local inflation = GameState.GetInflationFactor(state)
     state.cash = state.cash - math.floor((cfg.cash or 0) * inflation)
-    -- 扣除 influence：按比例从各地区扣减
-    if influenceCost and influenceCost > 0 then
-        local totalInf = GameState.CalcTotalInfluence(state)
-        if totalInf > 0 then
-            for _, r in ipairs(state.regions) do
-                local ratio = (r.influence or 0) / totalInf
-                local loss = math.floor(influenceCost * ratio + 0.5)
-                r.influence = math.max(0, (r.influence or 0) - loss)
-            end
-        end
-    end
     return true
 end
 
@@ -352,7 +335,7 @@ function ActionModals.ShowDiplomacy(state, accent)
                         actionBtn("协议",
                             C.accent_blue,
                             function() ActionModals._DiploTreaty(state, factionLocal) end,
-                            not ActionModals._CanAfford(state, Balance.DIPLOMACY.treaty, Balance.INFLUENCE.cost_treaty)),
+                            not ActionModals._CanAfford(state, Balance.DIPLOMACY.treaty)),
                         actionBtn("敌对",
                             C.accent_red,
                             function() ActionModals._DiploHostile(state, factionLocal) end,
@@ -384,17 +367,16 @@ end
 
 function ActionModals._DiploTreaty(state, faction)
     local cfg = Balance.DIPLOMACY.treaty
-    local infCost = Balance.INFLUENCE.cost_treaty
     if faction.attitude < cfg.attitude_req then
         UI.Toast.Show(string.format("需要态度 ≥ %d 才能签订协议", cfg.attitude_req),
             { variant = "warning", duration = 1.5 })
         return
     end
-    if not ActionModals._CanAfford(state, cfg, infCost) then
-        UI.Toast.Show("资源不足（需影响力≥" .. infCost .. "）", { variant = "error", duration = 1.2 })
+    if not ActionModals._CanAfford(state, cfg) then
+        UI.Toast.Show("资源不足", { variant = "error", duration = 1.2 })
         return
     end
-    ActionModals._Spend(state, cfg, infCost)
+    ActionModals._Spend(state, cfg)
     faction.attitude = math.min(100, faction.attitude + cfg.attitude)
     faction.pact_remaining = cfg.pact_turns
     GameState.AddLog(state, string.format("[外交] 与 %s 签订协议，%d 季互不侵犯",
@@ -518,11 +500,11 @@ function ActionModals.ShowTrade(state, accent)
             or state.tech.researched["d5_radio"]
             or state.tech.researched["d7_wartime_media"])
     if hasAnyManipTech then
-        -- 分组标题 + 公信力显示
-        local credibility = state.press_credibility or 100
+        -- 分组标题 + 声誉→操盘乘数显示
+        local reputation = state.reputation or 0
         local credMult = StockEngine.GetCredibilityMultiplier(state)
-        local credColor = credibility >= 70 and C.accent_green
-            or credibility >= 40 and C.accent_amber
+        local credColor = reputation >= 30 and C.accent_green
+            or reputation >= -20 and C.accent_amber
             or C.accent_red
         -- 标题行
         table.insert(rows, UI.Panel {
@@ -559,7 +541,7 @@ function ActionModals.ShowTrade(state, accent)
                     marginBottom = 4,
                     children = {
                         UI.Label {
-                            text = "📰 媒体公信力",
+                            text = "📰 声誉（操盘影响）",
                             fontSize = F.body_minor,
                             fontColor = C.text_secondary,
                         },
@@ -568,15 +550,10 @@ function ActionModals.ShowTrade(state, accent)
                             alignItems = "center",
                             children = {
                                 UI.Label {
-                                    text = string.format("%d", credibility),
+                                    text = string.format("%+d", reputation),
                                     fontSize = F.body,
                                     fontWeight = "bold",
                                     fontColor = credColor,
-                                },
-                                UI.Label {
-                                    text = " / 100",
-                                    fontSize = F.body_minor,
-                                    fontColor = C.text_tertiary,
                                 },
                             },
                         },
@@ -584,7 +561,7 @@ function ActionModals.ShowTrade(state, accent)
                 },
                 -- 进度条
                 UI.ProgressBar {
-                    value = credibility / 100,
+                    value = (reputation + 100) / 200,
                     width = "100%",
                     height = 6,
                     borderRadius = 3,
@@ -1324,6 +1301,8 @@ function ActionModals._ShowList(title, rows)
         showCloseButton = true,
         onClose = function(self)
             Config.ConsumeTap()
+            UI.ClearFocus()
+            Config.SuppressKeyboard()
             currentModal_ = nil
             self:Destroy()
         end,

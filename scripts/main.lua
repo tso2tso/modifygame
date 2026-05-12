@@ -528,23 +528,32 @@ function ShowBankruptcyRescueModal(state)
                         variant = "primary",
                         width = "100%",
                         onClick = Config.ClickGuard(function(self)
+                            -- 只隐藏弹窗，不销毁；等广告回调后再销毁
+                            -- 修复：提前 Destroy 会导致渲染管线异常闪退
                             modal:Close()
-                            modal:Destroy()
-                            ---@diagnostic disable-next-line: undefined-global
-                            sdk:ShowRewardVideoAd(function(result)
-                                if not result.success then
-                                    if result.msg == "embed manual close" then
-                                        UI.Toast.Show("需完整观看广告才能获得救济",
-                                            { variant = "warning", duration = 1.5 })
-                                    else
-                                        UI.Toast.Show("广告播放失败: " .. (result.msg or "未知错误"),
-                                            { variant = "error", duration = 1.5 })
+                            local ok, err = pcall(function()
+                                ---@diagnostic disable-next-line: undefined-global
+                                sdk:ShowRewardVideoAd(function(result)
+                                    pcall(function() modal:Destroy() end)
+                                    if not result.success then
+                                        if result.msg == "embed manual close" then
+                                            UI.Toast.Show("需完整观看广告才能获得救济",
+                                                { variant = "warning", duration = 1.5 })
+                                        else
+                                            UI.Toast.Show("广告播放失败: " .. (result.msg or "未知错误"),
+                                                { variant = "error", duration = 1.5 })
+                                        end
+                                        ProceedBankruptcy(state)
+                                        return
                                     end
-                                    ProceedBankruptcy(state)
-                                    return
-                                end
-                                ApplyBankruptcyRescue(state, rescueCash)
+                                    ApplyBankruptcyRescue(state, rescueCash)
+                                end)
                             end)
+                            if not ok then
+                                print("[破产免死] SDK 调用异常: " .. tostring(err))
+                                pcall(function() modal:Destroy() end)
+                                ProceedBankruptcy(state)
+                            end
                         end),
                     },
                     UI.Button {
@@ -632,16 +641,16 @@ function FinalizeEndTurn()
     AudioManager.UpdateBGM(state_)
 
     -- 收集本季动态通知（战斗结果、AI行动、警告）
-    -- 保留 turn_engine 中已写入的 market_intel 消息
-    local prevIntelMsgs = {}
+    -- 保留 turn_engine 中已写入的 market_intel / world_news 消息
+    local prevSpecialMsgs = {}
     for _, m in ipairs(state_.turn_messages or {}) do
-        if m.type == "market_intel" then
-            table.insert(prevIntelMsgs, m)
+        if m.type == "market_intel" or m.type == "world_news" then
+            table.insert(prevSpecialMsgs, m)
         end
     end
     state_.turn_messages = {}
-    -- 先放回 market_intel 消息
-    for _, m in ipairs(prevIntelMsgs) do
+    -- 先放回保留的特殊消息
+    for _, m in ipairs(prevSpecialMsgs) do
         table.insert(state_.turn_messages, m)
     end
     for _, msg in ipairs(report.ai_changes or {}) do
@@ -659,6 +668,12 @@ function FinalizeEndTurn()
     UIManager.RefreshAll(state_)
 
     -- 新闻快报弹窗：如果本回合有 market_intel 消息，弹出专属弹窗
+    local prevIntelMsgs = {}
+    for _, m in ipairs(prevSpecialMsgs) do
+        if m.type == "market_intel" then
+            table.insert(prevIntelMsgs, m)
+        end
+    end
     if #prevIntelMsgs > 0 then
         UIManager.ShowMarketIntelPopup(state_, prevIntelMsgs)
     end
@@ -800,6 +815,15 @@ function HandleUpdate(eventType, eventData)
     -- 延迟页面刷新：在 onClick 回调栈外执行 ClearChildren+rebuild，防止按钮闪烁
     UIManager.FlushPendingRefresh()
     Tutorial.Update(dt)
+
+    -- 全局键盘抑制：模态框关闭后持续清除焦点 + 隐藏键盘，
+    -- 修复 HandlePointerDown 焦点残留导致的键盘反复弹出问题。
+    -- Config.SuppressKeyboard() 启动 0.5s 抑制窗口，
+    -- 此处每帧强制 ClearFocus + 隐藏键盘直到窗口过期。
+    if Config.IsKeyboardSuppressed() then
+        UI.ClearFocus()
+        input:SetScreenKeyboardVisible(false)
+    end
 end
 
 ---@param eventType string

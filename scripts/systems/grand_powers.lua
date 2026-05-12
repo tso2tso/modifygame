@@ -127,6 +127,9 @@ function GrandPowers.Tick(state)
     -- ── Step 4: 继承/消亡事件 ──
     GrandPowers._ProcessSuccessions(state, year, quarter, report)
 
+    -- ── Step 4.5: 分支标记触发器（基于玩家积累行为自动激活分支）──
+    GrandPowers._CheckBranchTriggers(state, year, quarter)
+
     -- ── Step 5: 征服事件 ──
     GrandPowers._ProcessConquests(state, year, quarter, report)
 
@@ -135,6 +138,12 @@ function GrandPowers.Tick(state)
 
     -- ── Step 7: 本地 AI 联动 ──
     GrandPowers._LinkLocalAI(state, eraId)
+
+    -- ── Step 8: 好感度自然衰减 ──
+    GrandPowers._DecayAttitudes(state)
+
+    -- ── Step 9: 生成世界快讯 ──
+    report.headline = GrandPowers._GenerateHeadline(state, report)
 
     return report
 end
@@ -154,15 +163,29 @@ function GrandPowers._CheckActivations(state, year)
 end
 
 --- 历史漂移：每个活跃大国的三围向基准线漂移
+--- 自适应漂移：偏离基准线超过阈值时加速回拉，防止历史线完全脱轨
 function GrandPowers._ApplyDrift(state, year)
-    local driftRate = PowersData.DRIFT_RATE
+    local baseDrift = PowersData.DRIFT_RATE
+    local highDrift = PowersData.DRIFT_RATE_HIGH
+    local threshold = PowersData.DRIFT_DEVIATION_THRESHOLD
     for id, power in pairs(state.powers) do
         if power.active then
             local bl = PowersData.GetBaseline(id, year)
             if bl then
-                power.military    = clamp100(power.military    + (bl.military    - power.military)    * driftRate)
-                power.economy     = clamp100(power.economy     + (bl.economy     - power.economy)     * driftRate)
-                power.war_fatigue = clamp100(power.war_fatigue + (bl.war_fatigue - power.war_fatigue) * driftRate)
+                -- 对每个维度独立计算漂移率：偏离大则加速回拉
+                local function adaptiveDrift(current, baseline)
+                    local deviation = math.abs(current - baseline)
+                    if deviation > threshold then
+                        return highDrift
+                    end
+                    return baseDrift
+                end
+                local milDrift = adaptiveDrift(power.military, bl.military)
+                local ecoDrift = adaptiveDrift(power.economy, bl.economy)
+                local fatDrift = adaptiveDrift(power.war_fatigue, bl.war_fatigue)
+                power.military    = clamp100(power.military    + (bl.military    - power.military)    * milDrift)
+                power.economy     = clamp100(power.economy     + (bl.economy     - power.economy)     * ecoDrift)
+                power.war_fatigue = clamp100(power.war_fatigue + (bl.war_fatigue - power.war_fatigue) * fatDrift)
             end
         end
     end
@@ -255,6 +278,145 @@ function GrandPowers._ProcessSuccessions(state, year, quarter, report)
             local newLabel = newDef and newDef.label or ev.new_id
             table.insert(report.succession_msgs,
                 string.format("%s → %s", oldLabel, newLabel))
+        end
+    end
+end
+
+-- ============================================================================
+-- Step 4.5: 分支标记触发器（P2-1）
+-- 基于玩家积累的行动历史，在特定年份窗口内自动激活分支标记
+-- 设计原则：每个分支都需要"前期积累（合作度/行动次数）+ 窗口期"
+-- ============================================================================
+
+--- 统计行动历史中满足条件的行动次数
+---@param history table[] 行动历史
+---@param actionId string|nil 行动ID（nil=任意行动）
+---@param powerId string|nil 目标大国（nil=任意大国）
+---@param fromYear number|nil 起始年份
+---@param toYear number|nil 结束年份
+---@return number count
+local function _CountActions(history, actionId, powerId, fromYear, toYear)
+    local count = 0
+    for _, entry in ipairs(history) do
+        if (not actionId or entry.action == actionId)
+            and (not powerId or entry.power == powerId)
+            and (not fromYear or entry.year >= fromYear)
+            and (not toYear or entry.year <= toYear) then
+            count = count + 1
+        end
+    end
+    return count
+end
+
+--- 检查并自动激活分支标记（基于玩家积累行为）
+--- 在 Step 4（继承/消亡）之后、Step 5（征服）之前执行
+function GrandPowers._CheckBranchTriggers(state, year, quarter)
+    local score = state.collaboration_score or 0
+    local history = state.gp_action_history or {}
+    if #history == 0 then return end -- 无行动历史则跳过
+
+    -- ──────────────────────────────────────────────
+    -- 1. 战争加速 (1913-1914)
+    -- 条件：合作度 ≥ 30 + 向奥匈执行过 share_intel
+    -- ──────────────────────────────────────────────
+    if year >= 1913 and year <= 1914
+        and not state._branch_war_accelerated
+        and not state._branch_war_delayed
+        and not state._branch_war_prevented then
+        if score >= 30
+            and _CountActions(history, "share_intel", "austria_hungary") >= 1 then
+            state._branch_war_accelerated = true
+            GameState.AddLog(state,
+                "[分支触发] 你对奥匈帝国的深度合作与情报共享加速了战争进程")
+        end
+    end
+
+    -- ──────────────────────────────────────────────
+    -- 2. 战争推迟 (1913-1914)
+    -- 条件：合作度 ≤ -20 + 累计对大国执行 3 次经济制裁
+    -- ──────────────────────────────────────────────
+    if year >= 1913 and year <= 1914
+        and not state._branch_war_delayed
+        and not state._branch_war_accelerated
+        and not state._branch_war_prevented then
+        if score <= -20
+            and _CountActions(history, "economic_sanction") >= 3 then
+            state._branch_war_delayed = math.random(2, 4)
+            GameState.AddLog(state,
+                "[分支触发] 你长期的经济制裁行动削弱了列强的战争能力，一战被推迟")
+        end
+    end
+
+    -- ──────────────────────────────────────────────
+    -- 3. 战争阻止 (1912-1913) — 蝴蝶效应级别
+    -- 条件：5 次货币战争 + 总控制度 ≥ 200（极端路线）
+    -- ──────────────────────────────────────────────
+    if year >= 1912 and year <= 1913
+        and not state._branch_war_prevented
+        and not state._branch_war_accelerated then
+        local totalCtrl = GameState.CalcTotalControl(state)
+        if _CountActions(history, "currency_war") >= 5 and totalCtrl >= 200 then
+            state._branch_war_prevented = true
+            state._branch_war_delayed = 99
+            GameState.AddLog(state,
+                "[分支触发·蝴蝶效应] 你的货币战争与庞大控制力重塑了欧洲格局，一战被阻止！")
+        end
+    end
+
+    -- ──────────────────────────────────────────────
+    -- 4. 奥匈联邦化 (1916-1917)
+    -- 条件：合作路线 — 对奥匈好感 ≥ 50 + 合作度 ≥ 40
+    -- ──────────────────────────────────────────────
+    if year >= 1916 and year <= 1917
+        and not state._branch_ah_federalized then
+        local ah = state.powers and state.powers["austria_hungary"]
+        if ah and ah.active
+            and ah.attitude_to_player >= 50
+            and score >= 40 then
+            state._branch_ah_federalized = true
+            -- 联邦化效果：奥匈军事削弱但不解体
+            ah.military = math.max(10, ah.military - 15)
+            ah.war_fatigue = math.max(0, ah.war_fatigue - 10)
+            ah.attitude_to_player = math.min(100, ah.attitude_to_player + 15)
+            GameState.AddLog(state,
+                "[分支触发] 你与奥匈帝国的深度合作推动了联邦化改革，帝国改组为多民族联邦")
+        end
+    end
+
+    -- ──────────────────────────────────────────────
+    -- 5. 南斯拉夫中立 (1940-1941)
+    -- 条件：对南斯拉夫好感 ≥ 30 + 执行 shelter_refugees ≥ 2 次
+    -- ──────────────────────────────────────────────
+    if year >= 1940 and year <= 1941
+        and not state._branch_yugo_neutral then
+        -- 南斯拉夫在不同时期有不同 ID
+        local yugo = state.powers
+            and (state.powers["yugoslavia"] or state.powers["tito_yugoslavia"])
+        if yugo and yugo.active
+            and (yugo.attitude_to_player or 0) >= 30
+            and _CountActions(history, "shelter_refugees") >= 2 then
+            state._branch_yugo_neutral = true
+            GameState.AddLog(state,
+                "[分支触发] 你的难民庇护行动和外交努力使南斯拉夫暂时维持中立")
+        end
+    end
+
+    -- ──────────────────────────────────────────────
+    -- 6. 自我解放 (1943-1944)
+    -- 条件：抵抗路线 — 合作度 ≤ -50 + 武装 ≥ 25 + 支持游击队 ≥ 3 次
+    -- ──────────────────────────────────────────────
+    if year >= 1943 and year <= 1944
+        and not state._branch_self_liberation then
+        local guards = state.military and state.military.guards or 0
+        if score <= -50 and guards >= 25
+            and _CountActions(history, "support_guerrilla") >= 3 then
+            state._branch_self_liberation = true
+            -- 自我解放效果：控制度大幅提升
+            for _, r in ipairs(state.regions) do
+                r.control = math.min(100, (r.control or 0) + 10)
+            end
+            GameState.AddLog(state,
+                "[分支触发] 你的长期抵抗与军事准备使自主解放成为可能！萨拉热窝率先起义")
         end
     end
 end
@@ -433,6 +595,82 @@ function GrandPowers._ProcessConquests(state, year, quarter, report)
     end
 end
 
+--- 好感度自然衰减：每季所有活跃大国的 attitude_to_player 向0靠拢
+--- 设计意图：好感不再一劳永逸，需要持续维护外交关系
+function GrandPowers._DecayAttitudes(state)
+    local cfg = Balance.ATTITUDE_DECAY
+    if not cfg then return end
+    -- military_relation 修正器：正值减缓好感衰减，负值加速衰减
+    local milRelMod = GameState.GetModifierValue(state, "military_relation")
+    for _, power in pairs(state.powers) do
+        if power.active then
+            local att = power.attitude_to_player or 0
+            if math.abs(att) > cfg.threshold then
+                local decay = math.min(
+                    math.abs(att) * cfg.rate,
+                    cfg.cap_per_turn
+                )
+                decay = math.max(1, math.floor(decay + 0.5))
+                -- military_relation 调整衰减速度：正值减缓，负值加速
+                if milRelMod ~= 0 then
+                    local factor = 1 - milRelMod * 0.03  -- +15 → ×0.55 衰减, -5 → ×1.15 衰减
+                    decay = math.max(0, math.floor(decay * factor + 0.5))
+                end
+                if att > 0 then
+                    power.attitude_to_player = att - decay
+                else
+                    power.attitude_to_player = att + decay
+                end
+            end
+        end
+    end
+end
+
+--- 生成本季最重要的世界快讯标题
+--- 优先级：征服 > 继承 > 大国军事剧变
+---@param state table
+---@param report table Tick产出的report
+---@return string|nil headline
+function GrandPowers._GenerateHeadline(state, report)
+    -- 1. 征服事件（最高优先）
+    if report.conquest_msgs and #report.conquest_msgs > 0 then
+        return report.conquest_msgs[1]
+    end
+    -- 2. 继承/消亡事件
+    if report.succession_msgs and #report.succession_msgs > 0 then
+        return report.succession_msgs[1]
+    end
+    -- 3. 大国军事或经济剧变（与上季对比变化最大的）
+    local bestDelta = 0
+    local bestMsg = nil
+    for id, power in pairs(state.powers) do
+        if power.active then
+            local bl = PowersData.GetBaseline(id, state.year)
+            if bl then
+                local milDelta = math.abs(power.military - bl.military)
+                local ecoDelta = math.abs(power.economy - bl.economy)
+                if milDelta > bestDelta then
+                    bestDelta = milDelta
+                    local dir = power.military > bl.military and "增强" or "衰退"
+                    bestMsg = string.format("%s 军事力量%s（当前 %d）",
+                        power.label, dir, power.military)
+                end
+                if ecoDelta > bestDelta then
+                    bestDelta = ecoDelta
+                    local dir = power.economy > bl.economy and "繁荣" or "萧条"
+                    bestMsg = string.format("%s 经济%s（当前 %d）",
+                        power.label, dir, power.economy)
+                end
+            end
+        end
+    end
+    -- 偏离超过15才算"剧变"
+    if bestDelta >= 15 and bestMsg then
+        return bestMsg
+    end
+    return nil
+end
+
 --- 抵抗增长：被占领国家每季度抵抗度 +2（本地加固时+4，纳粹合作者时轴心占领区-1）
 function GrandPowers._GrowResistance(state)
     if not state.europe then return end
@@ -455,6 +693,18 @@ function GrandPowers._GrowResistance(state)
             if state._branch_nazi_collaborator and state.year >= 1941 and state.year <= 1945
                 and AXIS_POWERS[country.sovereign] then
                 growth = math.max(1, growth - 1)
+            end
+            -- 稳定度影响：低稳定度（<80）加速抵抗增长（share_intel 等行动的效果）
+            local stab = country.stability or 100
+            if stab < 80 then
+                -- 稳定度每低于80减10点，抵抗增长+25%（如60稳定度→+50%）
+                local stabMult = 1 + (80 - stab) * 0.025
+                growth = math.floor(growth * stabMult + 0.5)
+            end
+            -- 合作度"人民英雄"加成：抵抗增长 +15%
+            local resistBonus = GameState.GetModifierValue(state, "resistance_growth_bonus")
+            if resistBonus > 0 then
+                growth = math.floor(growth * (1 + resistBonus) + 0.5)
             end
             country.resistance = math.min(100, (country.resistance or 0) + growth)
 

@@ -13,6 +13,9 @@ local Tech = require("systems.tech")
 local GrandPowers = require("systems.grand_powers")
 local BranchEvents = require("systems.branch_events")
 local Equipment = require("systems.equipment")
+local Trade = require("systems.trade")
+local Expedition = require("systems.expedition")
+local Venture = require("systems.venture")
 local MapTilesData = require("data.map_tiles_data")
 local RegionsData = require("data.regions_data")
 
@@ -47,6 +50,8 @@ local function MarkFactionDefeated(state, faction, mode, report)
             tile.manual_control = true
         end
     end
+    -- 反向同步：tile controller 变化后重算 region 的 control / ai_presence
+    MapTilesData.SyncRegionsFromTiles(state)
     local msg = string.format("%s 已被击败，剩余地盘转入玩家控制", faction.name)
     GameState.AddLog(state, msg)
     if report then table.insert(report.ai_changes, msg) end
@@ -73,7 +78,7 @@ local function UpdateSpecialContentFlags(state, report)
     }
 
     local year = state.year or 1904
-    local influence = GameState.CalcTotalInfluence(state)
+    local totalCtrl = GameState.CalcTotalControl(state)
     local knowledgeAvg = 0
     local activeMembers = 0
     for _, m in ipairs((state.family and state.family.members) or {}) do
@@ -92,7 +97,7 @@ local function UpdateSpecialContentFlags(state, report)
     state.special_content.foreign_trade_window = year >= 1948
         and (year <= 1955 or year >= 1984)
     state.special_content.technocrat_route = (year >= 1946 and year <= 1991)
-        and (influence >= 70 or knowledgeAvg >= 6)
+        and (totalCtrl >= 150 or knowledgeAvg >= 6)
 
     local labels = {
         quota_active = "配额生产窗口开启",
@@ -167,6 +172,9 @@ function TurnEngine.EndTurn(state)
         end
     end
     drift = drift + GameState.GetModifierValue(state, "inflation_drift")
+    -- 难度乘数：高难度通胀漂移更快
+    local diff = Config.GetDifficulty(state.difficulty)
+    drift = drift * (diff.inflation_drift_mult or 1.0)
     drift = math.max(infl.quarter_drift_crisis_floor or -0.015, drift)
     -- 乘法模型：factor *= (1 + drift)，符合通胀的复利特征
     state.inflation_factor = math.max(infl.floor_factor or infl.base_factor or 1.0,
@@ -190,8 +198,11 @@ function TurnEngine.EndTurn(state)
     StockEngine.TickManipulationCooldowns(state)
     -- M2: 方向互斥锁推进
     StockEngine.TickDirectionLocks(state)
-    -- M1: 公信力每季恢复
-    StockEngine.TickCredibility(state)
+    -- (公信力已合并到统一声誉，恢复逻辑在阶段 4.6)
+    -- S2: 庇护难民冷却递减
+    if (state._shelter_cooldown or 0) > 0 then
+        state._shelter_cooldown = state._shelter_cooldown - 1
+    end
 
     -- ========================================
     -- 阶段 1.6: 贷款利息结算 & 到期还本 & 破产检测
@@ -287,8 +298,8 @@ function TurnEngine.EndTurn(state)
 
         local kept = {}
         for _, loan in ipairs(state.loans) do
-            -- 动态利率：base_interest × (1 + leverage × multiplier)
-            local effectiveRate = loan.interest * (1 + currentLeverage * leverageMul)
+            -- 动态利率：base_interest × (1 + leverage × multiplier) × 难度乘数
+            local effectiveRate = loan.interest * (1 + currentLeverage * leverageMul) * (diff.loan_interest_mult or 1.0)
             local interest = math.ceil(loan.principal * effectiveRate)
             report.loan_interest = report.loan_interest + interest
 
@@ -453,6 +464,31 @@ function TurnEngine.EndTurn(state)
         table.insert(report.warnings, msg)
     end
 
+    -- ========================================
+    -- 阶段 1.9: 外贸结算（解锁后激活）
+    -- ========================================
+    if Trade.CanDoForeignAction(state) then
+        -- 结算运输中的订单（到达/失败判定）
+        local tradeReport = Trade.SettleDeliveries(state)
+        if #tradeReport.deliveries > 0 then
+            local msg = string.format("[外贸] 本季度交付 %d 笔订单，收入 %d 金币",
+                #tradeReport.deliveries, tradeReport.total_revenue)
+            GameState.AddLog(state, msg)
+            table.insert(report.warnings, msg)
+        end
+        if #tradeReport.failures > 0 then
+            local msg = string.format("[外贸] %d 笔订单运输失败，损失货物",
+                #tradeReport.failures)
+            GameState.AddLog(state, msg)
+            table.insert(report.warnings, msg)
+        end
+        -- 记录上季度收入（供经济结算使用）
+        state.trade.last_quarter_revenue = tradeReport.total_revenue
+        -- 生成新订单补充订单池
+        Trade.GenerateOrders(state)
+        report.trade_settlement = tradeReport
+    end
+
     if report.economy.bankrupt then
         table.insert(report.warnings, "家族财政陷入困境！")
     end
@@ -499,7 +535,6 @@ function TurnEngine.EndTurn(state)
     local oldMil = state.victory.military
 
     local totalControl = GameState.CalcTotalControl(state)
-    local totalInfluence = GameState.CalcTotalInfluence(state)
     local isWar = state.flags and state.flags.at_war
 
     -- ── 经济胜利点 ──
@@ -509,14 +544,13 @@ function TurnEngine.EndTurn(state)
         local cashPart    = state.cash > 0 and math.floor(state.cash / BVE.cash_divisor) or 0
         local goldPart    = math.min(math.floor(state.gold * BVE.gold_multiplier), BVE.gold_vp_cap or 999)
         local controlPart = math.floor(totalControl / BVE.control_divisor)
-        local influPart   = math.floor(totalInfluence / BVE.influence_divisor)
-        ecoDelta = cashPart + goldPart + controlPart + influPart
+        ecoDelta = cashPart + goldPart + controlPart
         -- war_mod
         if isWar then
             ecoDelta = math.floor(ecoDelta * BVE.war_mod)
         end
-        -- Influence 阈值 5 级加成
-        if totalInfluence >= 300 then
+        -- 控制度里程碑"绝对统治"（总控制度>=280）→ +5
+        if totalControl >= 280 then
             ecoDelta = ecoDelta + 5
         end
     end
@@ -531,13 +565,19 @@ function TurnEngine.EndTurn(state)
         local winsPart    = math.min(state.battle_wins_unclaimed or 0, BVM.battle_wins_cap)
         -- 装备分 + 老兵分（方案B）
         local equipScore, vetScore = Equipment.CalcVictoryScores(state)
-        milDelta = guardPart + moralePart + controlPart + winsPart + equipScore + vetScore
+        -- 威慑分：卫队 >= 阈值且本季无败绩 → +deterrence_bonus VP
+        local deterrencePart = 0
+        if state.military.guards >= (BVM.deterrence_guard_min or 15)
+            and (state.battle_losses_this_quarter or 0) == 0 then
+            deterrencePart = BVM.deterrence_bonus or 1
+        end
+        milDelta = guardPart + moralePart + controlPart + winsPart + equipScore + vetScore + deterrencePart
         -- war_mod
         if isWar then
             milDelta = math.floor(milDelta * BVM.war_mod)
         end
-        -- Influence 阈值 5 级加成
-        if totalInfluence >= 300 then
+        -- 控制度里程碑"绝对统治"（总控制度>=280）→ +5
+        if totalControl >= 280 then
             milDelta = milDelta + 5
         end
     end
@@ -560,31 +600,42 @@ function TurnEngine.EndTurn(state)
     report.victory_delta.economic = state.victory.economic - oldEco
     report.victory_delta.military = state.victory.military - oldMil
     state.battle_wins_unclaimed = 0
+    state.battle_losses_this_quarter = 0  -- V2: 重置本季败绩（威慑VP用）
     GameState.UpdateVictoryPrompt(state)
+
+    -- ========================================
+    -- 阶段 3.5: 合作度实际效果（每季根据合作度区间刷新修正器）
+    -- ========================================
+    do
+        -- 移除上季的合作度修正器
+        if state.modifiers then
+            local kept = {}
+            for _, mod in ipairs(state.modifiers) do
+                if mod.source ~= "collaboration_effect" then
+                    table.insert(kept, mod)
+                end
+            end
+            state.modifiers = kept
+        end
+        local collabScore = state.collaboration_score or 0
+        if collabScore >= 30 then
+            -- 合作者：占领维护费-30%（利用远征结算中已有的 occupation_maintenance_discount 读取）
+            GameState.AddModifier(state, "collaboration_effect",
+                "occupation_maintenance_discount", 0.30, 2)
+        elseif collabScore <= -30 then
+            -- 人民英雄：抵抗组织增长加成+15%（在 grand_powers 的抵抗增长中读取）
+            GameState.AddModifier(state, "collaboration_effect",
+                "resistance_growth_bonus", 0.15, 2)
+        end
+        -- 注：偏向合作(10~29)的贸易价格+10%直接在 trade.lua 订单生成时计算
+        -- 注：消极抵抗(-10~-29)的制裁阈值+3直接在 expedition.lua CheckSanction 中计算
+    end
 
     -- ========================================
     -- 阶段 4: 修正器推进
     -- ========================================
     GameState.TickModifiers(state)
 
-    -- ========================================
-    -- 阶段 4.5: Influence 自然衰减
-    -- 每季所有地区 influence 衰减，除非本季执行了文化行动
-    -- ========================================
-    if not state.culture_action_this_turn then
-        -- 文化顾问满配独有：文化感召，免疫影响力衰减
-        if not GameState.HasExcellentPosition(state, "culture_advisor") then
-            local decay = Balance.INFLUENCE.decay_per_season    -- 负值，如 -1
-            -- 文化顾问减缓衰减：bonus×0.3
-            local cultureBonus = GameState.GetPositionBonus(state, "culture_advisor")
-            if cultureBonus > 0 then
-                decay = math.floor(decay * (1 - cultureBonus * 0.3))
-            end
-            for _, r in ipairs(state.regions) do
-                r.influence = math.max(0, (r.influence or 0) + decay)
-            end
-        end
-    end
     -- 重置本季文化行动标记
     state.culture_action_this_turn = false
     -- 重置紧急变卖标记
@@ -624,11 +675,30 @@ function TurnEngine.EndTurn(state)
             end
         end
 
-        -- 2. 声誉自然恢复（+2 + 科技加成，不超过 0）
-        if (state.reputation or 0) < BRep.max then
+        -- 2. 声誉自然恢复（向 0 靠拢，+2 或 -2）
+        local rep = state.reputation or 0
+        if rep ~= 0 then
             local repRecovery = BRep.recovery_per_turn + (state.rep_recovery_bonus or 0)
-            state.reputation = math.min(BRep.max,
-                (state.reputation or 0) + repRecovery)
+            -- 新闻社持股加成恢复
+            local pressLevel = nil
+            if StockEngine and StockEngine.GetHoldingLevel then
+                pressLevel = StockEngine.GetHoldingLevel(state, "balkan_press")
+            end
+            if pressLevel == "control" then
+                repRecovery = repRecovery + BRep.press_control_recovery_bonus
+            elseif pressLevel == "influence" then
+                repRecovery = repRecovery + BRep.press_influence_recovery_bonus
+            end
+            if rep < 0 then
+                state.reputation = math.min(0, rep + repRecovery)
+            else
+                state.reputation = math.max(0, rep - repRecovery)
+            end
+        end
+        -- local_reputation 修正器：事件赋予的本地声誉惩罚（累加到 reputation）
+        local localRepMod = GameState.GetModifierValue(state, "local_reputation")
+        if localRepMod ~= 0 then
+            state.reputation = (state.reputation or 0) + localRepMod
         end
 
         -- 3. 夺取矿脉到期检查 + 产出
@@ -746,12 +816,12 @@ function TurnEngine.EndTurn(state)
                 goto continue_faction
             end
 
-            -- ── 正常状态：基础资产增长 ──
-            local rate = aiConfig.growth_rate
+            -- ── 正常状态：基础资产增长（难度越高 AI 增长越快）──
+            local rate = aiConfig.growth_rate * (diff.ai_growth_mult or 1.0)
             local growth = math.floor(faction.cash * math.max(0, rate))
             faction.cash = faction.cash + growth
-            -- 现金上限：防止复利爆炸增长（按时代递增）
-            local cashCap = aiConfig.cash_cap or 10000
+            -- 现金上限：防止复利爆炸增长（按时代递增 × 难度系数）
+            local cashCap = math.floor((aiConfig.cash_cap or 10000) * (diff.ai_cash_cap_mult or 1.0))
             local eraScaling = Balance.AI.era_scaling
             if eraScaling then
                 for i = #eraScaling, 1, -1 do
@@ -815,7 +885,17 @@ function TurnEngine.EndTurn(state)
                         end
                     end
                 end
-                faction.power = math.min(powerCap, faction.power + powerGain)
+                faction.power = math.min(powerCap, faction.power + math.floor(powerGain * (diff.ai_growth_mult or 1.0)))
+            end
+
+            -- C2: AI 势力自然衰减（防滚雪球）
+            aiConfig = Balance.AI[faction.type] or {}
+            local decayRate = aiConfig.power_decay_rate or 0
+            if decayRate > 0 and faction.power > 0 then
+                local decay = math.floor(faction.power * decayRate)
+                if decay >= 1 then
+                    faction.power = math.max(0, faction.power - decay)
+                end
             end
 
             -- 协议保护期内 AI 不主动敌对
@@ -837,8 +917,9 @@ function TurnEngine.EndTurn(state)
 
             -- ── AI 主动花费现金（防止现金无意义堆积）──
             local spend = Balance.AI.spending
+            local spendMult = diff.ai_spending_mult or 1.0  -- 高难度时 AI 花费门槛降低
             -- 1) 雇佣兵：有钱时花钱提升 power
-            if faction.cash >= (spend.mercenary_cost or 500)
+            if faction.cash >= math.floor((spend.mercenary_cost or 500) / spendMult)
                 and faction.cash > (aiConfig.expand_threshold or 600)
                 and faction.power < (powerCap - 10)
                 and math.random() < (spend.mercenary_chance or 0.25) then
@@ -849,7 +930,7 @@ function TurnEngine.EndTurn(state)
             end
             -- 2) 地区压制：态度差时打压玩家控制度
             if faction.attitude < -30
-                and faction.cash >= (spend.suppress_cost or 400)
+                and faction.cash >= math.floor((spend.suppress_cost or 400) / spendMult)
                 and math.random() < (spend.suppress_chance or 0.20) then
                 faction.cash = faction.cash - spend.suppress_cost
                 local targetRegion = PickAIExpansionRegion(state, faction)
@@ -864,7 +945,7 @@ function TurnEngine.EndTurn(state)
             -- 3) 经济制裁：外资对玩家施加负面修正器
             if faction.type == "foreign_capital"
                 and faction.attitude < -40
-                and faction.cash >= (spend.sanction_cost or 600)
+                and faction.cash >= math.floor((spend.sanction_cost or 600) / spendMult)
                 and math.random() < (spend.sanction_chance or 0.15) then
                 faction.cash = faction.cash - spend.sanction_cost
                 GameState.AddModifier(state, "foreign_sanction", "income_mod", -0.10, 3)
@@ -874,7 +955,7 @@ function TurnEngine.EndTurn(state)
             -- 4) 通胀操纵：外资推高通胀（极端敌对时）
             if faction.type == "foreign_capital"
                 and faction.attitude < -50
-                and faction.cash >= (spend.inflate_cost or 800)
+                and faction.cash >= math.floor((spend.inflate_cost or 800) / spendMult)
                 and math.random() < (spend.inflate_chance or 0.12) then
                 faction.cash = faction.cash - spend.inflate_cost
                 GameState.AddModifier(state, "foreign_inflate",
@@ -886,7 +967,7 @@ function TurnEngine.EndTurn(state)
             -- 5) 矿价波动：外资压低金铜矿产品价格
             if faction.type == "foreign_capital"
                 and faction.attitude < -35
-                and faction.cash >= (spend.mine_price_cost or 700)
+                and faction.cash >= math.floor((spend.mine_price_cost or 700) / spendMult)
                 and math.random() < (spend.mine_price_chance or 0.15) then
                 faction.cash = faction.cash - spend.mine_price_cost
                 local priceMod = spend.mine_price_mod or -0.15
@@ -900,22 +981,23 @@ function TurnEngine.EndTurn(state)
                         faction.name, priceMod * 100, priceDur))
             end
 
-            -- ── 态度系统：负向触发器 ──
+            -- ── 态度系统：负向触发器（难度越高 AI 敌意增长越快）──
+            local aggrMult = diff.ai_aggression_mult or 1.0
             -- 1) 经济碾压 → 嫉妒
             if state.cash > faction.cash * 1.5 then
-                faction.attitude = math.max(-100, faction.attitude - 3)
+                faction.attitude = math.max(-100, faction.attitude - math.ceil(3 * aggrMult))
             end
             -- 2) 军事威胁 → 恐惧
             if state.military.guards > 20 and faction.power < 50 then
-                faction.attitude = math.max(-100, faction.attitude - 2)
+                faction.attitude = math.max(-100, faction.attitude - math.ceil(2 * aggrMult))
             end
             -- 3) 玩家矿山过多 → 领地竞争
             if #state.mines >= 5 then
-                faction.attitude = math.max(-100, faction.attitude - 1)
+                faction.attitude = math.max(-100, faction.attitude - math.ceil(1 * aggrMult))
             end
             -- 4) AI 势力扩大后自然傲慢
             if faction.power >= 60 and faction.attitude > -50 then
-                faction.attitude = faction.attitude - 1
+                faction.attitude = faction.attitude - math.ceil(1 * aggrMult)
             end
 
             -- ── 态度系统：正向触发器（平衡单调下降）──
@@ -941,6 +1023,16 @@ function TurnEngine.EndTurn(state)
                 and faction.attitude < attCap then
                 faction.attitude = math.min(attCap, faction.attitude + 1)
             end
+            -- 9) local_relations 修正器：事件赋予的地方关系加成/惩罚
+            local localRelMod = GameState.GetModifierValue(state, "local_relations")
+            if localRelMod ~= 0 then
+                -- 每季按修正器值的 1/4 影响态度（修正器为累积总值，分散到每季）
+                local relEffect = math.floor(localRelMod * 0.25 + 0.5)
+                if relEffect ~= 0 then
+                    faction.attitude = faction.attitude + relEffect
+                end
+            end
+
             -- 最终 clamp
             faction.attitude = math.max(-100, math.min(100, faction.attitude))
         end
@@ -992,11 +1084,83 @@ function TurnEngine.EndTurn(state)
     MapTilesData.SyncTilesFromRegions(state)
 
     -- ========================================
+    -- 阶段 6.6: 远征系统结算
+    -- 活跃远征推进 → 占领收入/维护 → HP恢复 → 侵略值衰减 → 制裁倒计时
+    -- ========================================
+    if Expedition.CanDoExpedition(state) then
+        -- 推进活跃远征（造成伤害，HP归零→完成判定）
+        local tickReports = Expedition.TickActiveExpeditions(state)
+        if tickReports and #tickReports > 0 then
+            report.expedition_tick = tickReports
+        end
+
+        local expReport = Expedition.SettleTurn(state)
+        Expedition.TickCountryHP(state)
+
+        -- 制裁倒计时
+        if state.expeditions.under_sanction then
+            state.expeditions.sanction_remaining = (state.expeditions.sanction_remaining or 0) - 1
+            if state.expeditions.sanction_remaining <= 0 then
+                state.expeditions.under_sanction = false
+                state.expeditions.sanction_remaining = 0
+                GameState.AddLog(state, "⚖ 列强制裁解除，远征行动恢复")
+            end
+        end
+
+        -- 制裁检查
+        if Expedition.CheckSanction(state) then
+            table.insert(report.ai_changes, "⚠ 侵略值过高，列强正在酝酿制裁")
+        end
+
+        if expReport then
+            report.expedition_settlement = expReport
+        end
+    end
+
+    -- ========================================
+    -- 阶段 6.65: 商业远征结算
+    -- 活跃远征推进 → 商站收入/维护 → 市场壁垒恢复 → 贸易制裁
+    -- ========================================
+    if Venture.CanDoVenture(state) then
+        -- 推进活跃商业远征（扣投资费、渗透壁垒、完成判定）
+        local ventureTickReports = Venture.TickActiveVentures(state)
+        if ventureTickReports and #ventureTickReports > 0 then
+            report.venture_tick = ventureTickReports
+        end
+
+        -- 商站收入/维护结算 + 紧张度衰减 + 制裁倒计时/触发
+        local ventureReport = Venture.SettleTurn(state)
+
+        -- 市场壁垒自然恢复（未被投资的国家）
+        Venture.TickMarketBarriers(state)
+
+        if ventureReport then
+            report.venture_settlement = ventureReport
+            -- 制裁事件推送到 AI 变化列表
+            if ventureReport.sanction_triggered then
+                table.insert(report.ai_changes, "⚠ 市场紧张度过高，列强发起贸易制裁！")
+            end
+            if ventureReport.sanction_lifted then
+                table.insert(report.ai_changes, "⚖ 贸易制裁已解除，商业活动恢复正常")
+            end
+        end
+    end
+
+    -- ========================================
     -- 阶段 6.7: 大国博弈系统更新
     -- 历史漂移 → 继承处理 → 征服执行 → 抵抗增长 → 本地AI联动
     -- ========================================
     local gpReport = GrandPowers.Tick(state)
     if gpReport then
+        -- 历史快讯推送（A.2）：将最重要的世界事件作为专属消息类型推送
+        if gpReport.headline then
+            local yearQ = string.format("%dQ%d", state.year, state.quarter)
+            state.turn_messages = state.turn_messages or {}
+            table.insert(state.turn_messages, {
+                text = string.format("📰 %s: %s", yearQ, gpReport.headline),
+                type = "world_news",
+            })
+        end
         for _, msg in ipairs(gpReport.conquest_msgs or {}) do
             table.insert(report.ai_changes, msg)
         end
@@ -1044,13 +1208,13 @@ function TurnEngine.EndTurn(state)
     end
 
     -- ========================================
-    -- 阶段 7: 工人士气
+    -- 阶段 7: 劳工满意度
     -- ========================================
     -- 工资满足度影响士气
     if state.workers.wage < Balance.WORKERS.base_wage then
         state.workers.morale = math.max(0, state.workers.morale - 5)
         if state.workers.morale < 30 then
-            table.insert(report.warnings, "工人士气极低，可能引发罢工！")
+            table.insert(report.warnings, "劳工满意度极低，可能引发罢工！")
         end
     else
         -- 工资正常，士气缓慢恢复
@@ -1089,6 +1253,32 @@ function TurnEngine.EndTurn(state)
             member.cooldown_turns = member.cooldown_turns - 1
             if member.cooldown_turns <= 0 then
                 member.cooldown_turns = 0
+            end
+        end
+    end
+
+    -- ── 年龄增长与退休检查 ──
+    -- 每年第 1 季度：全体成员 age+1；达到退休年龄则强制退休
+    if state.quarter == 1 then
+        local retireAge = Balance.FAMILY.retirement_age or 60
+        local warnAge   = Balance.FAMILY.retirement_warning_age or 55
+        local membersToRetire = {}
+        for _, member in ipairs((state.family and state.family.members) or {}) do
+            member.age = (member.age or 30) + 1
+            if member.age >= retireAge then
+                table.insert(membersToRetire, member.id)
+            elseif member.age >= warnAge then
+                table.insert(report.warnings,
+                    string.format("%s 已 %d 岁，将在 %d 年后退休",
+                        member.name, member.age, retireAge - member.age))
+            end
+        end
+        -- 反向遍历移除退休成员（避免索引混乱）
+        for i = #membersToRetire, 1, -1 do
+            local ok, name = GameState.RetireFamilyMember(state, membersToRetire[i])
+            if ok then
+                table.insert(report.warnings,
+                    string.format("🎖 %s 年满退休，光荣离开家族核心圈", name))
             end
         end
     end
@@ -1170,8 +1360,8 @@ function TurnEngine.EndTurn(state)
     if state.family.training then
         state.family.training.progress = state.family.training.progress + 1
         if state.family.training.progress >= state.family.training.total then
-            -- 培养完成：标记可重随1次（看广告）
-            state.family.training.member_template.reroll_available = 1
+            -- 培养完成：标记可重随10次（看广告或免广告卡）
+            state.family.training.member_template.reroll_available = 10
             table.insert(state.family.members, state.family.training.member_template)
             GameState.AddLog(state, string.format("新成员 %s 加入家族！",
                 state.family.training.member_template.name))
@@ -1337,9 +1527,9 @@ function TurnEngine.FormatReportSummary(report)
             eco.coal_mine_allocated or 0,
             eco.coal_sold or 0))
     end
-    table.insert(lines, string.format("支出 %d (工资%d+军费%d+补给%d+税%d)",
+    table.insert(lines, string.format("支出 %d (工资%d+军费%d+税%d)",
         eco.total_expense, eco.worker_expense, eco.military_expense,
-        eco.supply_expense, eco.tax))
+        eco.tax))
     if report.loan_interest and report.loan_interest > 0 then
         table.insert(lines, string.format("贷款利息 %d", report.loan_interest))
     end

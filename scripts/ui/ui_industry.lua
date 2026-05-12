@@ -280,7 +280,7 @@ function IndustryPage._CreateMineCard(state, mine)
         })
         -- 搁置不管
         table.insert(bottomChildren, UI.Button {
-            text = "🚫 搁置不管（免费，影响力-5 士气-3）",
+            text = "🚫 搁置不管（免费，控制度-5 满意度-3）",
             fontSize = F.body_minor,
             height = S.btn_small_height,
             width = "100%",
@@ -857,7 +857,7 @@ function IndustryPage._CreateWorkerCard(state)
         or (morale >= 40 and "低落" or "极差"))
 
     local hireCost = math.floor(BW.hire_cost * GameState.GetLaborCostFactor(state)
-        * (1 - GameState.GetInfluenceRecruitDiscount(state)))
+        * (1 - GameState.GetControlRecruitDiscount(state)))
 
     return UI.Panel {
         id = "workerCard",
@@ -905,7 +905,7 @@ function IndustryPage._CreateWorkerCard(state)
                     IndustryPage._InfoRow("每人工资", workers.wage .. " /季", C.text_primary),
                     IndustryPage._InfoRow("工资总计", workerWage .. " /季",
                         workerWage > state.cash * 0.3 and C.accent_amber or C.text_primary),
-                    IndustryPage._InfoRow("工人士气", morale .. "%", moraleColor),
+                    IndustryPage._InfoRow("劳工满意度", morale .. "%", moraleColor),
                     -- 士气条
                     UI.ProgressBar {
                         value = morale / 100,
@@ -1268,13 +1268,13 @@ function IndustryPage._OnAbandonMine(mine)
     end
     stateRef_.mines = kept
 
-    -- 负面影响：地区影响力 -5
+    -- 负面影响：地区控制度 -5
     local region = GameState.GetRegion(stateRef_, mine.region_id)
     if region then
-        region.influence = math.max(0, (region.influence or 0) - 5)
+        region.control = math.max(0, (region.control or 0) - 5)
     end
 
-    -- 负面影响：工人士气 -3
+    -- 负面影响：劳工满意度 -3
     stateRef_.workers.morale = math.max(0, stateRef_.workers.morale - 3)
 
     -- 同步区域储量
@@ -1283,7 +1283,7 @@ function IndustryPage._OnAbandonMine(mine)
     end
 
     GameState.AddLog(stateRef_, string.format(
-        "[矿业] %s 被搁置废弃（影响力-5 士气-3）",
+        "[矿业] %s 被搁置废弃（影响力-5 满意度-3）",
         mine.name))
     UI.Toast.Show(string.format("🚫 %s 已废弃，声誉受损", mine.name),
         { variant = "error", duration = 2.5 })

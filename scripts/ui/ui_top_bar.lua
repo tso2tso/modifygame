@@ -10,7 +10,9 @@ local Config = require("config")
 local RegionsData = require("data.regions_data")
 local Balance = require("data.balance")
 local GameState = require("game_state")
-local Economy = require("systems.economy")
+local Actions = require("systems.actions")
+local SaveLoad = require("utils.save_load")
+
 
 local C = Config.COLORS
 local S = Config.SIZE
@@ -28,17 +30,6 @@ local onStateChanged_ = nil
 local onLightRefresh_ = nil
 ---@type table 游戏状态引用（用于 + 按钮）
 local stateRef_ = nil
-
-local function calcExpectedGoldOutput(state)
-    local total = 0
-    for _, mine in ipairs(state.mines or {}) do
-        if mine.active and not mine.migrating then
-            local raw = Economy._CalcMineOutput(state, mine)
-            total = total + math.min(raw, mine.reserve or 0)
-        end
-    end
-    return total
-end
 
 -- ============================================================================
 -- 公开接口
@@ -101,14 +92,8 @@ function TopBar._CreateInfoRow(state, era)
     -- 日期+时代（副文字行）
     local dateText = Config.QUARTER_DATES[state.quarter] or ""
 
-    -- 预计当季实际可采黄金；按剩余储量封顶，避免显示理论产能超过储量。
-    local production = calcExpectedGoldOutput(state)
-
-    -- 声望
-    local reputation = 0
-    if state.regions and #state.regions > 0 then
-        reputation = state.regions[1].influence or 0
-    end
+    -- 声誉
+    local reputation = state.reputation or 0
 
     return UI.Panel {
         id = "topInfoRow",
@@ -138,6 +123,7 @@ function TopBar._CreateInfoRow(state, era)
                         paddingVertical = 4,
                         gap = 2,
                         flexShrink = 1,
+                        overflow = "hidden",
                         children = {
                             TopBar._ResourceCell("cashCell", "💰",
                                 Config.FormatCompact(state.cash), era.accent, "现金"),
@@ -152,7 +138,7 @@ function TopBar._CreateInfoRow(state, era)
                                 alignItems = "center",
                                 pointerEvents = "auto",
                                 onPointerUp = Config.TapGuard(function(self)
-                                    TopBar._OnWatchAd()
+                                    TopBar._ShowAdModal()
                                 end),
                                 children = {
                                     UI.Label {
@@ -164,11 +150,20 @@ function TopBar._CreateInfoRow(state, era)
                                 },
                             },
                             TopBar._ResourceCell("goldCell", "●",
-                                tostring(state.gold), C.text_primary, "黄金"),
-                            TopBar._ResourceCell("prodCell", "⛏",
-                                tostring(production), C.text_primary, "产金"),
-                            TopBar._ResourceCell("repCell", "★",
-                                tostring(reputation), C.text_primary, "声望"),
+                                Config.FormatCompactK(state.gold), C.text_primary, "黄金"),
+
+                            UI.Panel {
+                                pointerEvents = "auto",
+                                onPointerUp = Config.TapGuard(function(self)
+                                    TopBar._ShowReputationModal()
+                                end),
+                                children = {
+                                    TopBar._ResourceCell("repCell", "★",
+                                        string.format("%+d", reputation),
+                                        reputation >= 0 and C.text_primary or C.accent_red,
+                                        "声誉"),
+                                },
+                            },
                         },
                     },
                     (function()
@@ -234,7 +229,8 @@ function TopBar._ResourceCell(id, icon, valueText, valueColor, label, framed)
         borderRadius = framed and S.radius_card or nil,
         borderWidth = framed and 1 or 0,
         borderColor = framed and C.border_soft or nil,
-        flexShrink = 0,
+        flexShrink = framed and 0 or 1,
+        minWidth = framed and nil or 28,
         children = {
             UI.Panel {
                 flexDirection = "row",
@@ -544,18 +540,16 @@ function TopBar.Refresh(root, state)
     end
 
     local goldVal = root:FindById("goldCell_val")
-    if goldVal then goldVal:SetText(tostring(state.gold)) end
+    if goldVal then goldVal:SetText(Config.FormatCompactK(state.gold)) end
 
-    local production = calcExpectedGoldOutput(state)
-    local prodVal = root:FindById("prodCell_val")
-    if prodVal then prodVal:SetText(tostring(production)) end
-
-    local reputation = 0
-    if state.regions and #state.regions > 0 then
-        reputation = state.regions[1].influence or 0
-    end
+    local reputation = state.reputation or 0
     local repVal = root:FindById("repCell_val")
-    if repVal then repVal:SetText(tostring(reputation)) end
+    if repVal then
+        repVal:SetText(string.format("%+d", reputation))
+        if repVal.SetFontColor then
+            repVal:SetFontColor(reputation >= 0 and C.text_primary or C.accent_red)
+        end
+    end
 
     -- 净资产刷新
     local totalAssets = GameState.CalcTotalAssets(state)
@@ -672,12 +666,58 @@ function TopBar._OnBuyAP()
 end
 
 -- ============================================================================
--- 看广告 → 幸运事件
+-- 广告系统：广告弹窗 + 幸运事件 + 免广告卡充能
 -- ============================================================================
+
+---@type table|nil
+local adModal_ = nil
+
+--- 发放幸运广告金奖励（提取公共逻辑）
+function TopBar._GrantLuckyReward()
+    local lucky = Balance.LUCKY_EVENT
+    stateRef_.lucky_ad_watched = (stateRef_.lucky_ad_watched or 0) + 1
+    local decay = stateRef_.lucky_ad_decay or 1.0
+
+    -- 加权随机抽档
+    local totalWeight = 0
+    for _, tier in ipairs(lucky.tiers) do
+        totalWeight = totalWeight + tier.weight * decay
+    end
+    local roll = math.random() * totalWeight
+    local chosen = lucky.tiers[1]
+    local acc = 0
+    for _, tier in ipairs(lucky.tiers) do
+        acc = acc + tier.weight * decay
+        if roll <= acc then
+            chosen = tier
+            break
+        end
+    end
+
+    -- 通胀浮动金额
+    local inflation = GameState.GetInflationFactor(stateRef_)
+    local amount = math.floor(chosen.base * inflation * decay)
+
+    -- 发放奖励
+    stateRef_.cash = stateRef_.cash + amount
+    stateRef_.total_income = (stateRef_.total_income or 0) + amount
+
+    -- 衰减概率
+    stateRef_.lucky_ad_decay = math.max(lucky.decay_min,
+        decay * lucky.decay_factor)
+
+    -- 日志 & 提示
+    GameState.AddLog(stateRef_, string.format(
+        "🎰 %s：获得 %s 克朗", chosen.label, Config.FormatNumber(amount)))
+    UI.Toast.Show(string.format("🎰 %s\n+%s 克朗！",
+        chosen.label, Config.FormatNumber(amount)),
+        { variant = "success", duration = 2.5 })
+end
+
+--- 看广告领广告金
 function TopBar._OnWatchAd()
     if not stateRef_ then return end
     local lucky = Balance.LUCKY_EVENT
-    -- 本季次数限制
     local watched = stateRef_.lucky_ad_watched or 0
     if watched >= lucky.max_per_season then
         UI.Toast.Show("本季运气已用尽（最多 " .. lucky.max_per_season .. " 次）",
@@ -685,62 +725,556 @@ function TopBar._OnWatchAd()
         return
     end
 
-    -- 调用 SDK 激励视频广告
-    ---@diagnostic disable-next-line: undefined-global
-    sdk:ShowRewardVideoAd(function(result)
-        if not result.success then
-            if result.msg == "embed manual close" then
-                UI.Toast.Show("需完整观看广告才能获得奖励",
-                    { variant = "warning", duration = 1.5 })
-            else
-                UI.Toast.Show("广告播放失败: " .. (result.msg or "未知错误"),
-                    { variant = "error", duration = 1.5 })
+    local ok, err = pcall(function()
+        ---@diagnostic disable-next-line: undefined-global
+        sdk:ShowRewardVideoAd(function(result)
+            if not result.success then
+                if result.msg == "embed manual close" then
+                    UI.Toast.Show("需完整观看广告才能获得奖励",
+                        { variant = "warning", duration = 1.5 })
+                else
+                    UI.Toast.Show("广告播放失败: " .. (result.msg or "未知错误"),
+                        { variant = "error", duration = 1.5 })
+                end
+                return
             end
-            return
-        end
-
-        -- 广告成功，发放幸运奖励
-        stateRef_.lucky_ad_watched = (stateRef_.lucky_ad_watched or 0) + 1
-        local decay = stateRef_.lucky_ad_decay or 1.0
-
-        -- 加权随机抽档
-        local totalWeight = 0
-        for _, tier in ipairs(lucky.tiers) do
-            totalWeight = totalWeight + tier.weight * decay
-        end
-        local roll = math.random() * totalWeight
-        local chosen = lucky.tiers[1]  -- 兜底
-        local acc = 0
-        for _, tier in ipairs(lucky.tiers) do
-            acc = acc + tier.weight * decay
-            if roll <= acc then
-                chosen = tier
-                break
+            local ok2, err2 = pcall(function()
+                TopBar._GrantLuckyReward()
+                SaveLoad.Save(stateRef_, SaveLoad.SLOT_AUTO)
+                TopBar._RefreshAdModal()
+                if onStateChanged_ then onStateChanged_() end
+            end)
+            if not ok2 then
+                print("[广告金] 奖励发放异常: " .. tostring(err2))
             end
-        end
-
-        -- 通胀浮动金额；同一季度连续观看会按 lucky_ad_decay 衰减实际奖金
-        local inflation = GameState.GetInflationFactor(stateRef_)
-        local amount = math.floor(chosen.base * inflation * decay)
-
-        -- 发放奖励
-        stateRef_.cash = stateRef_.cash + amount
-        stateRef_.total_income = (stateRef_.total_income or 0) + amount
-
-        -- 衰减概率（下次更难抽到高额）
-        stateRef_.lucky_ad_decay = math.max(lucky.decay_min,
-            decay * lucky.decay_factor)
-
-        -- 日志 & 提示
-        GameState.AddLog(stateRef_, string.format(
-            "🎰 %s：获得 %s 克朗", chosen.label, Config.FormatNumber(amount)))
-        UI.Toast.Show(string.format("🎰 %s\n+%s 克朗！",
-            chosen.label, Config.FormatNumber(amount)),
-            { variant = "success", duration = 2.5 })
-
-        -- 刷新 UI
-        if onStateChanged_ then onStateChanged_() end
+        end)
     end)
+    if not ok then
+        print("[广告金] SDK 调用异常: " .. tostring(err))
+        UI.Toast.Show("广告服务暂不可用", { variant = "error", duration = 1.5 })
+    end
+end
+
+--- 免广告领广告金（使用免广告卡配额）
+function TopBar._OnFreeLucky()
+    if not stateRef_ then return end
+    local lucky = Balance.LUCKY_EVENT
+    local watched = stateRef_.lucky_ad_watched or 0
+    if watched >= lucky.max_per_season then
+        UI.Toast.Show("本季运气已用尽（最多 " .. lucky.max_per_season .. " 次）",
+            { variant = "warning", duration = 1.5 })
+        return
+    end
+    local cfg = Balance.AD_FREE_CARD
+    local used = stateRef_.ad_free_lucky_used or 0
+    if used >= cfg.free_lucky_per_turn then
+        UI.Toast.Show("本回合免广告次数已用完", { variant = "warning", duration = 1.5 })
+        return
+    end
+    stateRef_.ad_free_lucky_used = used + 1
+    TopBar._GrantLuckyReward()
+    SaveLoad.Save(stateRef_, SaveLoad.SLOT_AUTO)
+    TopBar._RefreshAdModal()
+    if onStateChanged_ then onStateChanged_() end
+end
+
+--- 看广告为免广告卡充能
+function TopBar._ChargeAdFreeCard()
+    if not stateRef_ then return end
+    local cfg = Balance.AD_FREE_CARD
+    if stateRef_.ad_free_card_active then
+        UI.Toast.Show("免广告卡已激活", { variant = "info", duration = 1.5 })
+        return
+    end
+
+    local ok, err = pcall(function()
+        ---@diagnostic disable-next-line: undefined-global
+        sdk:ShowRewardVideoAd(function(result)
+            if not result.success then
+                if result.msg == "embed manual close" then
+                    UI.Toast.Show("需完整观看广告才能获得奖励",
+                        { variant = "warning", duration = 1.5 })
+                else
+                    UI.Toast.Show("广告播放失败: " .. (result.msg or "未知错误"),
+                        { variant = "error", duration = 1.5 })
+                end
+                return
+            end
+
+            local ok2, err2 = pcall(function()
+                stateRef_.ad_free_card_charges = (stateRef_.ad_free_card_charges or 0) + 1
+                if stateRef_.ad_free_card_charges >= cfg.charge_ads_needed then
+                    stateRef_.ad_free_card_active = true
+                    stateRef_.ad_free_lucky_used = 0
+                    stateRef_.ad_free_reroll_used = 0
+                    UI.Toast.Show("免广告卡已激活！\n广告金每回合免广 "
+                        .. cfg.free_lucky_per_turn .. " 次\n重随每回合免广 "
+                        .. cfg.free_rerolls_per_turn .. " 次",
+                        { variant = "success", duration = 3.0 })
+                    GameState.AddLog(stateRef_, "免广告卡激活")
+                else
+                    UI.Toast.Show("充能 " .. stateRef_.ad_free_card_charges
+                        .. "/" .. cfg.charge_ads_needed,
+                        { variant = "info", duration = 1.5 })
+                end
+
+                SaveLoad.Save(stateRef_, SaveLoad.SLOT_AUTO)
+                TopBar._RefreshAdModal()
+                if onStateChanged_ then onStateChanged_() end
+            end)
+            if not ok2 then
+                print("[免广告卡充能] 回调异常: " .. tostring(err2))
+            end
+        end)
+    end)
+    if not ok then
+        print("[免广告卡充能] SDK 调用异常: " .. tostring(err))
+        UI.Toast.Show("广告服务暂不可用", { variant = "error", duration = 1.5 })
+    end
+end
+
+--- 刷新广告弹窗内容
+function TopBar._RefreshAdModal()
+    if not adModal_ or not stateRef_ then return end
+    local content = TopBar._BuildAdModalContent()
+    adModal_:ClearContent()
+    adModal_:AddContent(content)
+end
+
+--- 构建广告弹窗内容
+function TopBar._BuildAdModalContent()
+    local lucky = Balance.LUCKY_EVENT
+    local cfg = Balance.AD_FREE_CARD
+    local watched = stateRef_.lucky_ad_watched or 0
+    local luckyRemaining = lucky.max_per_season - watched
+    local active = stateRef_.ad_free_card_active or false
+    local charges = stateRef_.ad_free_card_charges or 0
+    local freeLuckyUsed = stateRef_.ad_free_lucky_used or 0
+    local freeLuckyRemaining = active and (cfg.free_lucky_per_turn - freeLuckyUsed) or 0
+
+    local children = {}
+
+    -- === 广告金区域 ===
+    table.insert(children, UI.Label {
+        text = "🎰 广告金",
+        fontSize = F.subtitle,
+        fontWeight = "bold",
+        fontColor = C.text_primary,
+    })
+    table.insert(children, UI.Label {
+        text = "本季剩余 " .. luckyRemaining .. "/" .. lucky.max_per_season .. " 次",
+        fontSize = F.body_minor,
+        fontColor = luckyRemaining > 0 and C.text_secondary or C.text_muted,
+    })
+
+    if luckyRemaining > 0 then
+        -- 免广告领取按钮
+        if active and freeLuckyRemaining > 0 then
+            table.insert(children, UI.Button {
+                text = "🎰 免广告领取（免广剩 " .. freeLuckyRemaining .. " 次）",
+                variant = "success",
+                size = "md",
+                width = "100%",
+                onClick = Config.ClickGuard(function()
+                    TopBar._OnFreeLucky()
+                end),
+            })
+        end
+        -- 看广告领取按钮
+        table.insert(children, UI.Button {
+            text = "🎬 看广告领取",
+            variant = "primary",
+            size = "md",
+            width = "100%",
+            onClick = Config.ClickGuard(function()
+                TopBar._OnWatchAd()
+            end),
+        })
+    else
+        table.insert(children, UI.Label {
+            text = "本季广告金已领完",
+            fontSize = F.body_minor,
+            fontColor = C.text_muted,
+        })
+    end
+
+    -- === 分割线 ===
+    table.insert(children, UI.Divider { color = C.divider })
+
+    -- === 免广告卡区域 ===
+    table.insert(children, UI.Label {
+        text = "🃏 免广告卡",
+        fontSize = F.subtitle,
+        fontWeight = "bold",
+        fontColor = C.text_primary,
+    })
+
+    if active then
+        local freeRerollUsed = stateRef_.ad_free_reroll_used or 0
+        local freeRerollRemaining = cfg.free_rerolls_per_turn - freeRerollUsed
+        table.insert(children, UI.Panel {
+            width = "100%",
+            backgroundColor = "#4CAF5018",
+            borderRadius = 6,
+            padding = 8,
+            flexDirection = "column",
+            gap = 4,
+            children = {
+                UI.Label {
+                    text = "✅ 已激活",
+                    fontSize = F.body,
+                    fontColor = "#4CAF50",
+                    fontWeight = "bold",
+                },
+                UI.Label {
+                    text = "广告金：本回合免广剩 " .. freeLuckyRemaining
+                        .. "/" .. cfg.free_lucky_per_turn .. " 次",
+                    fontSize = F.body_minor,
+                    fontColor = C.text_secondary,
+                },
+                UI.Label {
+                    text = "重随：本回合免广剩 " .. freeRerollRemaining
+                        .. "/" .. cfg.free_rerolls_per_turn .. " 次",
+                    fontSize = F.body_minor,
+                    fontColor = C.text_secondary,
+                },
+            },
+        })
+    else
+        -- 未激活：充能进度 + 充能按钮
+        local progress = charges / cfg.charge_ads_needed
+        table.insert(children, UI.Label {
+            text = "看 " .. cfg.charge_ads_needed .. " 次广告激活，激活后每回合可免广告使用广告金和重随",
+            fontSize = F.body_minor,
+            fontColor = C.text_muted,
+            whiteSpace = "normal",
+        })
+        -- 进度条
+        table.insert(children, UI.Panel {
+            width = "100%",
+            height = 8,
+            backgroundColor = "#333333",
+            borderRadius = 4,
+            overflow = "hidden",
+            children = {
+                UI.Panel {
+                    width = math.floor(progress * 100) .. "%",
+                    height = "100%",
+                    backgroundColor = "#F0A030",
+                    borderRadius = 4,
+                },
+            },
+        })
+        table.insert(children, UI.Button {
+            text = "🎬 看广告充能（" .. charges .. "/" .. cfg.charge_ads_needed .. "）",
+            variant = "outlined",
+            size = "md",
+            width = "100%",
+            onClick = Config.ClickGuard(function()
+                TopBar._ChargeAdFreeCard()
+            end),
+        })
+    end
+
+    return UI.ScrollView {
+        width = "100%",
+        maxHeight = 380,
+        children = {
+            UI.Panel {
+                width = "100%",
+                flexDirection = "column",
+                gap = 8,
+                padding = 4,
+                children = children,
+            },
+        },
+    }
+end
+
+--- 显示广告弹窗
+function TopBar._ShowAdModal()
+    if not stateRef_ then return end
+    if adModal_ then
+        adModal_:Close()
+        adModal_ = nil
+    end
+
+    adModal_ = UI.Modal {
+        title = "🎰 广告奖励",
+        size = "sm",
+        closeOnOverlay = true,
+        closeOnEscape = true,
+        showCloseButton = true,
+        onClose = function()
+            adModal_ = nil
+        end,
+    }
+    adModal_:AddContent(TopBar._BuildAdModalContent())
+    adModal_:Open()
+end
+
+-- ============================================================================
+-- 声誉管理弹窗
+-- ============================================================================
+
+---@type table|nil
+local repModal_ = nil
+
+function TopBar._ShowReputationModal()
+    if not stateRef_ then return end
+    if repModal_ then
+        repModal_:Close()
+        repModal_ = nil
+    end
+
+    local state = stateRef_
+    local BR = Balance.REPUTATION
+    local rep = state.reputation or 0
+
+    -- 声誉等级描述
+    local levelLabel, levelColor
+    if rep >= 50 then
+        levelLabel, levelColor = "声名卓著", C.accent_green
+    elseif rep >= 10 then
+        levelLabel, levelColor = "声誉良好", { 120, 180, 120, 255 }
+    elseif rep >= -10 then
+        levelLabel, levelColor = "默默无闻", C.text_muted
+    elseif rep >= -30 then
+        levelLabel, levelColor = "名声可疑", { 212, 170, 50, 255 }
+    elseif rep >= -50 then
+        levelLabel, levelColor = "恶名昭彰", { 220, 120, 50, 255 }
+    elseif rep >= -80 then
+        levelLabel, levelColor = "臭名远播", C.accent_red
+    else
+        levelLabel, levelColor = "人民公敌", { 180, 30, 30, 255 }
+    end
+
+    -- 被动恢复速率计算
+    local passiveRate = BR.recovery_per_turn + (state.rep_recovery_bonus or 0)
+    local StockEngine = require("systems.stock_engine")
+    local pressLevel = StockEngine.GetHoldingLevel(state, "balkan_press")
+    if pressLevel == "control" then
+        passiveRate = passiveRate + BR.press_control_recovery_bonus
+    elseif pressLevel == "influence" then
+        passiveRate = passiveRate + BR.press_influence_recovery_bonus
+    end
+
+    -- 进度条归一化 (0~1)
+    local progressNorm = (rep + 100) / 200
+
+    -- ─── 弹窗内容 ───
+    local contentChildren = {}
+
+    -- 声誉状态头部
+    table.insert(contentChildren, UI.Panel {
+        width = "100%",
+        flexDirection = "column",
+        alignItems = "center",
+        gap = 4,
+        paddingVertical = 8,
+        children = {
+            UI.Label {
+                text = string.format("%+d", rep),
+                fontSize = 32,
+                fontWeight = "bold",
+                fontColor = levelColor,
+            },
+            UI.Label {
+                text = levelLabel,
+                fontSize = F.body,
+                fontColor = levelColor,
+            },
+            -- 进度条
+            UI.Panel {
+                width = "80%",
+                height = 8,
+                borderRadius = 4,
+                backgroundColor = C.bg_inset,
+                overflow = "hidden",
+                children = {
+                    UI.Panel {
+                        width = string.format("%.1f%%", progressNorm * 100),
+                        height = "100%",
+                        borderRadius = 4,
+                        backgroundColor = levelColor,
+                    },
+                },
+            },
+            UI.Panel {
+                width = "80%",
+                flexDirection = "row",
+                justifyContent = "space-between",
+                children = {
+                    UI.Label { text = "-100", fontSize = 9, fontColor = C.text_muted },
+                    UI.Label { text = "0", fontSize = 9, fontColor = C.text_muted },
+                    UI.Label { text = "+100", fontSize = 9, fontColor = C.text_muted },
+                },
+            },
+        },
+    })
+
+    -- 被动恢复信息
+    local passiveDesc = rep == 0 and "声誉为零，无需恢复"
+        or string.format("每季自动向0恢复 %d 点", passiveRate)
+    table.insert(contentChildren, UI.Panel {
+        width = "100%",
+        backgroundColor = C.bg_inset,
+        borderRadius = S.radius_card,
+        padding = 8,
+        flexDirection = "row",
+        alignItems = "center",
+        gap = 6,
+        children = {
+            UI.Label { text = "🔄", fontSize = 16 },
+            UI.Panel {
+                flexDirection = "column",
+                flexShrink = 1,
+                children = {
+                    UI.Label {
+                        text = "被动恢复",
+                        fontSize = F.body_minor,
+                        fontWeight = "bold",
+                        fontColor = C.text_primary,
+                    },
+                    UI.Label {
+                        text = passiveDesc,
+                        fontSize = F.label,
+                        fontColor = C.text_muted,
+                        whiteSpace = "normal",
+                    },
+                },
+            },
+        },
+    })
+
+    -- 分隔线
+    table.insert(contentChildren, UI.Panel {
+        width = "100%", height = 1,
+        backgroundColor = C.border_soft,
+        marginVertical = 4,
+    })
+
+    -- 主动恢复行动标题
+    table.insert(contentChildren, UI.Label {
+        text = "主动恢复",
+        fontSize = F.body,
+        fontWeight = "bold",
+        fontColor = C.text_primary,
+    })
+
+    -- 行动列表
+    local repActions = Actions.GetReputationActions(state)
+    for _, item in ipairs(repActions) do
+        local cfg = item.cfg
+        local enabled = item.available
+        local textColor = enabled and C.text_primary or C.text_muted
+
+        table.insert(contentChildren, UI.Panel {
+            width = "100%",
+            flexDirection = "row",
+            alignItems = "center",
+            backgroundColor = enabled and C.bg_card or C.bg_inset,
+            borderRadius = S.radius_card,
+            borderWidth = 1,
+            borderColor = enabled and C.border_soft or { 80, 80, 80, 60 },
+            padding = 8,
+            gap = 8,
+            opacity = enabled and 1.0 or 0.6,
+            pointerEvents = enabled and "auto" or "none",
+            onPointerUp = enabled and Config.TapGuard(function(self)
+                Actions.ExecuteReputationAction(state, item.id, function()
+                    -- 关闭弹窗 & 刷新
+                    if repModal_ then
+                        repModal_:Close()
+                        repModal_ = nil
+                    end
+                    if onLightRefresh_ then onLightRefresh_() end
+                end)
+            end) or nil,
+            children = {
+                -- 图标
+                UI.Label {
+                    text = cfg.icon,
+                    fontSize = 20,
+                },
+                -- 名称 + 描述
+                UI.Panel {
+                    flexDirection = "column",
+                    flexGrow = 1,
+                    flexShrink = 1,
+                    gap = 2,
+                    children = {
+                        UI.Label {
+                            text = cfg.label,
+                            fontSize = F.body_minor,
+                            fontWeight = "bold",
+                            fontColor = textColor,
+                        },
+                        UI.Label {
+                            text = cfg.desc,
+                            fontSize = F.label,
+                            fontColor = C.text_muted,
+                            whiteSpace = "normal",
+                        },
+                        -- 不可用原因
+                        (not enabled and item.reason) and UI.Label {
+                            text = item.reason,
+                            fontSize = F.label,
+                            fontColor = C.accent_red,
+                        } or nil,
+                    },
+                },
+                -- 费用标签
+                UI.Panel {
+                    flexDirection = "column",
+                    alignItems = "flex-end",
+                    flexShrink = 0,
+                    gap = 2,
+                    children = {
+                        UI.Label {
+                            text = string.format("+%d", cfg.rep_gain),
+                            fontSize = F.body_minor,
+                            fontWeight = "bold",
+                            fontColor = enabled and C.accent_green or C.text_muted,
+                        },
+                        UI.Label {
+                            text = string.format("%d💰 %dAP", cfg.cash_cost, cfg.ap_cost),
+                            fontSize = 9,
+                            fontColor = C.text_muted,
+                        },
+                    },
+                },
+            },
+        })
+    end
+
+    -- 创建弹窗
+    repModal_ = UI.Modal {
+        title = "★ 声誉管理",
+        size = "md",
+        closeOnOverlay = true,
+        closeOnEscape = true,
+        showCloseButton = true,
+        onClose = function()
+            repModal_ = nil
+        end,
+    }
+
+    local scrollContent = UI.Panel {
+        width = "100%",
+        flexDirection = "column",
+        gap = 8,
+        padding = 4,
+        children = contentChildren,
+    }
+
+    repModal_:AddContent(UI.ScrollView {
+        width = "100%",
+        maxHeight = 400,
+        children = { scrollContent },
+    })
+
+    repModal_:Open()
 end
 
 return TopBar

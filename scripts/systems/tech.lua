@@ -134,13 +134,13 @@ function Tech.Start(state, techId)
     local bonus = GameState.GetPositionBonus(state, "tech_advisor")
     total = math.max(1, math.floor(total * (1 - bonus * 0.3)))
 
-    -- 影响力里程碑加成
-    if GameState.HasInfluenceThreshold(state, 200) then
+    -- 控制度里程碑加成
+    if GameState.HasControlMilestone(state, 300) then
         total = math.max(1, total - 1)
     end
 
     -- 科技加成：research_speed 缩短研发
-    local speedBonus = state.research_speed_bonus or 0
+    local speedBonus = math.min(state.research_speed_bonus or 0, 0.35)
     if speedBonus > 0 then
         total = math.max(1, math.floor(total * (1 - speedBonus)))
     end
@@ -211,19 +211,15 @@ local function applyEffect(state, eff, techId)
         -- 旧字段 state.military.equipment 已弃用（新系统通过 tech.researched 判断解锁）
         -- 装备解锁通知已移至 Tech.Complete() 统一处理
 
-    elseif eff.kind == "supply_reduction" then
-        state.supply_reduction_bonus = (state.supply_reduction_bonus or 0) + math.abs(eff.value)
-
     elseif eff.kind == "finance_network" then
-        state.finance_supply_discount = 0.20
         state.finance_passive_income = 80
 
     elseif eff.kind == "stock_boost_all" then
         -- 卖出结算时收益加成：盈利+10%，亏损减少10%
         state.stock_return_bonus = (state.stock_return_bonus or 0) + (eff.value or 0.10)
 
-    elseif eff.kind == "influence_gain" then
-        state.passive_influence = (state.passive_influence or 0) + eff.value
+    elseif eff.kind == "passive_control_gain" then
+        state.passive_control = (state.passive_control or 0) + eff.value
 
     elseif eff.kind == "morale_bonus" then
         if state.workers then
@@ -253,6 +249,18 @@ local function applyEffect(state, eff, techId)
 
     elseif eff.kind == "unlock_local_coal_mine" then
         state.local_coal_mine_unlocked = true
+
+    elseif eff.kind == "unlock_foreign_trade" then
+        if not state.unlocked_features then state.unlocked_features = {} end
+        state.unlocked_features["foreign_trade"] = true
+
+    elseif eff.kind == "unlock_venture" then
+        if not state.unlocked_features then state.unlocked_features = {} end
+        state.unlocked_features["venture"] = true
+
+    elseif eff.kind == "unlock_short_selling" then
+        if not state.unlocked_features then state.unlocked_features = {} end
+        state.unlocked_features["short_selling"] = true
 
     elseif eff.kind == "prospect_success" then
         state.prospect_success_bonus = (state.prospect_success_bonus or 0) + eff.value

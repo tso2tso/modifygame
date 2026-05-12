@@ -25,6 +25,9 @@ local onStateChanged_ = nil
 local stateRef_ = nil
 ---@type table|nil UI 根节点引用
 local uiRoot_ = nil
+---@type number 弹窗关闭时间戳（防止手机端触摸穿透导致立即重新打开）
+local modalCloseTime_ = 0
+-- 键盘抑制已移至 Config.SuppressKeyboard()（全局时间制方案）
 
 --- 设置回调
 function EquipModals.SetCallbacks(state, onChanged)
@@ -58,6 +61,9 @@ local function showList(title, rows)
         showCloseButton = true,
         onClose = function(self)
             Config.ConsumeTap()
+            UI.ClearFocus()
+            Config.SuppressKeyboard()
+            modalCloseTime_ = time:GetElapsedTime()
             currentModal_ = nil
             self:Destroy()
         end,
@@ -577,41 +583,89 @@ end
 -- ============================================================================
 
 function EquipModals._ShowResizeSquad(state, accent, squad)
+    -- 安全网：强制隐藏系统键盘 & 清除残留焦点
+    input:SetScreenKeyboardVisible(false)
+    UI.ClearFocus()
+    -- 防止手机端触摸穿透：弹窗刚关闭 0.3 秒内不再打开
+    if time:GetElapsedTime() - modalCloseTime_ < 0.3 then return end
     closeModal()
 
     local unassigned = Equipment.GetUnassignedGuards(state)
+    local minSize = EquipmentData.SQUAD.min_size
     local maxNewSize = math.min(EquipmentData.SQUAD.max_size, squad.size + unassigned)
+    local inputVal = { text = tostring(squad.size), count = squad.size }
 
-    local sizeButtons = {}
-    for s = EquipmentData.SQUAD.min_size, maxNewSize do
-        local sLocal = s
-        local isCurrent = s == squad.size
-        table.insert(sizeButtons, UI.Panel {
-            width = 40, height = 36,
-            borderRadius = S.radius_btn,
-            backgroundColor = isCurrent and accent or C.paper_mid,
-            justifyContent = "center",
-            alignItems = "center",
-            onPointerUp = Config.TapGuard(function()
-                if sLocal == squad.size then return end
-                local ok, msg = Equipment.ResizeSquad(state, squad.id, sLocal)
-                UI.Toast.Show(msg, {
-                    variant = ok and "success" or "error",
-                    duration = 1.5,
-                })
-                if ok then closeModal(); notifyChanged() end
-            end),
-            children = {
-                UI.Label {
-                    text = tostring(s),
-                    fontSize = F.body,
-                    fontWeight = isCurrent and "bold" or "normal",
-                    fontColor = isCurrent and { 255, 255, 255, 255 } or C.text_primary,
-                    pointerEvents = "none",
-                },
-            },
-        })
+    local function _ParseSize(text)
+        local n = tonumber(text)
+        if not n then return 0 end
+        n = math.floor(n)
+        if n < minSize then return 0 end
+        return math.min(n, maxNewSize)
     end
+
+    local function _DoResize()
+        local newSize = inputVal.count
+        if newSize <= 0 or newSize == squad.size then return end
+        local ok, msg = Equipment.ResizeSquad(state, squad.id, newSize)
+        UI.Toast.Show(msg, {
+            variant = ok and "success" or "error",
+            duration = 1.5,
+        })
+        if ok then closeModal(); notifyChanged() end
+    end
+
+    -- 预创建动态控件引用
+    local hintLabel = UI.Label {
+        text = "请输入有效人数",
+        fontSize = F.body,
+        fontWeight = "bold",
+        fontColor = C.text_muted,
+        textAlign = "center",
+        width = "100%",
+    }
+    local confirmBtn = UI.Button {
+        text = "请输入新人数",
+        fontSize = F.body,
+        fontWeight = "bold",
+        fontColor = C.text_muted,
+        backgroundColor = C.bg_surface,
+        borderRadius = S.radius_btn,
+        paddingVertical = 8,
+        width = "100%",
+        disabled = true,
+        onClick = Config.ClickGuard(function(self)
+            self.props.disabled = true
+            _DoResize()
+        end),
+    }
+
+    local function _UpdateSummary()
+        local newSize = inputVal.count
+        local valid = newSize >= minSize and newSize <= maxNewSize
+        local changed = valid and newSize ~= squad.size
+
+        if changed then
+            hintLabel.props.text = string.format("调整为 %d 人（%s%d）",
+                newSize,
+                newSize > squad.size and "+" or "",
+                newSize - squad.size)
+            hintLabel.props.fontColor = accent
+            confirmBtn.props.text = string.format("确认调整为 %d 人", newSize)
+            confirmBtn.props.fontColor = { 255, 255, 255, 255 }
+            confirmBtn.props.backgroundColor = accent
+            confirmBtn.props.disabled = false
+        else
+            hintLabel.props.text = valid and "与当前相同" or "请输入有效人数"
+            hintLabel.props.fontColor = C.text_muted
+            confirmBtn.props.text = "请输入新人数"
+            confirmBtn.props.fontColor = C.text_muted
+            confirmBtn.props.backgroundColor = C.bg_surface
+            confirmBtn.props.disabled = true
+        end
+    end
+
+    -- 初始状态：预填了当前人数，需要初始化一次
+    _UpdateSummary()
 
     local rows = {
         UI.Panel {
@@ -630,21 +684,31 @@ function EquipModals._ShowResizeSquad(state, accent, squad)
                     whiteSpace = "normal",
                 },
                 UI.Label {
-                    text = "选择新人数（当前高亮）：",
-                    fontSize = F.body_minor,
+                    text = string.format("可设范围: %d ~ %d 人", minSize, maxNewSize),
+                    fontSize = F.label,
                     fontColor = C.text_muted,
                 },
-                UI.Panel {
+                UI.TextField {
+                    value = inputVal.text,
+                    placeholder = "输入新人数",
+                    fontSize = F.body,
                     width = "100%",
-                    flexDirection = "row",
-                    flexWrap = "wrap",
-                    gap = 8,
-                    children = sizeButtons,
+                    height = 40,
+                    onChange = function(self, v)
+                        inputVal.text = v
+                        inputVal.count = _ParseSize(v)
+                        _UpdateSummary()
+                    end,
+                    onSubmit = function(self, v)
+                        inputVal.count = _ParseSize(v)
+                        _DoResize()
+                    end,
                 },
+                hintLabel,
+                confirmBtn,
             },
         },
     }
-
     showList("📏 调整人数 — " .. squad.name, rows)
 end
 

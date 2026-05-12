@@ -4,6 +4,7 @@
 -- ============================================================================
 
 local Balance = require("data.balance")
+local Config = require("config")
 local GameState = require("game_state")
 local Equipment = require("systems.equipment")
 local EquipmentData = require("data.equipment_data")
@@ -52,17 +53,27 @@ function Combat.PlayerPower(state)
     local m = state.military
     local totalPower = 0
 
-    -- 编队战力（新系统）
+    -- 编队战力（新系统）— 排除已部署到远征的编队
     if m.squads and #m.squads > 0 then
+        local homeSquadCount = 0
         for _, squad in ipairs(m.squads) do
-            totalPower = totalPower + Equipment.CalcSquadPower(squad)
+            if not squad.deployed_to then  -- 跳过已部署到远征的编队
+                totalPower = totalPower + Equipment.CalcSquadPower(squad)
+                homeSquadCount = homeSquadCount + 1
+            end
         end
         -- 未编队护卫（60% 效率，T1 装备）
+        -- 当本土无任何编队驻守时，散兵缺乏指挥，战力大幅下降至20%
         local unassigned = Equipment.GetUnassignedGuards(state)
-        totalPower = totalPower + unassigned * EquipmentData.SQUAD.unassigned_power
+        local unassignedPower = EquipmentData.SQUAD.unassigned_power
+        if homeSquadCount == 0 and unassigned > 0 then
+            unassignedPower = unassignedPower * 0.2
+        end
+        totalPower = totalPower + unassigned * unassignedPower
     else
         -- 兼容：无编队时所有护卫视为未编队，使用 unassigned_power 系数
-        totalPower = m.guards * BMI.guard_base_power * (EquipmentData.SQUAD.unassigned_power or 0.6)
+        local homeGuards = m.guards or 0
+        totalPower = homeGuards * BMI.guard_base_power * (EquipmentData.SQUAD.unassigned_power or 0.6)
     end
 
     local moraleMul = math.max(0.3, m.morale * BMI.morale_multiplier)
@@ -137,11 +148,12 @@ end
 ---@return string logText
 function Combat.ApplyResult(state, faction, result)
     local m = state.military
+    local diff = Config.GetDifficulty(state.difficulty)
     local log
 
     if result.winner == "player" then
-        -- 胜：缴获 AI 现金，士气 +，军事胜利分 +
-        local loot = math.floor(faction.cash * BC.loot_ratio)
+        -- 胜：缴获 AI 现金，战意 +，军事胜利分 +
+        local loot = math.floor(faction.cash * BC.loot_ratio * (diff.loot_mult or 1.0))
         faction.cash = faction.cash - loot
         faction.power = math.max(0, faction.power - 8)
         faction.attitude = math.max(-100, faction.attitude - 10)
@@ -152,7 +164,7 @@ function Combat.ApplyResult(state, faction, result)
         -- 编队战后处理：耐久衰减 + 老兵经验
         Equipment.OnBattleEnd(state, nil)
         local mapImpact = Combat.ApplyMapImpact(state, faction, result) or ""
-        log = string.format("⚔ 击退 %s（战力 %d vs %d），缴获 %d 现金，护卫士气+%d%s",
+        log = string.format("⚔ 击退 %s（战力 %d vs %d），缴获 %d 现金，战意+%d%s",
             faction.name, math.floor(result.p_power), math.floor(result.a_power),
             loot, BC.win_morale, mapImpact)
         -- 检查是否触发瘫痪
@@ -165,15 +177,20 @@ function Combat.ApplyResult(state, faction, result)
             log = log .. string.format("\n💀 %s 势力崩溃，陷入瘫痪！", faction.name)
         end
     else
-        -- 败：损失护卫 + 士气，丢失一部分现金被抢
-        local lost = math.ceil(m.guards * BC.lose_guards_ratio)
+        -- 败：损失护卫 + 战意，丢失一部分现金被抢
+        local lost = math.ceil(m.guards * BC.lose_guards_ratio * (diff.combat_loss_mult or 1.0))
+        -- C1: 保底至少保留3名护卫
+        local maxLoss = math.max(0, m.guards - 3)
+        lost = math.min(lost, maxLoss)
         -- 编队战后处理：先计算耐久衰减（包含即将解散的小队），再减员
         Equipment.OnBattleEnd(state, nil)
         m.guards = math.max(0, m.guards - lost)
         -- 编队减员同步
         Equipment.OnGuardsLost(state, lost)
         m.morale = math.max(0, m.morale + BC.lose_morale)
-        local pillage = math.floor(state.cash * 0.10)
+        local pillage = math.floor(state.cash * 0.06 * (diff.combat_pillage_mult or 1.0))
+        -- V2: 记录本季战败次数（用于威慑VP判定）
+        state.battle_losses_this_quarter = (state.battle_losses_this_quarter or 0) + 1
         state.cash = math.max(0, state.cash - pillage)
         faction.cash = faction.cash + pillage
         faction.power = math.min(100, faction.power + 5)
@@ -408,6 +425,45 @@ function Combat.PlayerAttack(state, factionId)
     local result = Combat.Resolve(state, target, false)
     local log = Combat.ApplyResult(state, target, result)
     return true, log
+end
+
+-- ============================================================================
+-- 远征战力检定：供 Expedition 模块调用，返回胜负和战力比
+-- ============================================================================
+
+--- 远征战力检定（玩家编队 vs 目标国防御力）
+---@param state table
+---@param squadId string|nil 编队ID（nil 则取全部战力）
+---@param defenderPower number 防御方战力
+---@return table result { winner, ratio, p_power, d_power }
+function Combat.ResolveExpedition(state, squadId, defenderPower)
+    local pPower
+    if squadId then
+        -- 使用指定编队的战力
+        local m = state.military
+        for _, squad in ipairs(m.squads or {}) do
+            if squad.id == squadId then
+                pPower = Equipment.CalcSquadPower(squad)
+                break
+            end
+        end
+        if not pPower then
+            pPower = Combat.PlayerPower(state) * 0.5
+        end
+    else
+        pPower = Combat.PlayerPower(state)
+    end
+    -- 随机因子 ±20%
+    local pRoll = pPower * (0.8 + math.random() * 0.4)
+    local dRoll = defenderPower * (0.8 + math.random() * 0.4)
+    local winner = pRoll >= dRoll and "player" or "defender"
+    local ratio = pRoll / math.max(1, dRoll)
+    return {
+        winner = winner,
+        ratio = ratio,
+        p_power = pPower,
+        d_power = defenderPower,
+    }
 end
 
 return Combat

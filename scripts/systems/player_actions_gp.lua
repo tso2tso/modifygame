@@ -7,6 +7,7 @@ local Balance    = require("data.balance")
 local GameState  = require("game_state")
 local GrandPowers = require("systems.grand_powers")
 local Equipment  = require("systems.equipment")
+local Trade      = require("systems.trade")
 
 local PlayerActionsGP = {}
 
@@ -37,11 +38,22 @@ ACTIONS.war_supplier = {
     end,
     execute = function(state, powerId)
         local power = state.powers[powerId]
-        local income = 300 + math.floor(power.military * 5)
+        -- E5: 收入跟通胀
+        local inflation = GameState.GetInflationFactor(state)
+        local income = math.floor((300 + math.floor(power.military * 5)) * inflation)
         state.cash = state.cash + income
         state.collaboration_score = (state.collaboration_score or 0) + 5
         power.attitude_to_player = math.min(100, power.attitude_to_player + 5)
         GameState.AddLog(state, string.format("向 %s 供应战争物资，获利 %d 克朗", power.label, income))
+
+        -- ── P2-3c 外交→贸易耦合：war_supplier 立即生成1个贸易订单 ──
+        if Trade and Trade.GenerateBonusOrder then
+            local ok, tradeMsg = Trade.GenerateBonusOrder(state, powerId)
+            if ok then
+                GameState.AddLog(state, "[外交→贸易] " .. tradeMsg)
+            end
+        end
+
         return string.format("向 %s 供应物资，获利 %d", power.label, income)
     end,
 }
@@ -148,8 +160,8 @@ ACTIONS.economic_sanction = {
     condition = function(state, powerId)
         local power = state.powers and state.powers[powerId]
         if not power or not power.active then return false, "大国不活跃" end
-        local totalInfluence = GameState.CalcTotalInfluence(state)
-        if totalInfluence < 30 then return false, "影响力不足（需≥30）" end
+        local totalControl = GameState.CalcTotalControl(state)
+        if totalControl < 30 then return false, "控制度不足（需≥30）" end
         if state.cash < 100 then return false, "现金不足（需≥100）" end
         return true
     end,
@@ -221,6 +233,17 @@ ACTIONS.support_guerrilla = {
                 end
             end
         end
+        -- ── P2-3c 外交→远征耦合：游击队降低远征难度 ──
+        -- 如果玩家已占领某些区域或正在远征，降低远征难度10%，持续2回合
+        if state.expeditions and #(state.expeditions.occupied_countries or {}) > 0 then
+            GameState.AddModifier(state,
+                "guerrilla_support",              -- source
+                "guerrilla_difficulty_reduction",  -- target
+                0.10,                              -- -10% 难度
+                2)                                 -- 持续2回合
+            GameState.AddLog(state, "[外交→远征] 游击队破坏敌方补给线，远征难度降低10%（2回合）")
+        end
+
         GameState.AddLog(state, string.format("资助对 %s 的游击队，花费 200 克朗", power.label))
         return string.format("资助游击队，%s 厌战 +2", power.label)
     end,
@@ -237,6 +260,10 @@ ACTIONS.shelter_refugees = {
     condition = function(state, powerId)
         local power = state.powers and state.powers[powerId]
         if not power or not power.active then return false, "大国不活跃" end
+        -- S2: 4季冷却
+        if (state._shelter_cooldown or 0) > 0 then
+            return false, string.format("冷却中（剩余 %d 季）", state._shelter_cooldown)
+        end
         -- 需要有被占领的国家
         local hasOccupied = false
         if state.europe then
@@ -252,16 +279,17 @@ ACTIONS.shelter_refugees = {
     end,
     execute = function(state, powerId)
         local power = state.powers[powerId]
-        -- 声望（影响力）提升
+        -- 声望（控制度）提升
         for _, r in ipairs(state.regions) do
-            r.influence = math.min(100, (r.influence or 0) + 3)
+            r.control = math.min(100, (r.control or 0) + 3)
         end
-        -- 人口增加
-        state.workers.hired = state.workers.hired + 50
+        -- S2: 人口 50→20，加4季冷却
+        state.workers.hired = state.workers.hired + 20
+        state._shelter_cooldown = 4
         power.attitude_to_player = math.max(-100, power.attitude_to_player - 5)
         state.collaboration_score = (state.collaboration_score or 0) - 5
-        GameState.AddLog(state, "庇护了一批战争难民，声望提升，人口 +50")
-        return "庇护难民，声望 +3，人口 +50"
+        GameState.AddLog(state, "庇护了一批战争难民，声望提升，人口 +20")
+        return "庇护难民，声望 +3，人口 +20"
     end,
 }
 
@@ -302,6 +330,14 @@ ACTIONS.sabotage_supply = {
 -- 公开 API
 -- ============================================================================
 
+--- 检查大国外交行动是否已解锁
+---@param state table
+---@return boolean
+function PlayerActionsGP.IsUnlocked(state)
+    return state.unlocked_features ~= nil
+        and state.unlocked_features["gp_actions"] == true
+end
+
 --- 获取可用行动列表（按姿态分组）
 ---@param state table
 ---@param powerId string
@@ -313,6 +349,11 @@ function PlayerActionsGP.GetAvailableActions(state, powerId)
         counter = {},
         resist = {},
     }
+
+    -- 大国外交行动未解锁时，返回空列表
+    if not PlayerActionsGP.IsUnlocked(state) then
+        return result
+    end
 
     for _, action in pairs(ACTIONS) do
         local available, reason = action.condition(state, powerId)
@@ -342,6 +383,11 @@ end
 ---@param actionId string
 ---@return boolean success, string message
 function PlayerActionsGP.ExecuteAction(state, powerId, actionId)
+    -- 大国外交行动未解锁
+    if not PlayerActionsGP.IsUnlocked(state) then
+        return false, "大国外交行动未解锁（需获得「情报网络」称号）"
+    end
+
     local action = ACTIONS[actionId]
     if not action then
         return false, "未知行动"
@@ -362,12 +408,72 @@ function PlayerActionsGP.ExecuteAction(state, powerId, actionId)
     -- 扣 AP（优先消耗临时 AP）
     GameState.SpendAP(state, action.ap_cost)
 
-    -- 外交总监加成：记录好感度变化量，对正向变化额外加成
+    -- ── 干预惯性机制（P2-2）：连续同姿态行动加成 ──
+    local streakKey = powerId .. "_" .. action.stance
+    local streaks = state._action_streaks or {}
+    streaks[streakKey] = (streaks[streakKey] or 0) + 1
+    -- 对同一大国的其他姿态计数重置
+    for k, _ in pairs(streaks) do
+        if k ~= streakKey and k:sub(1, #powerId + 1) == powerId .. "_" then
+            streaks[k] = 0
+        end
+    end
+    state._action_streaks = streaks
+    local streakCount = streaks[streakKey]
+    local streakBonus = (streakCount >= 3) and 0.20 or 0
+
+    -- 记录 execute 前的关键状态（用于惯性加成计算）
     local power = state.powers and state.powers[powerId]
     local attBefore = power and power.attitude_to_player or 0
+    local cashBefore = state.cash
+    local collabBefore = state.collaboration_score or 0
 
     -- 执行
     local msg = action.execute(state, powerId)
+
+    -- 应用惯性加成：对本次行动的数值变化额外 +20%
+    if streakBonus > 0 and power then
+        -- 好感度变化加成
+        local attDelta = (power.attitude_to_player or 0) - attBefore
+        if attDelta ~= 0 then
+            local extra = math.floor(math.abs(attDelta) * streakBonus + 0.5)
+            if attDelta > 0 then
+                power.attitude_to_player = math.min(100, power.attitude_to_player + extra)
+            else
+                power.attitude_to_player = math.max(-100, power.attitude_to_player - extra)
+            end
+        end
+        -- 现金收益加成（仅对收益，不加成支出）
+        local cashDelta = state.cash - cashBefore
+        if cashDelta > 0 then
+            local extra = math.floor(cashDelta * streakBonus)
+            state.cash = state.cash + extra
+        end
+        -- 合作度变化加成（绝对值放大）
+        local collabDelta = (state.collaboration_score or 0) - collabBefore
+        if collabDelta ~= 0 then
+            local extra = math.floor(math.abs(collabDelta) * streakBonus + 0.5)
+            if extra >= 1 then
+                if collabDelta > 0 then
+                    state.collaboration_score = (state.collaboration_score or 0) + extra
+                else
+                    state.collaboration_score = (state.collaboration_score or 0) - extra
+                end
+            end
+        end
+        -- 添加惯性提示
+        msg = (msg or "") .. string.format(" 🔄惯性×%d(+%d%%)", streakCount, math.floor(streakBonus * 100))
+    end
+
+    -- 记录行动历史（用于分支标记触发器 P2-1）
+    if not state.gp_action_history then state.gp_action_history = {} end
+    table.insert(state.gp_action_history, {
+        action = actionId,
+        power = powerId,
+        stance = action.stance,
+        year = state.year,
+        quarter = state.quarter,
+    })
 
     -- 外交总监：正向好感度按比例加成
     if power then
@@ -385,6 +491,37 @@ function PlayerActionsGP.ExecuteAction(state, powerId, actionId)
             power.attitude_to_player = math.min(100, (power.attitude_to_player or 0) + 3)
         end
     end
+
+    -- ── E.2 抵抗/制衡路线即时反馈 ──
+    local collabAfter = state.collaboration_score or 0
+    local collabDelta = collabAfter - collabBefore
+    if collabDelta ~= 0 and (action.stance == "resist" or action.stance == "counter") then
+        -- 附加合作度变化信息
+        msg = (msg or "") .. string.format("\n[合作度 %d → %d]", collabBefore, collabAfter)
+        -- 里程碑阈值与奖励预告
+        local milestones = {
+            { threshold = -10, label = "民间同情" },
+            { threshold = -20, label = "人民支持" },
+            { threshold = -30, label = "抵抗英雄" },
+            { threshold = -50, label = "解放先驱" },
+        }
+        -- 查找下一个未达到的里程碑
+        for _, ms in ipairs(milestones) do
+            if collabAfter > ms.threshold then
+                local gap = collabAfter - ms.threshold
+                msg = msg .. string.format(" 再降低%d点解锁「%s」！", gap, ms.label)
+                break
+            end
+        end
+        -- 检查本次行动是否刚好跨越了某个里程碑
+        for _, ms in ipairs(milestones) do
+            if collabBefore > ms.threshold and collabAfter <= ms.threshold then
+                msg = msg .. string.format(" 🏆 达成「%s」里程碑！", ms.label)
+                break
+            end
+        end
+    end
+
     return true, msg
 end
 
