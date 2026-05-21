@@ -871,9 +871,10 @@ function Trade.QuickFulfill(state, orderId, escortSquadId)
     if not routeDef then
         return false, "贸易路线不存在"
     end
-    local transportCost = math.floor(routeDef.base_cost * GameState.GetInflationFactor(state))
+    local baseTransportCost = math.floor(routeDef.base_cost * GameState.GetInflationFactor(state))
+    local transportCost = math.floor(baseTransportCost * (1 + (BFT.quick_fulfill_surcharge or 0.20)))
     if state.cash < transportCost then
-        return false, "现金不足支付运输费（需 " .. transportCost .. "）"
+        return false, "现金不足支付运输费（需 " .. transportCost .. "，含快速交付附加费）"
     end
 
     -- ── 一切检查通过，开始执行 ──
@@ -915,10 +916,7 @@ function Trade.QuickFulfill(state, orderId, escortSquadId)
         end
     end
 
-    -- S1: QuickFulfill 便利溢价
-    transportCost = math.floor(transportCost * (1 + (BFT.quick_fulfill_surcharge or 0.20)))
-
-    -- 扣运输费
+    -- 扣运输费（含快速交付附加费，已在检查时计算）
     state.cash = state.cash - transportCost
 
     -- 设置护送编队
@@ -987,10 +985,11 @@ function Trade.CanQuickFulfill(state, order)
         end
     end
 
-    -- 运输费检查
+    -- 运输费检查（含快速交付附加费）
     local routeDef = TradeRoutesData.GetRoute(order.route_id)
     if routeDef then
-        local transportCost = math.floor(routeDef.base_cost * GameState.GetInflationFactor(state))
+        local baseCost = math.floor(routeDef.base_cost * GameState.GetInflationFactor(state))
+        local transportCost = math.floor(baseCost * (1 + (BFT.quick_fulfill_surcharge or 0.20)))
         if state.cash < transportCost then
             return false, "运费不足(" .. transportCost .. ")"
         end

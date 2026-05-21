@@ -236,6 +236,90 @@ function MarketPage._LoansTabContent(state, accent)
     local leverageColor = leverage >= maxLev and C.accent_red
         or (leverage >= maxLev * 0.6 and C.accent_amber or C.accent_green)
 
+    local overviewChildren = {
+        -- 第一行：标题 + 贷款笔数
+        UI.Panel {
+            width = "100%",
+            flexDirection = "row",
+            justifyContent = "space-between",
+            alignItems = "center",
+            children = {
+                UI.Label {
+                    text = "贷款总览",
+                    fontSize = F.subtitle,
+                    fontWeight = "bold",
+                    fontColor = C.text_primary,
+                },
+                UI.Label {
+                    text = string.format("活跃 %d / %d 笔",
+                        #state.loans, Balance.LOAN.max_active),
+                    fontSize = F.body_minor,
+                    fontColor = C.text_secondary,
+                },
+            },
+        },
+        -- 第二行：资产/负债/杠杆
+        UI.Panel {
+            width = "100%",
+            flexDirection = "row",
+            justifyContent = "space-between",
+            children = {
+                MarketPage._LoanDetailCol("总资产",
+                    Config.FormatNumber(totalAssets), C.accent_green),
+                MarketPage._LoanDetailCol("总负债",
+                    Config.FormatNumber(totalDebt),
+                    totalDebt > 0 and C.accent_red or C.text_primary),
+                MarketPage._LoanDetailCol("杠杆率",
+                    leveragePct .. "%", leverageColor),
+            },
+        },
+    }
+    -- 破产风险提示（渐进式：清算→警告→破产）
+    if (state.loan_consecutive_defaults or 0) >= 2 then
+        table.insert(overviewChildren, UI.Panel {
+            width = "100%",
+            padding = 6,
+            backgroundColor = { 180, 40, 40, 40 },
+            borderRadius = S.radius_btn,
+            borderWidth = 1,
+            borderColor = C.accent_red,
+            gap = 2,
+            children = {
+                UI.Label {
+                    text = string.format("⚠ 已连续违约 %d 季（强制清算后仍无法偿付），达 %d 季将破产！",
+                        state.loan_consecutive_defaults,
+                        (Balance.LOAN.bankruptcy or {}).consecutive_defaults or 4),
+                    fontSize = F.body_minor,
+                    fontColor = C.accent_red,
+                },
+                UI.Label {
+                    text = "提示：违约时系统会自动变卖黄金、降级矿山来偿付，仍不足才计入违约",
+                    fontSize = F.label,
+                    fontColor = C.text_tertiary,
+                },
+            },
+        })
+    end
+    if (state.negative_net_worth_turns or 0) >= 2 then
+        table.insert(overviewChildren, UI.Panel {
+            width = "100%",
+            padding = 6,
+            backgroundColor = { 180, 40, 40, 40 },
+            borderRadius = S.radius_btn,
+            borderWidth = 1,
+            borderColor = C.accent_red,
+            justifyContent = "center", alignItems = "center",
+            children = {
+                UI.Label {
+                    text = string.format("⚠ 净资产连续为负 %d 季，达 %d 季将破产！",
+                        state.negative_net_worth_turns,
+                        (Balance.LOAN.bankruptcy or {}).negative_net_worth_turns or 4),
+                    fontSize = F.body_minor,
+                    fontColor = C.accent_red,
+                },
+            },
+        })
+    end
     table.insert(children, UI.Panel {
         width = "100%",
         padding = S.card_padding,
@@ -243,86 +327,7 @@ function MarketPage._LoansTabContent(state, accent)
         borderRadius = S.radius_card,
         flexDirection = "column",
         gap = 8,
-        children = {
-            -- 第一行：标题 + 贷款笔数
-            UI.Panel {
-                width = "100%",
-                flexDirection = "row",
-                justifyContent = "space-between",
-                alignItems = "center",
-                children = {
-                    UI.Label {
-                        text = "贷款总览",
-                        fontSize = F.subtitle,
-                        fontWeight = "bold",
-                        fontColor = C.text_primary,
-                    },
-                    UI.Label {
-                        text = string.format("活跃 %d / %d 笔",
-                            #state.loans, Balance.LOAN.max_active),
-                        fontSize = F.body_minor,
-                        fontColor = C.text_secondary,
-                    },
-                },
-            },
-            -- 第二行：资产/负债/杠杆
-            UI.Panel {
-                width = "100%",
-                flexDirection = "row",
-                justifyContent = "space-between",
-                children = {
-                    MarketPage._LoanDetailCol("总资产",
-                        Config.FormatNumber(totalAssets), C.accent_green),
-                    MarketPage._LoanDetailCol("总负债",
-                        Config.FormatNumber(totalDebt),
-                        totalDebt > 0 and C.accent_red or C.text_primary),
-                    MarketPage._LoanDetailCol("杠杆率",
-                        leveragePct .. "%", leverageColor),
-                },
-            },
-            -- 破产风险提示（渐进式：清算→警告→破产）
-            (state.loan_consecutive_defaults or 0) >= 2 and UI.Panel {
-                width = "100%",
-                padding = 6,
-                backgroundColor = { 180, 40, 40, 40 },
-                borderRadius = S.radius_btn,
-                borderWidth = 1,
-                borderColor = C.accent_red,
-                gap = 2,
-                children = {
-                    UI.Label {
-                        text = string.format("⚠ 已连续违约 %d 季（强制清算后仍无法偿付），达 %d 季将破产！",
-                            state.loan_consecutive_defaults,
-                            (Balance.LOAN.bankruptcy or {}).consecutive_defaults or 4),
-                        fontSize = F.body_minor,
-                        fontColor = C.accent_red,
-                    },
-                    UI.Label {
-                        text = "提示：违约时系统会自动变卖黄金、降级矿山来偿付，仍不足才计入违约",
-                        fontSize = F.label,
-                        fontColor = C.text_tertiary,
-                    },
-                },
-            } or nil,
-            (state.negative_net_worth_turns or 0) >= 2 and UI.Panel {
-                width = "100%",
-                padding = 6,
-                backgroundColor = { 180, 40, 40, 40 },
-                borderRadius = S.radius_btn,
-                borderWidth = 1,
-                borderColor = C.accent_red,
-                justifyContent = "center", alignItems = "center",
-                children = {
-                    UI.Label {
-                        text = string.format("⚠ 净资产连续为负 %d 季，达 %d 季将破产！",
-                            state.negative_net_worth_turns,
-                            (Balance.LOAN.bankruptcy or {}).negative_net_worth_turns or 4),
-                        fontSize = F.body_minor,
-                        fontColor = C.accent_red,
-                    },
-                },
-            } or nil,
-        },
+        children = overviewChildren,
     })
 
     -- 现有贷款列表
@@ -352,11 +357,10 @@ function MarketPage._LoansTabContent(state, accent)
                                 fontWeight = "bold",
                                 fontColor = C.text_primary,
                             },
-                            UI.Panel {
-                                flexDirection = "row",
-                                gap = 4,
-                                children = {
-                                    (loan.rollovers and loan.rollovers > 0) and UI.Panel {
+                            (function()
+                                local badgeChildren = {}
+                                if loan.rollovers and loan.rollovers > 0 then
+                                    table.insert(badgeChildren, UI.Panel {
                                         backgroundColor = C.accent_red,
                                         borderRadius = S.radius_badge,
                                         paddingHorizontal = 6, paddingVertical = 2,
@@ -368,23 +372,28 @@ function MarketPage._LoansTabContent(state, accent)
                                                 pointerEvents = "none",
                                             },
                                         },
-                                    } or nil,
-                                    UI.Panel {
-                                        backgroundColor = (loan.rollovers and loan.rollovers > 0)
-                                            and C.accent_red or C.accent_amber,
-                                        borderRadius = S.radius_badge,
-                                        paddingHorizontal = 6, paddingVertical = 2,
-                                        children = {
-                                            UI.Label {
-                                                text = string.format("剩 %d 季", loan.remaining_turns),
-                                                fontSize = F.label,
-                                                fontColor = { 255, 255, 255, 255 },
-                                                pointerEvents = "none",
-                                            },
+                                    })
+                                end
+                                table.insert(badgeChildren, UI.Panel {
+                                    backgroundColor = (loan.rollovers and loan.rollovers > 0)
+                                        and C.accent_red or C.accent_amber,
+                                    borderRadius = S.radius_badge,
+                                    paddingHorizontal = 6, paddingVertical = 2,
+                                    children = {
+                                        UI.Label {
+                                            text = string.format("剩 %d 季", loan.remaining_turns),
+                                            fontSize = F.label,
+                                            fontColor = { 255, 255, 255, 255 },
+                                            pointerEvents = "none",
                                         },
                                     },
-                                },
-                            },
+                                })
+                                return UI.Panel {
+                                    flexDirection = "row",
+                                    gap = 4,
+                                    children = badgeChildren,
+                                }
+                            end)(),
                         },
                     },
                     UI.Panel {

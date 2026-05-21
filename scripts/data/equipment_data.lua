@@ -144,7 +144,7 @@ EquipmentData.SUPPORT_TIER_ORDER = { "medkit", "scout_gear", "field_radio", "sie
 
 -- 支援装备科技解锁映射
 EquipmentData.SUPPORT_TECH_UNLOCK = {
-    c2_field_fortify = "medkit",
+    c2_logistics = "medkit",
     c3_machine_gun   = "scout_gear",
     c5_motorized     = "field_radio",
     c7_elite_force   = "siege_kit",

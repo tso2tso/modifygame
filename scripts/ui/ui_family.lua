@@ -258,38 +258,44 @@ function FamilyPage._CreateSummaryCard(state)
                     end)(),
                 },
             },
-            -- 大学入口（科技解锁后显示）
-            GameState.IsUniversityUnlocked(state) and UI.Panel {
-                width = "100%",
-                flexDirection = "row",
-                alignItems = "center",
-                gap = 8,
-                children = {
-                    UI.Label {
-                        text = "🎓 萨拉热窝大学",
-                        fontSize = F.body,
-                        fontWeight = "bold",
-                        fontColor = C.accent_gold,
-                    },
-                    UI.Panel { flexGrow = 1 },
-                    UI.Button {
-                        text = string.format("进修（💰%d）", math.floor((Balance.FAMILY.university_cost or 300) * GameState.GetInflationFactor(state))),
-                        fontSize = F.body_minor,
-                        variant = "outlined",
-                        size = "sm",
-                        onClick = Config.ClickGuard(function()
-                            FamilyPage._ShowUniversityModal(state)
-                        end),
-                    },
-                },
-            } or nil,
-            UI.Label {
-                text = "分配家族成员到岗位可获得对应方向经营加成，上岗需适应2季度",
-                fontSize = F.body_minor,
-                fontColor = C.text_muted,
-                whiteSpace = "normal",
-                lineHeight = 1.4,
-            },
+            -- 大学入口（科技解锁后显示）+ 提示文本
+            table.unpack((function()
+                local extra = {}
+                if GameState.IsUniversityUnlocked(state) then
+                    table.insert(extra, UI.Panel {
+                        width = "100%",
+                        flexDirection = "row",
+                        alignItems = "center",
+                        gap = 8,
+                        children = {
+                            UI.Label {
+                                text = "🎓 萨拉热窝大学",
+                                fontSize = F.body,
+                                fontWeight = "bold",
+                                fontColor = C.accent_gold,
+                            },
+                            UI.Panel { flexGrow = 1 },
+                            UI.Button {
+                                text = string.format("进修（💰%d）", math.floor((Balance.FAMILY.university_cost or 300) * GameState.GetInflationFactor(state))),
+                                fontSize = F.body_minor,
+                                variant = "outlined",
+                                size = "sm",
+                                onClick = Config.ClickGuard(function()
+                                    FamilyPage._ShowUniversityModal(state)
+                                end),
+                            },
+                        },
+                    })
+                end
+                table.insert(extra, UI.Label {
+                    text = "分配家族成员到岗位可获得对应方向经营加成，上岗需适应2季度",
+                    fontSize = F.body_minor,
+                    fontColor = C.text_muted,
+                    whiteSpace = "normal",
+                    lineHeight = 1.4,
+                })
+                return extra
+            end)()),
         },
     }
 end
@@ -633,7 +639,9 @@ function FamilyPage._CreateIdleSection(state)
     local cooldownMembers = {}
     for _, m in ipairs(state.family.members) do
         if not m.position and m.status == "active" then
-            if (m.cooldown_turns or 0) > 0 then
+            if FamilyPage._IsStudying(state, m.id) then
+                -- 进修中成员不算待命，在大学面板显示
+            elseif (m.cooldown_turns or 0) > 0 then
                 table.insert(cooldownMembers, m)
             else
                 table.insert(idleMembers, m)
@@ -775,26 +783,30 @@ function FamilyPage._CreateIdleMemberRow(member, isDisabled, isCooldown)
                         flexDirection = "row",
                         alignItems = "center",
                         gap = 6,
-                        children = {
-                            UI.Label {
+                        children = (function()
+                            local ch = {}
+                            table.insert(ch, UI.Label {
                                 text = member.name,
                                 fontSize = F.body,
                                 fontWeight = "bold",
                                 fontColor = isDisabled and C.text_muted or C.text_primary,
-                            },
-                            member.age and UI.Label {
-                                text = tostring(member.age) .. "岁",
-                                fontSize = F.label,
-                                fontColor = (member.age >= (Balance.FAMILY.retirement_warning_age or 55))
-                                    and C.accent_red or C.text_muted,
-                            } or nil,
-                            UI.Chip {
+                            })
+                            if member.age then
+                                table.insert(ch, UI.Label {
+                                    text = tostring(member.age) .. "岁",
+                                    fontSize = F.label,
+                                    fontColor = (member.age >= (Balance.FAMILY.retirement_warning_age or 55))
+                                        and C.accent_red or C.text_muted,
+                                })
+                            end
+                            table.insert(ch, UI.Chip {
                                 label = statusLabel,
                                 color = statusColor,
                                 variant = isDisabled and "soft" or "outlined",
                                 size = "sm",
-                            },
-                        },
+                            })
+                            return ch
+                        end)(),
                     },
                     UI.Label {
                         text = attrLine,
@@ -849,10 +861,11 @@ function FamilyPage._ShowCandidateModal(pos)
     local attr1Name = Config.ATTR_NAMES[pos.attr1] or pos.attr1
     local attr2Name = Config.ATTR_NAMES[pos.attr2] or pos.attr2
 
-    -- 筛选可用候选人：活跃且未在其他岗位上
+    -- 筛选可用候选人：活跃、未在其他岗位上、不在进修中
     local candidates = {}
     for _, m in ipairs(stateRef_.family.members) do
-        if m.status == "active" and m.position ~= pos.id and (m.cooldown_turns or 0) <= 0 then
+        if m.status == "active" and m.position ~= pos.id and (m.cooldown_turns or 0) <= 0
+            and not FamilyPage._IsStudying(stateRef_, m.id) then
             table.insert(candidates, m)
         end
     end
@@ -991,26 +1004,30 @@ function FamilyPage._CreateCandidateRow(member, pos)
                         flexDirection = "row",
                         alignItems = "center",
                         gap = 6,
-                        children = {
-                            UI.Label {
+                        children = (function()
+                            local ch = {}
+                            table.insert(ch, UI.Label {
                                 text = member.name,
                                 fontSize = F.body,
                                 fontWeight = "bold",
                                 fontColor = C.text_primary,
-                            },
-                            member.age and UI.Label {
-                                text = tostring(member.age) .. "岁",
-                                fontSize = F.label,
-                                fontColor = (member.age >= (Balance.FAMILY.retirement_warning_age or 55))
-                                    and C.accent_red or C.text_muted,
-                            } or nil,
-                            UI.Chip {
+                            })
+                            if member.age then
+                                table.insert(ch, UI.Label {
+                                    text = tostring(member.age) .. "岁",
+                                    fontSize = F.label,
+                                    fontColor = (member.age >= (Balance.FAMILY.retirement_warning_age or 55))
+                                        and C.accent_red or C.text_muted,
+                                })
+                            end
+                            table.insert(ch, UI.Chip {
                                 label = fitLabel,
                                 color = fitColor,
                                 variant = "soft",
                                 size = "sm",
-                            },
-                        },
+                            })
+                            return ch
+                        end)(),
                     },
                     UI.Label {
                         text = string.format("%s %d · %s %d → %+d%%",
@@ -1024,11 +1041,17 @@ function FamilyPage._CreateCandidateRow(member, pos)
                         flexDirection = "row",
                         gap = 4,
                         flexWrap = "wrap",
-                        children = {
-                            FamilyPage._TraitChip(member),
-                            FamilyPage._FlawChip(member),
-                            table.unpack(FamilyPage._DegreeChips(member)),
-                        },
+                        children = (function()
+                            local ch = {}
+                            local tc = FamilyPage._TraitChip(member)
+                            if tc then table.insert(ch, tc) end
+                            local fc = FamilyPage._FlawChip(member)
+                            if fc then table.insert(ch, fc) end
+                            for _, dc in ipairs(FamilyPage._DegreeChips(member)) do
+                                table.insert(ch, dc)
+                            end
+                            return ch
+                        end)(),
                     },
                     fromOtherPos and UI.Label {
                         text = "当前在岗：" .. (otherPosName or ""),
@@ -1167,19 +1190,25 @@ function FamilyPage._ShowMemberDetail(member)
                 alignItems = "center",
                 gap = 6,
                 flexWrap = "wrap",
-                children = {
-                    UI.Label {
+                children = (function()
+                    local ch = {}
+                    table.insert(ch, UI.Label {
                         text = member.title,
                         fontSize = F.body,
                         fontColor = C.text_secondary,
-                    },
-                    ageText and UI.Label {
-                        text = ageText,
-                        fontSize = F.body,
-                        fontColor = ageNearRetire and C.accent_red or C.text_muted,
-                    } or nil,
-                    table.unpack(traitChips),
-                },
+                    })
+                    if ageText then
+                        table.insert(ch, UI.Label {
+                            text = ageText,
+                            fontSize = F.body,
+                            fontColor = ageNearRetire and C.accent_red or C.text_muted,
+                        })
+                    end
+                    for _, tc in ipairs(traitChips) do
+                        table.insert(ch, tc)
+                    end
+                    return ch
+                end)(),
             },
         }
 
@@ -1254,20 +1283,26 @@ function FamilyPage._ShowMemberDetail(member)
                             flexDirection = "row",
                             alignItems = "center",
                             gap = 6,
-                            children = {
-                                UI.Label {
+                            children = (function()
+                                local ch = {}
+                                table.insert(ch, UI.Label {
                                     text = member.title,
                                     fontSize = F.body,
                                     fontColor = C.text_secondary,
-                                },
-                                member.age and UI.Label {
-                                    text = tostring(member.age) .. "岁",
-                                    fontSize = F.body,
-                                    fontColor = (member.age >= (Balance.FAMILY.retirement_warning_age or 55))
-                                        and C.accent_red or C.text_muted,
-                                } or nil,
-                                table.unpack(traitChips),
-                            },
+                                })
+                                if member.age then
+                                    table.insert(ch, UI.Label {
+                                        text = tostring(member.age) .. "岁",
+                                        fontSize = F.body,
+                                        fontColor = (member.age >= (Balance.FAMILY.retirement_warning_age or 55))
+                                            and C.accent_red or C.text_muted,
+                                    })
+                                end
+                                for _, tc in ipairs(traitChips) do
+                                    table.insert(ch, tc)
+                                end
+                                return ch
+                            end)(),
                         },
                     },
                 },
@@ -2215,33 +2250,43 @@ function FamilyPage._ShowUniversityMemberPicker(state, degree)
                                 flexDirection = "row",
                                 alignItems = "center",
                                 gap = 6,
-                                children = {
-                                    UI.Label {
+                                children = (function()
+                                    local ch = {}
+                                    table.insert(ch, UI.Label {
                                         text = m.name,
                                         fontSize = F.body,
                                         fontWeight = "bold",
                                         fontColor = C.text_primary,
-                                    },
-                                    FamilyPage._TraitChip(m),
-                                    FamilyPage._FlawChip(m),
-                                },
+                                    })
+                                    local tc = FamilyPage._TraitChip(m)
+                                    if tc then table.insert(ch, tc) end
+                                    local fc = FamilyPage._FlawChip(m)
+                                    if fc then table.insert(ch, fc) end
+                                    return ch
+                                end)(),
                             },
                             UI.Panel {
                                 flexDirection = "row",
                                 gap = 4,
                                 flexWrap = "wrap",
-                                children = {
-                                    posName and UI.Label {
-                                        text = "在岗：" .. posName .. "（将离岗）",
-                                        fontSize = F.label,
-                                        fontColor = C.accent_amber,
-                                    } or nil,
-                                    (m.degrees and #m.degrees > 0) and UI.Label {
-                                        text = "学位：" .. #m.degrees .. "/" .. maxDeg,
-                                        fontSize = F.label,
-                                        fontColor = C.text_muted,
-                                    } or nil,
-                                },
+                                children = (function()
+                                    local ch = {}
+                                    if posName then
+                                        table.insert(ch, UI.Label {
+                                            text = "在岗：" .. posName .. "（将离岗）",
+                                            fontSize = F.label,
+                                            fontColor = C.accent_amber,
+                                        })
+                                    end
+                                    if m.degrees and #m.degrees > 0 then
+                                        table.insert(ch, UI.Label {
+                                            text = "学位：" .. #m.degrees .. "/" .. maxDeg,
+                                            fontSize = F.label,
+                                            fontColor = C.text_muted,
+                                        })
+                                    end
+                                    return ch
+                                end)(),
                             },
                         },
                     },

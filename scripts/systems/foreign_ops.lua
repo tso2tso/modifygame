@@ -245,8 +245,13 @@ function ForeignOps.CanRebuild(state, tileId)
     if available < BF.rebuild_ap then
         return false, "行动点不足"
     end
-    if state.cash < BF.rebuild_cash then
-        return false, "资金不足（需要" .. BF.rebuild_cash .. "）"
+    local rebuildCost = math.floor(BF.rebuild_cash * GameState.GetInflationFactor(state))
+    local degreeDisc = GameState.GetActiveDegreeEffect and GameState.GetActiveDegreeEffect(state, "repair_cost_reduction") or 0
+    if degreeDisc > 0 then
+        rebuildCost = math.ceil(rebuildCost * (1 - degreeDisc))
+    end
+    if state.cash < rebuildCost then
+        return false, "资金不足（需要" .. rebuildCost .. "）"
     end
     return true, nil
 end
@@ -262,9 +267,9 @@ function ForeignOps.DoRebuild(state, tileId)
     local info = fo.active[tileId]
 
     GameState.SpendAP(state, BF.rebuild_ap)
-    -- 家族学位：理工学院（repair_cost_reduction）—— 修复费用折扣
+    -- 家族学位：理工学院（repair_cost_reduction）—— 修复费用折扣（含通胀）
+    local rebuildCost = math.floor(BF.rebuild_cash * GameState.GetInflationFactor(state))
     local degreeRepairDisc = GameState.GetActiveDegreeEffect and GameState.GetActiveDegreeEffect(state, "repair_cost_reduction") or 0
-    local rebuildCost = BF.rebuild_cash
     if degreeRepairDisc > 0 then
         rebuildCost = math.ceil(rebuildCost * (1 - degreeRepairDisc))
     end

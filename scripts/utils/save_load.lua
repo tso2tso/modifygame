@@ -704,7 +704,7 @@ function SaveLoad._DeserializeState(data)
     data.trade.failed_count = data.trade.failed_count or 0
     data.trade.total_revenue = data.trade.total_revenue or 0
     data.trade.last_quarter_revenue = data.trade.last_quarter_revenue or 0
-    data.trade.civil_trades_completed = data.trade.civil_trades_completed or 0
+    data.stats.civil_trades_completed = data.stats.civil_trades_completed or (data.trade.civil_trades_completed or 0)
     -- 旧存档迁移：为缺少 order_type 的订单补充默认值
     for _, order in ipairs(data.trade.order_pool) do
         order.order_type = order.order_type or "military"

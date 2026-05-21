@@ -91,6 +91,7 @@ function GameState.CreateNew()
             holdings = {},  -- { [stock_id] = { shares, avg_cost } }
             short_positions = {},  -- { [stock_id] = { shares, entry_price, margin, seasons_held } }
         },
+        stock_return_bonus = 0,  -- 装备加成：股票收益率额外加成
 
         -- ============================
         -- 贷款
@@ -436,6 +437,7 @@ function GameState.CreateNew()
             manipulation_successes = 0, -- 操纵股市成功次数
             trades_completed      = 0,  -- 股票交易完成次数（买+卖）
             short_profit_total    = 0,  -- 做空累计盈利
+            civil_trades_completed = 0, -- 民用贸易完成次数
         },
         titles_unlocked = {},  -- { [title_id] = unlocked_turn }
         titles_new      = {},  -- 本回合新解锁（回合末填充，展示后清空）
@@ -1193,6 +1195,15 @@ function GameState.AssignPosition(state, memberId, positionId)
                 m.position = nil
                 m.onboarding_remaining = 0
                 m.cooldown_turns = Balance.FAMILY.unassign_cooldown or 2
+            end
+        end
+    end
+
+    -- 检查成员是否正在进修（进修中不可分配岗位）
+    if positionId and state.family.university then
+        for _, u in ipairs(state.family.university) do
+            if u.member_id == memberId then
+                return false, "该成员正在进修中，无法分配岗位"
             end
         end
     end

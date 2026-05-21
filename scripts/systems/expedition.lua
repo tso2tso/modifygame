@@ -515,7 +515,8 @@ function Expedition.LaunchExpedition(state, countryId, squadIds)
     local cashCost = math.floor(totalSoldiers * BE.expedition_cost_per_soldier * inflation)
     local apCost = BE.expedition_ap_cost
 
-    if state.ap.current < apCost then
+    local availableAP = state.ap.current + (state.ap.temp or 0)
+    if availableAP < apCost then
         return false, string.format("行动点不足（需要 %d AP）", apCost)
     end
     if state.cash < cashCost then
@@ -525,7 +526,7 @@ function Expedition.LaunchExpedition(state, countryId, squadIds)
     EnsureHPInit(state)
 
     -- 消耗资源
-    state.ap.current = state.ap.current - apCost
+    GameState.SpendAP(state, apCost)
     state.cash = state.cash - cashCost
 
     -- 标记编队部署
@@ -608,7 +609,8 @@ function Expedition.Reinforce(state, countryId, squadIds)
     local cashCost = math.floor(addedSoldiers * BE.expedition_cost_per_soldier * inflation)
     local apCost = BE.expedition_reinforce_ap
 
-    if state.ap.current < apCost then
+    local availableAP = state.ap.current + (state.ap.temp or 0)
+    if availableAP < apCost then
         return false, string.format("行动点不足（需要 %d AP）", apCost)
     end
     if state.cash < cashCost then
@@ -616,7 +618,7 @@ function Expedition.Reinforce(state, countryId, squadIds)
     end
 
     -- 消耗
-    state.ap.current = state.ap.current - apCost
+    GameState.SpendAP(state, apCost)
     state.cash = state.cash - cashCost
 
     -- 标记编队
@@ -649,28 +651,36 @@ function Expedition.Withdraw(state, countryId, squadIds)
     if not record then return false, "没有对该国的活跃远征" end
 
     local apCost = BE.expedition_withdraw_ap
-    if state.ap.current < apCost then
+    local availableAP = state.ap.current + (state.ap.temp or 0)
+    if availableAP < apCost then
         return false, string.format("行动点不足（需要 %d AP）", apCost)
     end
 
     squadIds = squadIds or {}
     local withdrawnSoldiers = 0
 
-    -- 撤回编队
+    -- 先验证所有编队都在远征中，避免部分修改后返回错误
     for _, sqId in ipairs(squadIds) do
-        -- 从记录中移除
         local found = false
-        for i, deployedId in ipairs(record.deployed_squads) do
-            if deployedId == sqId then
-                table.remove(record.deployed_squads, i)
-                found = true
-                break
-            end
+        for _, deployedId in ipairs(record.deployed_squads) do
+            if deployedId == sqId then found = true; break end
         end
         if not found then
             return false, string.format("编队 %s 未部署在此远征中", sqId)
         end
-        -- 清除squad部署标记
+    end
+
+    -- 消耗AP（验证全部通过后再修改状态）
+    GameState.SpendAP(state, apCost)
+
+    -- 撤回编队
+    for _, sqId in ipairs(squadIds) do
+        for i, deployedId in ipairs(record.deployed_squads) do
+            if deployedId == sqId then
+                table.remove(record.deployed_squads, i)
+                break
+            end
+        end
         for _, squad in ipairs(state.military.squads or {}) do
             if squad.id == sqId then
                 squad.deployed_to = nil
@@ -679,9 +689,6 @@ function Expedition.Withdraw(state, countryId, squadIds)
             end
         end
     end
-
-    -- 消耗AP
-    state.ap.current = state.ap.current - apCost
 
     -- 检查是否全部撤出 → 取消远征
     local remainingSoldiers = Expedition.CalcDeployedSoldiers(state, record)
@@ -934,7 +941,8 @@ function Expedition.OccupySelf(state, countryId)
     end
 
     -- 检查AP和现金
-    if state.ap.current < BE.occupy_ap_cost then
+    local availableAP = state.ap.current + (state.ap.temp or 0)
+    if availableAP < BE.occupy_ap_cost then
         return false, string.format("行动点不足（需要 %d AP）", BE.occupy_ap_cost)
     end
     if state.cash < BE.occupy_cash_cost then
@@ -942,7 +950,7 @@ function Expedition.OccupySelf(state, countryId)
     end
 
     -- 消耗
-    state.ap.current = state.ap.current - BE.occupy_ap_cost
+    GameState.SpendAP(state, BE.occupy_ap_cost)
     state.cash = state.cash - BE.occupy_cash_cost
 
     -- 确定收入和维护
@@ -1047,11 +1055,12 @@ function Expedition.OccupyGiveToFaction(state, countryId, factionId)
     if not targetFaction then return false, "没有可用的势力" end
 
     -- AP消耗
-    if state.ap.current < BE.give_to_faction_ap then
+    local availableAP = state.ap.current + (state.ap.temp or 0)
+    if availableAP < BE.give_to_faction_ap then
         return false, string.format("行动点不足（需要 %d AP）", BE.give_to_faction_ap)
     end
 
-    state.ap.current = state.ap.current - BE.give_to_faction_ap
+    GameState.SpendAP(state, BE.give_to_faction_ap)
 
     -- 关系加成
     targetFaction.attitude = math.min(100,
@@ -1141,14 +1150,15 @@ function Expedition.Support(state, targetPowerId, squadId)
         return false, string.format("%s 当前未处于战争状态", targetCountry.label)
     end
 
-    if state.ap.current < BE.support_ap_cost then
+    local availableAP = state.ap.current + (state.ap.temp or 0)
+    if availableAP < BE.support_ap_cost then
         return false, string.format("行动点不足（需要 %d AP）", BE.support_ap_cost)
     end
     if state.cash < BE.support_cash_cost then
         return false, string.format("现金不足（需要 %d）", BE.support_cash_cost)
     end
 
-    state.ap.current = state.ap.current - BE.support_ap_cost
+    GameState.SpendAP(state, BE.support_ap_cost)
     state.cash = state.cash - BE.support_cash_cost
 
     -- 成功判定
