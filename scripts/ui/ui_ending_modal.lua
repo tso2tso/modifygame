@@ -6,6 +6,7 @@ local UI = require("urhox-libs/UI")
 local Config = require("config")
 local GameState = require("game_state")
 local Balance = require("data.balance")
+local AudioManager = require("systems.audio_manager")
 
 local C = Config.COLORS
 local F = Config.FONT
@@ -56,6 +57,13 @@ function EndingModal.Show(state)
     if not ending then return end
 
     EndingModal.Close()
+
+    -- 播放结算 BGM
+    if ending.variant == "success" then
+        AudioManager.PlayBGM("bgm_victory")
+    else
+        AudioManager.PlayBGM("bgm_defeat")
+    end
 
     modal_ = UI.Modal {
         title = ending.icon .. " " .. ending.title,
@@ -415,6 +423,204 @@ function EndingModal._StartNewGame()
         GameState.AddLog(newState, "科瓦奇家族在巴科维奇矿区开始了创业之路。")
         onNewGame_(newState)
     end
+end
+
+-- 即时胜利立绘映射
+local INSTANT_VICTORY_PORTRAITS = {
+    world_domination   = "image/victory_world_domination.png",
+    economic_dominance = "image/victory_economic_dominance.png",
+}
+
+--- 即时胜利全屏庆祝弹窗（全面统治/经济碾压 达成时立刻弹出）
+---@param state table
+---@param instantVictory table  { type, label, desc }
+function EndingModal.ShowInstantVictory(state, instantVictory)
+    if not instantVictory then return end
+
+    EndingModal.Close()
+
+    -- 播放胜利 BGM
+    AudioManager.PlayBGM("bgm_victory")
+
+    -- 先记录胜利
+    GameState.ClaimInstantVictory(state, instantVictory)
+
+    -- 图标 & 立绘
+    local icon = instantVictory.type == "world_domination" and "🌍" or "💎"
+    local portrait = INSTANT_VICTORY_PORTRAITS[instantVictory.type]
+
+    -- 统计数据
+    local stats = EndingModal._BuildInstantVictoryStats(state, instantVictory)
+    local statRows = {}
+    for i = 1, #stats, 2 do
+        table.insert(statRows, UI.Panel {
+            width = "100%",
+            flexDirection = "row",
+            gap = 8,
+            children = {
+                EndingModal._StatCell(stats[i].label, stats[i].value),
+                stats[i + 1] and EndingModal._StatCell(stats[i + 1].label, stats[i + 1].value)
+                    or UI.Panel { flexGrow = 1, flexBasis = 0 },
+            },
+        })
+    end
+
+    modal_ = UI.Modal {
+        title = icon .. " " .. instantVictory.label,
+        size = "fullscreen",
+        closeOnOverlay = false,
+        closeOnEscape = false,
+        showCloseButton = false,
+    }
+
+    -- 立绘区
+    local portraitPanel = nil
+    if portrait then
+        portraitPanel = UI.Panel {
+            width = "100%",
+            alignItems = "center",
+            justifyContent = "center",
+            children = {
+                UI.Panel {
+                    width = 380,
+                    height = 380,
+                    borderRadius = S.radius_card,
+                    backgroundImage = portrait,
+                    backgroundFit = "cover",
+                    borderWidth = 2,
+                    borderColor = C.accent_gold,
+                    flexShrink = 0,
+                },
+            },
+        }
+    end
+
+    -- 内容子元素
+    local contentChildren = {}
+
+    -- 1. 立绘
+    if portraitPanel then
+        table.insert(contentChildren, portraitPanel)
+    end
+
+    -- 2. 标题 + 描述卡片
+    table.insert(contentChildren, UI.Panel {
+        width = "100%",
+        padding = S.card_padding,
+        backgroundColor = C.paper_dark,
+        borderRadius = S.radius_card,
+        borderWidth = 2,
+        borderColor = C.accent_gold,
+        flexDirection = "column",
+        alignItems = "center",
+        gap = 6,
+        children = {
+            UI.Label {
+                text = "即时胜利",
+                fontSize = F.body_minor,
+                fontWeight = "bold",
+                fontColor = C.accent_gold,
+                textAlign = "center",
+            },
+            UI.Label {
+                text = icon .. " " .. instantVictory.label,
+                fontSize = F.data_large,
+                fontWeight = "bold",
+                fontColor = C.text_primary,
+                textAlign = "center",
+            },
+            UI.Divider { color = C.accent_gold },
+            UI.Label {
+                text = instantVictory.desc,
+                fontSize = F.body,
+                fontColor = C.text_secondary,
+                textAlign = "center",
+                whiteSpace = "normal",
+                lineHeight = 1.5,
+            },
+        },
+    })
+
+    -- 3. 成就统计
+    table.insert(contentChildren, UI.Panel {
+        width = "100%",
+        padding = S.card_padding,
+        backgroundColor = C.bg_surface,
+        borderRadius = S.radius_card,
+        flexDirection = "column",
+        gap = 8,
+        children = EndingModal._WithTitle("成就统计", statRows),
+    })
+
+    -- 4. 按钮
+    table.insert(contentChildren, UI.Panel {
+        width = "100%",
+        flexDirection = "row",
+        gap = 8,
+        children = {
+            EndingModal._Button("继续经营", C.bg_elevated, C.text_primary, function()
+                EndingModal.Close()
+                if onStateChanged_ then onStateChanged_() end
+            end),
+            EndingModal._Button("开始新游戏", C.accent_gold, { 30, 25, 15, 255 }, function()
+                EndingModal._StartNewGame()
+            end),
+        },
+    })
+
+    modal_:AddContent(UI.Panel {
+        width = "100%",
+        flexDirection = "column",
+        gap = 12,
+        padding = 4,
+        children = contentChildren,
+    })
+
+    if uiRoot_ then
+        uiRoot_:AddChild(modal_)
+    end
+    modal_:Open()
+end
+
+--- 构建即时胜利的统计数据
+---@param state table
+---@param instantVictory table
+---@return table[] stats
+function EndingModal._BuildInstantVictoryStats(state, instantVictory)
+    local stats = {}
+
+    -- 占领国家数
+    local occupiedCount = 0
+    if state.expeditions and state.expeditions.occupied_countries then
+        occupiedCount = #state.expeditions.occupied_countries
+    end
+
+    -- 总控制度
+    local totalControl = 0
+    for _, region in pairs(state.regions or {}) do
+        totalControl = totalControl + (region.control or 0)
+    end
+
+    -- 总资产
+    local totalAssets = (state.cash or 0) + (state.gold or 0) * (Balance.GOLD.price_per_unit or 400)
+
+    if instantVictory.type == "world_domination" then
+        table.insert(stats, { label = "占领国家", value = tostring(occupiedCount) })
+        table.insert(stats, { label = "总控制度", value = tostring(totalControl) })
+        table.insert(stats, { label = "现金", value = string.format("%d 克朗", state.cash or 0) })
+        table.insert(stats, { label = "黄金", value = string.format("%d 单位", state.gold or 0) })
+        table.insert(stats, { label = "总资产", value = string.format("%d 克朗", totalAssets) })
+        table.insert(stats, { label = "达成回合", value = string.format("第 %d 回合", state.turn or 0) })
+    else -- economic_dominance
+        table.insert(stats, { label = "现金", value = string.format("%d 克朗", state.cash or 0) })
+        table.insert(stats, { label = "黄金", value = string.format("%d 单位", state.gold or 0) })
+        table.insert(stats, { label = "总资产", value = string.format("%d 克朗", totalAssets) })
+        table.insert(stats, { label = "总控制度", value = tostring(totalControl) })
+        table.insert(stats, { label = "占领国家", value = tostring(occupiedCount) })
+        table.insert(stats, { label = "达成回合", value = string.format("第 %d 回合", state.turn or 0) })
+    end
+
+    return stats
 end
 
 function EndingModal.Close()

@@ -1,6 +1,6 @@
 -- ============================================================================
 -- 称号数据定义  titles_data.lua
--- 19 个称号 × 5 大类
+-- 20 个称号 × 5 大类
 -- v3: 全称号增加 rewards 字段 + 难度适配208回合节奏 + 新增"幕后执政"
 -- ============================================================================
 
@@ -335,7 +335,7 @@ TitlesData.TITLES = {
         desc     = "建立区域情报网络，开启大国外交互动能力",
         category = "comprehensive",
         icon     = "🕵️",
-        portraitImage = nil,
+        portraitImage = "image/victory_intelligence_network.png",
         rewards = {
             unlock_features = { "gp_actions" },
             modifiers = {
@@ -404,7 +404,7 @@ TitlesData.TITLES = {
         desc     = "存活超过 120 个回合（30年）且未破产",
         category = "comprehensive",
         icon     = "⏳",
-        portraitImage = "image/titles/shidaijianzhengzhe.png",
+        portraitImage = "image/victory_era_witness.png",
         rewards = {
             modifiers = {
                 { key = "income_bonus", value = 0.08, label = "所有收入+8%" },
@@ -421,7 +421,7 @@ TitlesData.TITLES = {
         desc     = "掌控全国三大区域，成为波黑真正的幕后掌权者。解锁跨国贸易与军事远征。",
         category = "comprehensive",
         icon     = "🏛️",
-        portraitImage = nil,
+        portraitImage = "image/victory_shadow_ruler.png",
         rewards = {
             unlock_features = { "expedition" },
             modifiers = {

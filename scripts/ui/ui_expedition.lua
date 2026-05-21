@@ -10,6 +10,7 @@ local Balance = require("data.balance")
 local Expedition = require("systems.expedition")
 local Equipment = require("systems.equipment")
 local EquipmentData = require("data.equipment_data")
+local AudioManager = require("systems.audio_manager")
 
 local C = Config.COLORS
 local F = Config.FONT
@@ -483,6 +484,7 @@ function ExpeditionPanel._BuildAwaitingCard(state, aw)
             self.props.disabled = true
             local ok, msg = Expedition.OccupySelf(state, countryId)
             if ok then
+                AudioManager.PlayEffect("expedition_victory")
                 UI.Toast.Show(msg, { variant = "success", duration = 2.5 })
             else
                 UI.Toast.Show(msg, { variant = "error", duration = 2.0 })
@@ -906,6 +908,7 @@ function ExpeditionPanel._ShowDeployDialog(state, countryId, mode)
                     ok, msg = Expedition.Reinforce(state, countryId, sqIds)
                 end
                 if ok then
+                    AudioManager.PlayEffect("expedition_launch")
                     UI.Toast.Show(msg, { variant = "success", duration = 2.5 })
                     if currentModal_ then currentModal_:Close() end
                 else

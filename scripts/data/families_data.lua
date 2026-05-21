@@ -25,6 +25,264 @@ FamiliesData.PORTRAIT_POOL = {
     "image/portraits/pool_08.png",
 }
 
+-- ============================================================================
+-- 天赋（每个成员出生时随机获得 1 个）
+-- effect_kind: 供系统查询的效果标识
+-- ============================================================================
+FamiliesData.TRAITS = {
+    {
+        id          = "mine_intuition",
+        name        = "矿脉直觉",
+        icon        = "💎",
+        desc        = "对矿脉走向有天生的判断力",
+        effect_desc = "矿山产出 +10%",
+        effect_kind = "mine_output_pct",
+        effect_value = 0.10,
+    },
+    {
+        id          = "iron_discipline",
+        name        = "铁腕治军",
+        icon        = "🛡️",
+        desc        = "天生的军事领袖气质",
+        effect_desc = "士气衰减减半",
+        effect_kind = "morale_decay_mult",
+        effect_value = 0.50,
+    },
+    {
+        id          = "silver_tongue",
+        name        = "巧舌如簧",
+        icon        = "🗣️",
+        desc        = "极具说服力的交涉天赋",
+        effect_desc = "外交行动 AP -1",
+        effect_kind = "diplomacy_ap_reduction",
+        effect_value = 1,
+    },
+    {
+        id          = "tax_expert",
+        name        = "税务专家",
+        icon        = "📊",
+        desc        = "精通税务规划与避税手段",
+        effect_desc = "税率 -3%",
+        effect_kind = "tax_rate_reduction",
+        effect_value = 0.03,
+    },
+    {
+        id          = "tech_prodigy",
+        name        = "技术奇才",
+        icon        = "🔬",
+        desc        = "对新技术有超乎常人的领悟力",
+        effect_desc = "科研速度 +15%",
+        effect_kind = "research_speed_pct",
+        effect_value = 0.15,
+    },
+    {
+        id          = "market_sense",
+        name        = "市场嗅觉",
+        icon        = "📈",
+        desc        = "对市场波动有敏锐的直觉",
+        effect_desc = "股票手续费 -20%",
+        effect_kind = "stock_fee_reduction",
+        effect_value = 0.20,
+    },
+}
+
+-- ============================================================================
+-- 缺陷（每个成员出生时随机获得 1 个）
+-- ============================================================================
+FamiliesData.FLAWS = {
+    {
+        id          = "extravagant",
+        name        = "挥霍无度",
+        icon        = "💸",
+        desc        = "花钱大手大脚，增加家族开支",
+        effect_desc = "维护费 +10%",
+        effect_kind = "maintenance_pct",
+        effect_value = 0.10,
+    },
+    {
+        id          = "stubborn",
+        name        = "刚愎自用",
+        icon        = "😤",
+        desc        = "固执己见，难以融入新岗位",
+        effect_desc = "上岗磨合期 ×2",
+        effect_kind = "onboarding_mult",
+        effect_value = 2,
+    },
+    {
+        id          = "frail",
+        name        = "体弱多病",
+        icon        = "🤒",
+        desc        = "身体虚弱，年老后容易卧病不起",
+        effect_desc = "55岁后每季 10% 概率暂离",
+        effect_kind = "sick_chance_after_55",
+        effect_value = 0.10,
+    },
+    {
+        id          = "overconfident",
+        name        = "眼高手低",
+        icon        = "🎭",
+        desc        = "高估自己的能力，实际表现打折",
+        effect_desc = "岗位适配「优秀」降为「良好」",
+        effect_kind = "downgrade_excellent",
+        effect_value = 1,
+    },
+    {
+        id          = "greedy",
+        name        = "贪得无厌",
+        icon        = "🪙",
+        desc        = "贪婪成性，总想从中捞取好处",
+        effect_desc = "腐败值 +3",
+        effect_kind = "corruption_add",
+        effect_value = 3,
+    },
+    {
+        id          = "troublemaker",
+        name        = "惹是生非",
+        icon        = "⚡",
+        desc        = "容易引发外交纠纷",
+        effect_desc = "每季 5% 概率触发外交事件",
+        effect_kind = "diplomacy_incident_chance",
+        effect_value = 0.05,
+    },
+}
+
+-- ============================================================================
+-- 大学学位（科技 d6a_university 解锁后可进修，每人最多 2 个不同学位）
+-- ============================================================================
+FamiliesData.DEGREES = {
+    {
+        id          = "mining_engineering",
+        name        = "采矿工程",
+        icon        = "⛏️",
+        desc        = "系统学习采矿理论与矿山管理",
+        attr_bonus  = { management = 1 },
+        effect_desc = "管理 +1，探矿速度 +10%",
+        effect_kind = "prospect_speed_pct",
+        effect_value = 0.10,
+    },
+    {
+        id          = "military_academy",
+        name        = "军事学院",
+        icon        = "⚔️",
+        desc        = "接受正规军事教育与战术训练",
+        attr_bonus  = { strategy = 1 },
+        effect_desc = "谋略 +1，战斗经验 +20%",
+        effect_kind = "combat_exp_pct",
+        effect_value = 0.20,
+    },
+    {
+        id          = "diplomacy_school",
+        name        = "外交学院",
+        icon        = "🤝",
+        desc        = "学习国际关系与外交礼仪",
+        attr_bonus  = { charisma = 1 },
+        effect_desc = "魅力 +1，合作度 +15%",
+        effect_kind = "collaboration_pct",
+        effect_value = 0.15,
+    },
+    {
+        id          = "public_admin",
+        name        = "公共管理",
+        icon        = "🏛️",
+        desc        = "研修行政管理与公共政策",
+        attr_bonus  = { management = 1 },
+        effect_desc = "管理 +1，控制度 +1/季",
+        effect_kind = "control_per_season",
+        effect_value = 1,
+    },
+    {
+        id          = "engineering",
+        name        = "理工学院",
+        icon        = "🔧",
+        desc        = "钻研工程技术与机械原理",
+        attr_bonus  = { knowledge = 1 },
+        effect_desc = "学识 +1，维修费 -15%",
+        effect_kind = "repair_cost_reduction",
+        effect_value = 0.15,
+    },
+    {
+        id          = "business_school",
+        name        = "商学院",
+        icon        = "💼",
+        desc        = "学习商业运营与贸易策略",
+        attr_bonus  = { ambition = 1 },
+        effect_desc = "野心 +1，贸易利润 +8%",
+        effect_kind = "trade_profit_pct",
+        effect_value = 0.08,
+    },
+}
+
+-- ============================================================================
+-- 天赋/缺陷快速查找
+-- ============================================================================
+
+--- 按 id 查找天赋定义
+---@param traitId string
+---@return table|nil
+function FamiliesData.GetTraitDef(traitId)
+    for _, t in ipairs(FamiliesData.TRAITS) do
+        if t.id == traitId then return t end
+    end
+    return nil
+end
+
+--- 按 id 查找缺陷定义
+---@param flawId string
+---@return table|nil
+function FamiliesData.GetFlawDef(flawId)
+    for _, f in ipairs(FamiliesData.FLAWS) do
+        if f.id == flawId then return f end
+    end
+    return nil
+end
+
+--- 按 id 查找学位定义
+---@param degreeId string
+---@return table|nil
+function FamiliesData.GetDegreeDef(degreeId)
+    for _, d in ipairs(FamiliesData.DEGREES) do
+        if d.id == degreeId then return d end
+    end
+    return nil
+end
+
+--- 随机选取一个天赋 id（可排除指定 id）
+---@param excludeIds table|nil 已有的天赋 id 列表
+---@return string
+function FamiliesData.RandomTraitId(excludeIds)
+    local pool = {}
+    local exSet = {}
+    if excludeIds then
+        for _, id in ipairs(excludeIds) do exSet[id] = true end
+    end
+    for _, t in ipairs(FamiliesData.TRAITS) do
+        if not exSet[t.id] then table.insert(pool, t.id) end
+    end
+    if #pool == 0 then
+        -- fallback: 全部可选
+        return FamiliesData.TRAITS[math.random(#FamiliesData.TRAITS)].id
+    end
+    return pool[math.random(#pool)]
+end
+
+--- 随机选取一个缺陷 id（可排除指定 id）
+---@param excludeIds table|nil 已有的缺陷 id 列表
+---@return string
+function FamiliesData.RandomFlawId(excludeIds)
+    local pool = {}
+    local exSet = {}
+    if excludeIds then
+        for _, id in ipairs(excludeIds) do exSet[id] = true end
+    end
+    for _, f in ipairs(FamiliesData.FLAWS) do
+        if not exSet[f.id] then table.insert(pool, f.id) end
+    end
+    if #pool == 0 then
+        return FamiliesData.FLAWS[math.random(#FamiliesData.FLAWS)].id
+    end
+    return pool[math.random(#pool)]
+end
+
 -- 已分配的池立绘索引（避免重复分配）
 local usedPoolIndices_ = {}
 
@@ -52,6 +310,9 @@ function FamiliesData.CreateInitialMembers()
                 loyalty    = 9,  -- 1-10，越高越忠
                 radical    = 3,  -- 1-10，越高越激进
             },
+            trait = "mine_intuition",  -- 天赋：矿脉直觉
+            flaw  = "stubborn",        -- 缺陷：刚愎自用
+            degrees = {},              -- 已获学位列表
             position = nil,      -- 当前岗位 id
             status = "active",   -- active / disabled
             disabled_turns = 0,  -- 失能剩余回合
@@ -78,6 +339,9 @@ function FamiliesData.CreateInitialMembers()
                 loyalty    = 7,
                 radical    = 7,
             },
+            trait = "iron_discipline",  -- 天赋：铁腕治军
+            flaw  = "troublemaker",     -- 缺陷：惹是生非
+            degrees = {},
             position = nil,
             status = "active",
             disabled_turns = 0,
@@ -104,6 +368,9 @@ function FamiliesData.CreateInitialMembers()
                 loyalty    = 8,
                 radical    = 2,
             },
+            trait = "tech_prodigy",  -- 天赋：技术奇才
+            flaw  = "frail",         -- 缺陷：体弱多病
+            degrees = {},
             position = nil,
             status = "active",
             disabled_turns = 0,
@@ -274,6 +541,9 @@ function FamiliesData.CreateTraineeTemplate(index, existingNames)
             loyalty = math.random(4, 9),
             radical = math.random(1, 8),
         },
+        trait = FamiliesData.RandomTraitId(),
+        flaw  = FamiliesData.RandomFlawId(),
+        degrees = {},
         position = nil,
         status = "active",
         disabled_turns = 0,

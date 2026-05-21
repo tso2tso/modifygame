@@ -269,6 +269,26 @@ function Expedition.CalcTurnDamage(state, record)
     -- 前进基地加成
     totalBonus = totalBonus + Expedition.GetForwardBaseBonus(state, record.country_id)
 
+    -- 支援装备加成：侦察装具(expedition_damage) + 攻城器材(siege_damage)
+    local EquipmentData = require("data.equipment_data")
+    local SUPPORT_CATALOG = EquipmentData.SUPPORT_CATALOG
+    for _, sid in ipairs(record.deployed_squads or {}) do
+        local sq = nil
+        for _, s in ipairs((state.military and state.military.squads) or {}) do
+            if s.id == sid then sq = s; break end
+        end
+        if sq and sq.support_equip_id and (sq.support_equip_condition or 0) > 0 then
+            local sd = SUPPORT_CATALOG[sq.support_equip_id]
+            if sd then
+                if sd.effect_type == "expedition_damage" then
+                    totalBonus = totalBonus + sd.effect_value
+                elseif sd.effect_type == "siege_damage" and country.tier == "major" then
+                    totalBonus = totalBonus + sd.effect_value
+                end
+            end
+        end
+    end
+
     -- 加法叠加上限60%
     totalBonus = math.min(totalBonus, 0.60)
     scaledDamage = scaledDamage * (1 + totalBonus)
@@ -1143,7 +1163,13 @@ function Expedition.Support(state, targetPowerId, squadId)
         local reward = math.floor(
             math.random(BE.support_reward_min, BE.support_reward_max) * inflation)
         state.cash = state.cash + reward
-        state.collaboration_score = (state.collaboration_score or 0) + 5
+        -- 家族学位：外交学院（collaboration_pct）—— 合作度增益加成
+        local baseCollab = 5
+        local degreeCollabPct = GameState.GetActiveDegreeEffect and GameState.GetActiveDegreeEffect(state, "collaboration_pct") or 0
+        if degreeCollabPct > 0 then
+            baseCollab = math.floor(baseCollab * (1 + degreeCollabPct))
+        end
+        state.collaboration_score = (state.collaboration_score or 0) + baseCollab
         Equipment.OnBattleEnd(state, squadId and {squadId} or nil)
         state.expeditions.history.support_missions =
             (state.expeditions.history.support_missions or 0) + 1

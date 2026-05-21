@@ -574,15 +574,24 @@ function MenuPage._ApplyCheat(state)
     state.military.morale = 100
     state.military.factory = { level = 3 }
     -- 创建满编精英小队
+    local EquipmentModule = require("systems.equipment")
     state.military.squads = {}
     for i = 1, 6 do
+        local squadSize = 8
+        local equipId = "elite_kit"
+        local neededCount = EquipmentModule.CalcNeededCount(equipId, squadSize)
+        local equipItems = {}
+        for _ = 1, neededCount do
+            table.insert(equipItems, { condition = 100, uid = 0 })
+        end
         table.insert(state.military.squads, {
             id = "cheat_squad_" .. i,
             name = "精锐第" .. i .. "队",
-            size = 8,
-            equip_id = "elite_kit",
+            size = squadSize,
+            equip_id = equipId,
             veterancy = 3,
             condition = 100,
+            equip_items = equipItems,
             battles = 20,
         })
     end
@@ -609,6 +618,10 @@ function MenuPage._ApplyCheat(state)
     state.victory = state.victory or {}
     state.victory.economic = 2000
     state.victory.military = 2500
+    -- 重置即时胜利标记，允许重复测试
+    state.victory.instant_claimed = {}
+    state.victory.instant_label = nil
+    state.victory.instant_desc = nil
 
     -- 11. 清除负面状态
     state.loans = {}
@@ -705,6 +718,20 @@ function MenuPage._ApplyCheat(state)
                 countries_conquered = 0,
             },
         }
+        -- 作弊：占领除 greece 外的所有国家（差一个即可触发全占领即时胜利）
+        state.expeditions.occupied_countries = {}
+        for id, country in pairs(state.europe or {}) do
+            if id ~= "bosnia" and id ~= "greece" then
+                table.insert(state.expeditions.occupied_countries, {
+                    country_id = id,
+                    label = country.label or id,
+                    income_per_turn = 500,
+                    maintenance = 100,
+                    since_turn = state.turn_count or 1,
+                })
+            end
+        end
+        state.expeditions.history.countries_conquered = #state.expeditions.occupied_countries
     end
 
     -- 20. 贸易系统初始化（解锁后生成订单池）

@@ -10,6 +10,7 @@ local Balance = require("data.balance")
 local GameState = require("game_state")
 local StockEngine = require("systems.stock_engine")
 local TradePanel = require("ui.ui_trade")
+local AudioManager = require("systems.audio_manager")
 
 local C = Config.COLORS
 local F = Config.FONT
@@ -1112,6 +1113,7 @@ function MarketPage._OnSellGoods(stateKey, name, price, amount)
     stateRef_.cash = stateRef_.cash + revenue
 
     GameState.AddLog(stateRef_, string.format("手动出售 %d 单位%s，获得 %d", amount, name, revenue))
+    AudioManager.PlayEffect("stock_sell")
     UI.Toast.Show(string.format("出售 %d %s → 💰+%d", amount, name, revenue),
         { variant = "success", duration = 2 })
 
@@ -1693,6 +1695,7 @@ end
 function MarketPage._OnBuy(state, stockId, qty)
     local ok, msg = StockEngine.Buy(state, stockId, qty)
     if ok then
+        AudioManager.PlayEffect("stock_buy")
         GameState.AddLog(state, "[股市] " .. msg)
         UI.Toast.Show(msg, { variant = "success", duration = 1.5 })
         if tradeModal_ then tradeModal_:Close() end -- onClose 回调负责 Destroy 和置 nil
@@ -1705,6 +1708,7 @@ end
 function MarketPage._OnSell(state, stockId, qty)
     local ok, msg = StockEngine.Sell(state, stockId, qty)
     if ok then
+        AudioManager.PlayEffect("stock_sell")
         GameState.AddLog(state, "[股市] " .. msg)
         UI.Toast.Show(msg, { variant = "success", duration = 1.5 })
         if tradeModal_ then tradeModal_:Close() end -- onClose 回调负责 Destroy 和置 nil

@@ -660,6 +660,10 @@ function UIManager.ShowVictoryPrompt(state)
     EndingModal.ShowVictoryPrompt(state or stateRef_)
 end
 
+function UIManager.ShowInstantVictory(state, instantVictory)
+    EndingModal.ShowInstantVictory(state or stateRef_, instantVictory)
+end
+
 -- ============================================================================
 -- 新闻快报弹窗（market_intel 事件专用）
 -- 回合结束后弹出，展示市场情报，根据顾问等级分层显示信息

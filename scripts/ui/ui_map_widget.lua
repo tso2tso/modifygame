@@ -880,9 +880,18 @@ function MapWidget:_DrawResourceLayer(nvg, mx, my, mw, mh)
             local iconSize = math.max(8, math.min(12, 6 + self.zoom_ * 1.0))
 
             if active[tile.id] then
-                -- 开采中：绿色资源标签 + 损毁%
+                -- 开采中：等级标签 + 绿色资源标签 + 损毁%
                 local act = active[tile.id]
+                local curLv = act.level or 1
                 local dmgPct = math.floor((act.damage or 0) * 100)
+                -- 等级指示器（Lv2+显示）
+                if curLv >= 2 and self.zoom_ >= 2.0 then
+                    local lvText = "Lv" .. curLv
+                    nvgFontFace(nvg, "sans"); nvgFontSize(nvg, math.max(7, iconSize - 1))
+                    nvgTextAlign(nvg, NVG_ALIGN_CENTER + NVG_ALIGN_BOTTOM)
+                    nvgFillColor(nvg, nvgRGBA(241, 196, 15, 230))
+                    nvgText(nvg, sx, sy - 16, lvText)
+                end
                 nvgFontFace(nvg, "sans"); nvgFontSize(nvg, iconSize)
                 nvgTextAlign(nvg, NVG_ALIGN_LEFT + NVG_ALIGN_MIDDLE)
                 local offsetX = 0

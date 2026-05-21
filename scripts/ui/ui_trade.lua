@@ -11,11 +11,13 @@ local Trade = require("systems.trade")
 local TradeRoutesData = require("data.trade_routes_data")
 local EuropeData = require("data.europe_data")
 local EquipmentData = require("data.equipment_data")
+local AudioManager = require("systems.audio_manager")
 
 local C = Config.COLORS
 local F = Config.FONT
 local S = Config.SIZE
 local BFT = Balance.FOREIGN_TRADE
+local BCT = Balance.CIVIL_TRADE
 local CATALOG = EquipmentData.CATALOG
 
 local TradePanel = {}
@@ -125,7 +127,7 @@ function TradePanel._BuildSummaryCard(state, summary)
                                 fontColor = C.accent_gold,
                             },
                             UI.Label {
-                                text = "军火出口 · 装备订单 · 跨境运输",
+                                text = "军火出口 · 矿产贸易 · 跨境运输",
                                 fontSize = F.label,
                                 fontColor = C.text_muted,
                             },
@@ -185,32 +187,60 @@ end
 -- ============================================================================
 
 function TradePanel._BuildAvailableOrderCard(state, order)
-    -- 构建需求物品列表
+    local isCivil = order.order_type == "civil"
+
+    -- 构建需求列表（军事=装备，民用=资源）
     local itemRows = {}
-    for _, item in ipairs(order.items_required or {}) do
-        local catInfo = CATALOG[item.equip_id]
-        local name = catInfo and catInfo.name or item.equip_id
-        -- 检查库存
-        local inStock = TradePanel._CountInventory(state, item.equip_id)
-        local stockColor = inStock >= item.qty and C.accent_green or C.accent_red
-        table.insert(itemRows, UI.Panel {
-            width = "100%",
-            flexDirection = "row",
-            justifyContent = "space-between",
-            alignItems = "center",
-            children = {
-                UI.Label {
-                    text = "  · " .. name,
-                    fontSize = F.label,
-                    fontColor = C.text_secondary,
+    if isCivil then
+        for _, req in ipairs(order.resources_required or {}) do
+            local label = (BCT.resource_labels[req.resource] or req.resource)
+            local icon  = (BCT.resource_icons[req.resource] or "")
+            local inStock = state[req.resource] or 0
+            local stockColor = inStock >= req.qty and C.accent_green or C.accent_red
+            table.insert(itemRows, UI.Panel {
+                width = "100%",
+                flexDirection = "row",
+                justifyContent = "space-between",
+                alignItems = "center",
+                children = {
+                    UI.Label {
+                        text = "  " .. icon .. " " .. label,
+                        fontSize = F.label,
+                        fontColor = C.text_secondary,
+                    },
+                    UI.Label {
+                        text = string.format("需 %d（库存 %d）", req.qty, inStock),
+                        fontSize = F.label,
+                        fontColor = stockColor,
+                    },
                 },
-                UI.Label {
-                    text = string.format("需 %d（库存 %d）", item.qty, inStock),
-                    fontSize = F.label,
-                    fontColor = stockColor,
+            })
+        end
+    else
+        for _, item in ipairs(order.items_required or {}) do
+            local catInfo = CATALOG[item.equip_id]
+            local name = catInfo and catInfo.name or item.equip_id
+            local inStock = TradePanel._CountInventory(state, item.equip_id)
+            local stockColor = inStock >= item.qty and C.accent_green or C.accent_red
+            table.insert(itemRows, UI.Panel {
+                width = "100%",
+                flexDirection = "row",
+                justifyContent = "space-between",
+                alignItems = "center",
+                children = {
+                    UI.Label {
+                        text = "  · " .. name,
+                        fontSize = F.label,
+                        fontColor = C.text_secondary,
+                    },
+                    UI.Label {
+                        text = string.format("需 %d（库存 %d）", item.qty, inStock),
+                        fontSize = F.label,
+                        fontColor = stockColor,
+                    },
                 },
-            },
-        })
+            })
+        end
     end
 
     -- 风险等级颜色
@@ -229,6 +259,11 @@ function TradePanel._BuildAvailableOrderCard(state, order)
 
     local canAccept = (state.ap.current + (state.ap.temp or 0)) >= BFT.accept_ap_cost
 
+    -- 订单类型标签
+    local typeLabel = isCivil and "矿产" or "军火"
+    local typeBg = isCivil and { 100, 140, 180, 40 } or { 180, 100, 50, 40 }
+    local typeColor = isCivil and C.accent_blue or C.accent_amber
+
     -- 构建所有 children
     local cardChildren = {
         -- 标题行
@@ -244,6 +279,19 @@ function TradePanel._BuildAvailableOrderCard(state, order)
                     gap = 6,
                     flexShrink = 1,
                     children = {
+                        UI.Panel {
+                            paddingHorizontal = 5,
+                            paddingVertical = 1,
+                            backgroundColor = typeBg,
+                            borderRadius = S.radius_badge,
+                            children = {
+                                UI.Label {
+                                    text = typeLabel,
+                                    fontSize = F.label,
+                                    fontColor = typeColor,
+                                },
+                            },
+                        },
                         UI.Label {
                             text = order.template_label or order.id,
                             fontSize = F.body,
@@ -294,7 +342,7 @@ function TradePanel._BuildAvailableOrderCard(state, order)
         },
         -- 需求物品标题
         UI.Label {
-            text = "需求装备：",
+            text = isCivil and "需求矿产：" or "需求装备：",
             fontSize = F.label,
             fontWeight = "bold",
             fontColor = C.text_secondary,
@@ -304,6 +352,16 @@ function TradePanel._BuildAvailableOrderCard(state, order)
     for _, row in ipairs(itemRows) do
         table.insert(cardChildren, row)
     end
+
+    -- 民用订单提示：接单即扣除资源
+    if isCivil then
+        table.insert(cardChildren, UI.Label {
+            text = "💡 接单时立即扣除矿产资源",
+            fontSize = F.label - 1,
+            fontColor = C.text_muted,
+        })
+    end
+
     -- 按钮行：接单 + 一键完成
     local canQuick, quickReason = Trade.CanQuickFulfill(state, order)
     table.insert(cardChildren, UI.Panel {
@@ -330,6 +388,7 @@ function TradePanel._BuildAvailableOrderCard(state, order)
                     self.props.disabled = true
                     local ok, msg = Trade.AcceptOrder(state, order.id)
                     if ok then
+                        AudioManager.PlayEffect("trade_order_accept")
                         UI.Toast.Show(msg, { variant = "success", duration = 1.5 })
                     else
                         UI.Toast.Show(msg, { variant = "error", duration = 1.5 })
@@ -355,6 +414,7 @@ function TradePanel._BuildAvailableOrderCard(state, order)
                     self.props.disabled = true
                     local ok, msg = Trade.QuickFulfill(state, order.id, nil)
                     if ok then
+                        AudioManager.PlayEffect("trade_order_accept")
                         UI.Toast.Show(msg, { variant = "success", duration = 2 })
                     else
                         UI.Toast.Show(msg, { variant = "error", duration = 1.5 })
@@ -392,6 +452,8 @@ end
 -- ============================================================================
 
 function TradePanel._BuildActiveOrderCard(state, order)
+    local isCivil = order.order_type == "civil"
+
     local statusLabels = {
         accepted = "已接取·待发货",
         shipping = "运输中",
@@ -403,39 +465,72 @@ function TradePanel._BuildActiveOrderCard(state, order)
     local statusText = statusLabels[order.status] or order.status
     local statusColor = statusColors[order.status] or C.text_muted
 
-    -- 需求 vs 已分配
+    -- 需求 vs 已分配（军事订单专用）
     local itemRows = {}
+    local allFulfilled = true
     local allocMap = {}
-    for _, item in ipairs(order.items_allocated or {}) do
-        allocMap[item.equip_id] = (allocMap[item.equip_id] or 0) + 1
+
+    if isCivil then
+        -- 民用订单：资源在接单时已全部扣除
+        allFulfilled = order.resources_allocated == true
+        for _, req in ipairs(order.resources_required or {}) do
+            local label = (BCT.resource_labels[req.resource] or req.resource)
+            local icon  = (BCT.resource_icons[req.resource] or "")
+            table.insert(itemRows, UI.Panel {
+                width = "100%",
+                flexDirection = "row",
+                justifyContent = "space-between",
+                children = {
+                    UI.Label {
+                        text = "  " .. icon .. " " .. label,
+                        fontSize = F.label,
+                        fontColor = C.text_secondary,
+                    },
+                    UI.Label {
+                        text = string.format("%d ✓", req.qty),
+                        fontSize = F.label,
+                        fontWeight = "bold",
+                        fontColor = C.accent_green,
+                    },
+                },
+            })
+        end
+    else
+        -- 军事订单：装备逐步分配
+        for _, item in ipairs(order.items_allocated or {}) do
+            allocMap[item.equip_id] = (allocMap[item.equip_id] or 0) + 1
+        end
+        for _, req in ipairs(order.items_required or {}) do
+            local catInfo = CATALOG[req.equip_id]
+            local name = catInfo and catInfo.name or req.equip_id
+            local allocated = allocMap[req.equip_id] or 0
+            local fulfilled = allocated >= req.qty
+            if not fulfilled then allFulfilled = false end
+            table.insert(itemRows, UI.Panel {
+                width = "100%",
+                flexDirection = "row",
+                justifyContent = "space-between",
+                children = {
+                    UI.Label {
+                        text = "  · " .. name,
+                        fontSize = F.label,
+                        fontColor = C.text_secondary,
+                    },
+                    UI.Label {
+                        text = string.format("%d/%d", allocated, req.qty),
+                        fontSize = F.label,
+                        fontWeight = "bold",
+                        fontColor = fulfilled and C.accent_green or C.accent_red,
+                    },
+                },
+            })
+        end
     end
 
-    local allFulfilled = true
-    for _, req in ipairs(order.items_required or {}) do
-        local catInfo = CATALOG[req.equip_id]
-        local name = catInfo and catInfo.name or req.equip_id
-        local allocated = allocMap[req.equip_id] or 0
-        local fulfilled = allocated >= req.qty
-        if not fulfilled then allFulfilled = false end
-        table.insert(itemRows, UI.Panel {
-            width = "100%",
-            flexDirection = "row",
-            justifyContent = "space-between",
-            children = {
-                UI.Label {
-                    text = "  · " .. name,
-                    fontSize = F.label,
-                    fontColor = C.text_secondary,
-                },
-                UI.Label {
-                    text = string.format("%d/%d", allocated, req.qty),
-                    fontSize = F.label,
-                    fontWeight = "bold",
-                    fontColor = fulfilled and C.accent_green or C.accent_red,
-                },
-            },
-        })
-    end
+    -- 订单类型标签
+    local typeLabel = isCivil and "矿产" or "军火"
+    local typeBg = isCivil and { 100, 140, 180, 40 } or { 180, 100, 50, 40 }
+    local typeColor = isCivil and C.accent_blue or C.accent_amber
 
     local cardChildren = {
         -- 标题行
@@ -445,12 +540,33 @@ function TradePanel._BuildActiveOrderCard(state, order)
             justifyContent = "space-between",
             alignItems = "center",
             children = {
-                UI.Label {
-                    text = order.template_label or order.id,
-                    fontSize = F.body,
-                    fontWeight = "bold",
-                    fontColor = C.text_primary,
+                UI.Panel {
+                    flexDirection = "row",
+                    alignItems = "center",
+                    gap = 6,
                     flexShrink = 1,
+                    children = {
+                        UI.Panel {
+                            paddingHorizontal = 5,
+                            paddingVertical = 1,
+                            backgroundColor = typeBg,
+                            borderRadius = S.radius_badge,
+                            children = {
+                                UI.Label {
+                                    text = typeLabel,
+                                    fontSize = F.label,
+                                    fontColor = typeColor,
+                                },
+                            },
+                        },
+                        UI.Label {
+                            text = order.template_label or order.id,
+                            fontSize = F.body,
+                            fontWeight = "bold",
+                            fontColor = C.text_primary,
+                            flexShrink = 1,
+                        },
+                    },
                 },
                 UI.Panel {
                     paddingHorizontal = 6,
@@ -491,57 +607,71 @@ function TradePanel._BuildActiveOrderCard(state, order)
         },
     }
 
-    -- 装备需求（仅已接取状态展开）
+    -- 货物详情（仅已接取状态展开）
     if order.status == "accepted" then
-        table.insert(cardChildren, UI.Label {
-            text = "装备分配：",
-            fontSize = F.label,
-            fontWeight = "bold",
-            fontColor = C.text_secondary,
-        })
-        for _, row in ipairs(itemRows) do
-            table.insert(cardChildren, row)
-        end
-
-        -- 一键分配按钮
-        if not allFulfilled then
-            table.insert(cardChildren, UI.Button {
-                text = "一键分配库存装备",
-                fontSize = F.body_minor,
-                fontColor = C.accent_amber,
-                backgroundColor = C.bg_elevated,
-                borderRadius = S.radius_btn,
-                borderWidth = 1,
-                borderColor = C.accent_amber,
-                paddingVertical = 5,
-                width = "100%",
-                onClick = Config.ClickGuard(function(self)
-                    self.props.disabled = true
-                    local allocations = {}
-                    for _, req in ipairs(order.items_required or {}) do
-                        local already = allocMap[req.equip_id] or 0
-                        local need = req.qty - already
-                        if need > 0 then
-                            table.insert(allocations, {
-                                equip_id = req.equip_id,
-                                qty = need,
-                            })
-                        end
-                    end
-                    if #allocations > 0 then
-                        local ok, msg = Trade.AllocateEquipment(state, order.id, allocations)
-                        if ok then
-                            UI.Toast.Show("装备分配完成", { variant = "success", duration = 1.5 })
-                        else
-                            UI.Toast.Show(msg, { variant = "error", duration = 1.5 })
-                        end
-                    end
-                    if onStateChanged_ then onStateChanged_() end
-                end),
+        if isCivil then
+            -- 民用订单：资源已全部到位，显示汇总
+            table.insert(cardChildren, UI.Label {
+                text = "矿产资源（已备齐）：",
+                fontSize = F.label,
+                fontWeight = "bold",
+                fontColor = C.text_secondary,
             })
+            for _, row in ipairs(itemRows) do
+                table.insert(cardChildren, row)
+            end
+        else
+            -- 军事订单：装备分配进度
+            table.insert(cardChildren, UI.Label {
+                text = "装备分配：",
+                fontSize = F.label,
+                fontWeight = "bold",
+                fontColor = C.text_secondary,
+            })
+            for _, row in ipairs(itemRows) do
+                table.insert(cardChildren, row)
+            end
+
+            -- 一键分配按钮（仅军事订单）
+            if not allFulfilled then
+                table.insert(cardChildren, UI.Button {
+                    text = "一键分配库存装备",
+                    fontSize = F.body_minor,
+                    fontColor = C.accent_amber,
+                    backgroundColor = C.bg_elevated,
+                    borderRadius = S.radius_btn,
+                    borderWidth = 1,
+                    borderColor = C.accent_amber,
+                    paddingVertical = 5,
+                    width = "100%",
+                    onClick = Config.ClickGuard(function(self)
+                        self.props.disabled = true
+                        local allocations = {}
+                        for _, req in ipairs(order.items_required or {}) do
+                            local already = allocMap[req.equip_id] or 0
+                            local need = req.qty - already
+                            if need > 0 then
+                                table.insert(allocations, {
+                                    equip_id = req.equip_id,
+                                    qty = need,
+                                })
+                            end
+                        end
+                        if #allocations > 0 then
+                            local ok, msg = Trade.AllocateEquipment(state, order.id, allocations)
+                            if ok then
+                                UI.Toast.Show("装备分配完成", { variant = "success", duration = 1.5 })
+                            else
+                                UI.Toast.Show(msg, { variant = "error", duration = 1.5 })
+                            end
+                        end
+                        if onStateChanged_ then onStateChanged_() end
+                    end),
+                })
+            end
         end
 
-        -- 发货按钮
+        -- 发货按钮（两种订单通用）
         local canShip = allFulfilled
             and (state.ap.current + (state.ap.temp or 0)) >= BFT.ship_ap_cost
         if allFulfilled then
@@ -587,6 +717,7 @@ function TradePanel._BuildActiveOrderCard(state, order)
                     self.props.disabled = true
                     local ok, msg = Trade.ShipOrder(state, order.id, nil)
                     if ok then
+                        AudioManager.PlayEffect("trade_delivery")
                         UI.Toast.Show(msg, { variant = "success", duration = 1.5 })
                     else
                         UI.Toast.Show(msg, { variant = "error", duration = 1.5 })

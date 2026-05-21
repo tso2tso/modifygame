@@ -678,6 +678,15 @@ function FinalizeEndTurn()
         UIManager.ShowMarketIntelPopup(state_, prevIntelMsgs)
     end
 
+    -- 即时胜利检查（占领/经济碾压），不终止游戏，弹庆祝窗后可继续经营
+    local instantVictory = GameState.CheckInstantVictory(state_)
+    if instantVictory then
+        print("[FinalizeEndTurn] 即时胜利达成: " .. instantVictory.type)
+        AudioManager.PlayEffect("game_victory")
+        UIManager.ShowInstantVictory(state_, instantVictory)
+        return
+    end
+
     -- 回合推进后立即展示胜利/失败结算，避免只在下一次点击时提示。
     if GameState.IsGameOver(state_) then
         print("[FinalizeEndTurn] 游戏结束检测: bankrupt=" .. tostring(state_.bankrupt)

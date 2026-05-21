@@ -161,6 +161,13 @@ function Combat.ApplyResult(state, faction, result)
         m.morale = math.min(100, m.morale + BC.win_morale)
         state.battle_wins_total = (state.battle_wins_total or 0) + 1
         state.battle_wins_unclaimed = (state.battle_wins_unclaimed or 0) + 1
+        -- 家族学位：军事学院（combat_exp_pct）—— 战斗缴获加成
+        local degreeCombatExp = GameState.GetActiveDegreeEffect and GameState.GetActiveDegreeEffect(state, "combat_exp_pct") or 0
+        if degreeCombatExp > 0 then
+            local bonusLoot = math.floor(loot * degreeCombatExp)
+            state.cash = state.cash + bonusLoot
+            loot = loot + bonusLoot
+        end
         -- 编队战后处理：耐久衰减 + 老兵经验
         Equipment.OnBattleEnd(state, nil)
         local mapImpact = Combat.ApplyMapImpact(state, faction, result) or ""
@@ -179,6 +186,19 @@ function Combat.ApplyResult(state, faction, result)
     else
         -- 败：损失护卫 + 战意，丢失一部分现金被抢
         local lost = math.ceil(m.guards * BC.lose_guards_ratio * (diff.combat_loss_mult or 1.0))
+        -- 支援装备：战地医疗包减少伤亡（最优一支有 medkit 的编队生效）
+        local medkitReduction = 0
+        for _, sq in ipairs(m.squads or {}) do
+            if sq.support_equip_id == "medkit" and (sq.support_equip_condition or 0) > 0 then
+                local sd = EquipmentData.SUPPORT_CATALOG and EquipmentData.SUPPORT_CATALOG.medkit
+                if sd then
+                    medkitReduction = math.max(medkitReduction, sd.effect_value)
+                end
+            end
+        end
+        if medkitReduction > 0 then
+            lost = math.ceil(lost * (1 - medkitReduction))
+        end
         -- C1: 保底至少保留3名护卫
         local maxLoss = math.max(0, m.guards - 3)
         lost = math.min(lost, maxLoss)

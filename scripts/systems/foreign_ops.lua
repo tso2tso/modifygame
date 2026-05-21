@@ -113,7 +113,13 @@ function ForeignOps.TickScout(state)
     local fo = ensureFO(state)
     if not fo.scouting then return end
 
-    fo.scouting.remaining = fo.scouting.remaining - 1
+    -- 家族学位：采矿工程（prospect_speed_pct）—— 勘探加速
+    local degreeProsRate = GameState.GetActiveDegreeEffect and GameState.GetActiveDegreeEffect(state, "prospect_speed_pct") or 0
+    local tickAmount = 1
+    if degreeProsRate > 0 and math.random() < degreeProsRate then
+        tickAmount = 2  -- 有概率双倍推进
+    end
+    fo.scouting.remaining = fo.scouting.remaining - tickAmount
     if fo.scouting.remaining <= 0 then
         local tileId = fo.scouting.tile_id
         fo.scouted[tileId] = true
@@ -256,7 +262,13 @@ function ForeignOps.DoRebuild(state, tileId)
     local info = fo.active[tileId]
 
     GameState.SpendAP(state, BF.rebuild_ap)
-    state.cash = state.cash - BF.rebuild_cash
+    -- 家族学位：理工学院（repair_cost_reduction）—— 修复费用折扣
+    local degreeRepairDisc = GameState.GetActiveDegreeEffect and GameState.GetActiveDegreeEffect(state, "repair_cost_reduction") or 0
+    local rebuildCost = BF.rebuild_cash
+    if degreeRepairDisc > 0 then
+        rebuildCost = math.ceil(rebuildCost * (1 - degreeRepairDisc))
+    end
+    state.cash = state.cash - rebuildCost
 
     local oldDamage = info.damage
     info.damage = math.max(BF.rebuild_min_damage, info.damage - BF.rebuild_repair)
@@ -266,6 +278,115 @@ function ForeignOps.DoRebuild(state, tileId)
     GameState.AddLog(state, string.format("投资重建[%s]：损毁率 %d%% → %d%%",
         label, math.floor(oldDamage * 100), math.floor(info.damage * 100)))
     return true
+end
+
+-- ============================================================================
+-- 据点升级（Lv2 专精分叉 / Lv3 终极强化）
+-- ============================================================================
+
+--- 获取据点当前等级
+---@param info table  outpost info from fo.active[tileId]
+---@return number level  1/2/3
+local function getOutpostLevel(info)
+    return info and info.level or 1
+end
+
+--- 检查能否升级据点
+---@param state table
+---@param tileId string
+---@param targetLevel number  升级目标等级 (2 或 3)
+---@param specType string     专精类型 "production" 或 "security"
+---@return boolean available
+---@return string|nil reason
+function ForeignOps.CanUpgrade(state, tileId, targetLevel, specType)
+    local fo = ensureFO(state)
+    local info = fo.active and fo.active[tileId]
+    if not info then
+        return false, "未在开采中"
+    end
+
+    local curLevel = getOutpostLevel(info)
+    if targetLevel ~= curLevel + 1 then
+        return false, string.format("当前Lv%d，只能升级到Lv%d", curLevel, curLevel + 1)
+    end
+
+    -- Lv3 必须沿用 Lv2 的专精路线
+    if targetLevel == 3 and info.specialization and info.specialization ~= specType then
+        return false, "Lv3必须沿用已选专精路线（" .. info.specialization .. "）"
+    end
+
+    local levelCfg = BF.upgrade_levels and BF.upgrade_levels[targetLevel]
+    if not levelCfg then
+        return false, "无此升级等级配置"
+    end
+    local specCfg = levelCfg[specType]
+    if not specCfg then
+        return false, "无此专精类型"
+    end
+
+    -- 合作分
+    if (specCfg.favor_required or 0) > 0 then
+        if (state.collaboration_score or 0) < specCfg.favor_required then
+            return false, "合作分不足（需要≥" .. specCfg.favor_required .. "）"
+        end
+    end
+
+    -- AP
+    local available = state.ap.current + (state.ap.temp or 0)
+    if available < specCfg.ap then
+        return false, "行动点不足"
+    end
+    -- 资金
+    if state.cash < specCfg.cost then
+        return false, "资金不足（需要" .. specCfg.cost .. "）"
+    end
+    return true, nil
+end
+
+--- 执行据点升级
+---@param state table
+---@param tileId string
+---@param targetLevel number
+---@param specType string
+---@return boolean success
+---@return string|nil reason
+function ForeignOps.UpgradeOutpost(state, tileId, targetLevel, specType)
+    local ok, reason = ForeignOps.CanUpgrade(state, tileId, targetLevel, specType)
+    if not ok then return false, reason end
+
+    local fo = ensureFO(state)
+    local info = fo.active[tileId]
+    local specCfg = BF.upgrade_levels[targetLevel][specType]
+
+    GameState.SpendAP(state, specCfg.ap)
+    state.cash = state.cash - specCfg.cost
+
+    info.level = targetLevel
+    info.specialization = specType
+
+    local tile = MapTilesData.GetTile(state, tileId)
+    local label = tile and tile.label or tileId
+    GameState.AddLog(state, string.format("据点升级！[%s] → Lv%d %s %s",
+        label, targetLevel, specCfg.icon or "", specCfg.name or specType))
+
+    table.insert(state.turn_messages, {
+        text = string.format("⬆️ [%s] 升级为 Lv%d %s",
+            label, targetLevel, specCfg.name or specType),
+        type = "info",
+    })
+
+    return true
+end
+
+--- 获取据点的专精配置（用于 UI 显示和产出计算）
+---@param info table  outpost info
+---@return table|nil specCfg  balance 配置项
+function ForeignOps.GetSpecConfig(info)
+    if not info then return nil end
+    local lv = getOutpostLevel(info)
+    if lv < 2 or not info.specialization then return nil end
+    local levelCfg = BF.upgrade_levels and BF.upgrade_levels[lv]
+    return levelCfg and levelCfg[info.specialization] or nil
 end
 
 -- ============================================================================
@@ -281,9 +402,16 @@ function ForeignOps.CalcOutput(state, tileId)
     local info = fo.active and fo.active[tileId]
     if not info then return nil end
 
-    local effectiveRatio = (1 - info.damage) * BF.output_base_ratio
-    local reserve = info.reserve
+    -- 产出系数：根据据点等级 & 专精确定
+    local specCfg = ForeignOps.GetSpecConfig(info)
+    local outputRatio = specCfg and specCfg.output_ratio or BF.output_base_ratio
 
+    -- 损毁乘数：堡垒/要塞专精可降低损毁影响
+    local damageMult = specCfg and specCfg.damage_mult or 1.0
+    local effectiveDamage = (info.damage or 0) * damageMult
+    local effectiveRatio = (1 - effectiveDamage) * outputRatio
+
+    local reserve = info.reserve
     local result = { gold = 0, copper = 0, coal = 0 }
 
     -- 金矿产出
@@ -317,6 +445,11 @@ function ForeignOps.CalcOutput(state, tileId)
         if not state._estimate_mode then
             reserve.coal = reserve.coal - out
         end
+    end
+
+    -- Lv3 工业矿场额外铜产出
+    if specCfg and (specCfg.copper_per_season or 0) > 0 then
+        result.copper = result.copper + specCfg.copper_per_season
     end
 
     return result

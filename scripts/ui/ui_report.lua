@@ -9,6 +9,7 @@ local GameState = require("game_state")
 local Balance = require("data.balance")
 local TitlesData = require("data.titles_data")
 local Titles = require("systems.titles")
+local AudioManager = require("systems.audio_manager")
 
 local C = Config.COLORS
 local F = Config.FONT
@@ -422,7 +423,8 @@ local function _ShowTitleDetail(state, title, cat)
                                         local featLabel = feat
                                         if feat == "foreign_trade" then featLabel = "解锁跨国贸易订单"
                                         elseif feat == "expedition" then featLabel = "解锁军事远征"
-                                        elseif feat == "venture" then featLabel = "解锁商业远征" end
+                                        elseif feat == "venture" then featLabel = "解锁商业远征"
+                                        elseif feat == "gp_actions" then featLabel = "解锁大国外交互动" end
                                         table.insert(rewardChildren, UI.Label {
                                             text = "★ " .. featLabel,
                                             fontSize = F.body,
@@ -613,6 +615,7 @@ function _CreateTitlesCard(state)
 
     -- 新解锁提示
     if hasNew then
+        AudioManager.PlayEffect("title_unlock")
         local newNames = {}
         for _, tid in ipairs(state.titles_new) do
             local id = type(tid) == "table" and tid.id or tid

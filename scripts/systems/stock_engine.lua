@@ -547,6 +547,12 @@ function StockEngine.Buy(state, stockId, shares)
         shares = buyable  -- 自动裁剪到可买数量
     end
     local cost = math.ceil(stock.price * shares)
+    -- 家族天赋：市场嗅觉（stock_fee_reduction）—— 降低买入成本
+    local GameState = require("game_state")
+    local traitStockDisc = GameState.GetActiveTraitEffect and GameState.GetActiveTraitEffect(state, "stock_fee_reduction") or 0
+    if traitStockDisc > 0 then
+        cost = math.ceil(cost * (1 - traitStockDisc))
+    end
     if state.cash < cost then
         return false, "资金不足"
     end
@@ -587,6 +593,12 @@ function StockEngine.Sell(state, stockId, shares)
         return false, "持仓不足"
     end
     local revenue = stock.price * shares
+    -- 家族天赋：市场嗅觉（stock_fee_reduction）—— 提高卖出收入
+    local GameState = require("game_state")
+    local traitStockDisc = GameState.GetActiveTraitEffect and GameState.GetActiveTraitEffect(state, "stock_fee_reduction") or 0
+    if traitStockDisc > 0 then
+        revenue = revenue * (1 + traitStockDisc)
+    end
     local costBasis = (h.avg_cost or stock.price) * shares
     local profit = revenue - costBasis
     -- 科技加成：盈利时增加收益，亏损时减少亏损

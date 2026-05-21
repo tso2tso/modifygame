@@ -11,6 +11,7 @@ local EquipmentData = require("data.equipment_data")
 local EuropeData = require("data.europe_data")
 
 local BFT = Balance.FOREIGN_TRADE
+local BCT = Balance.CIVIL_TRADE
 local CATALOG = EquipmentData.CATALOG
 
 local Trade = {}
@@ -95,24 +96,54 @@ local function countBelligerents(state)
 end
 
 --- 从订单模板创建订单实例
+--- 军火模板使用 template.items，民用模板使用 template.resources
 ---@param state table
 ---@param template table
 ---@param buyerPowerId string
 ---@param buyerLabel string
+---@param orderType string|nil "military" 或 "civil"，nil 按模板自动判断
 ---@return table order
-local function createOrderFromTemplate(state, template, buyerPowerId, buyerLabel)
+local function createOrderFromTemplate(state, template, buyerPowerId, buyerLabel, orderType)
     local inflation = GameState.GetInflationFactor(state)
-    local items = {}
-    for _, itemDef in ipairs(template.items) do
-        local qty = math.random(itemDef.qty_min, itemDef.qty_max)
-        table.insert(items, { equip_id = itemDef.equip_id, qty = qty })
-    end
+    local isCivil = orderType == "civil" or (template.resources ~= nil)
 
     -- 计算总报酬
     local totalPayment = 0
-    for _, item in ipairs(items) do
-        totalPayment = totalPayment + item.qty * template.payment_per_unit
+    local items = nil
+    local resources = nil
+
+    if isCivil then
+        -- 民用订单：消耗矿产资源
+        resources = {}
+        for _, resDef in ipairs(template.resources) do
+            local qty = math.random(resDef.qty_min, resDef.qty_max)
+            table.insert(resources, { resource = resDef.resource, qty = qty })
+        end
+        -- 报酬计算：对于多资源模板（如工业原料包 350/批），使用总量
+        if #resources == 1 then
+            totalPayment = resources[1].qty * template.payment_per_unit
+        else
+            -- 多资源模板：payment_per_unit 视为批次价
+            local totalQty = 0
+            for _, r in ipairs(resources) do totalQty = totalQty + r.qty end
+            totalPayment = totalQty * template.payment_per_unit
+            -- 工业原料包特殊处理：固定批次整包价
+            if template.payment_per_unit >= 100 then
+                totalPayment = template.payment_per_unit
+            end
+        end
+    else
+        -- 军火订单：消耗装备库存
+        items = {}
+        for _, itemDef in ipairs(template.items) do
+            local qty = math.random(itemDef.qty_min, itemDef.qty_max)
+            table.insert(items, { equip_id = itemDef.equip_id, qty = qty })
+        end
+        for _, item in ipairs(items) do
+            totalPayment = totalPayment + item.qty * template.payment_per_unit
+        end
     end
+
     -- 通胀溢价
     totalPayment = math.floor(totalPayment
         * (inflation ^ (BFT.inflation_price_exponent or 0.5)))
@@ -134,10 +165,9 @@ local function createOrderFromTemplate(state, template, buyerPowerId, buyerLabel
 
     local order = {
         id = genOrderId(state),
+        order_type = isCivil and "civil" or "military",
         buyer_power_id = buyerPowerId,
         buyer_label = buyerLabel,
-        items_required = items,
-        items_allocated = {},
         payment_base = totalPayment,
         deadline_turns = template.deadline_turns,
         remaining_turns = template.deadline_turns,
@@ -148,6 +178,14 @@ local function createOrderFromTemplate(state, template, buyerPowerId, buyerLabel
         escort_squad_id = nil,
         shipping_remaining = 0,
     }
+
+    if isCivil then
+        order.resources_required = resources
+        order.resources_allocated = false  -- 民用订单：接单时一次性扣除资源
+    else
+        order.items_required = items
+        order.items_allocated = {}
+    end
 
     return order
 end
@@ -206,10 +244,14 @@ function Trade.GenerateOrders(state)
         orderCount = math.max(1, math.floor(orderCount * 0.5))
     end
 
-    -- 选择订单模板池
-    local templates = isWartime
+    -- 选择订单模板池（军火 + 民用）
+    local milTemplates = isWartime
         and TradeRoutesData.WAR_ORDER_TEMPLATES
         or TradeRoutesData.PEACE_ORDER_TEMPLATES
+    local civTemplates = isWartime
+        and TradeRoutesData.CIVIL_WAR_TEMPLATES
+        or TradeRoutesData.CIVIL_PEACE_TEMPLATES
+    local civilRatio = BCT and BCT.civil_order_ratio or 0.40
 
     -- 生成订单
     for i = 1, orderCount do
@@ -218,24 +260,36 @@ function Trade.GenerateOrders(state)
         -- 获取买家标签：城市（国家）格式
         local buyerLabel = Trade.FormatBuyerLabel(state, route)
 
-        -- 随机选模板
-        local template = templates[math.random(1, #templates)]
+        -- 按概率决定生成军火还是民用订单
+        local isCivil = math.random() < civilRatio
 
-        -- 检查玩家是否有能力生产该装备（已解锁该装备）
-        local canProduce = true
-        for _, itemDef in ipairs(template.items) do
-            if itemDef.equip_id ~= "rifle"
-                and not EquipmentData.IsUnlocked(state, itemDef.equip_id) then
-                canProduce = false
-                break
-            end
-        end
-
-        if canProduce then
+        if isCivil then
+            -- 民用订单（矿产资源）
+            local template = civTemplates[math.random(1, #civTemplates)]
             local order = createOrderFromTemplate(
-                state, template, route.buyer_power_id, buyerLabel)
+                state, template, route.buyer_power_id, buyerLabel, "civil")
             order.route_id = route.id
             table.insert(t.order_pool, order)
+        else
+            -- 军火订单（装备）
+            local template = milTemplates[math.random(1, #milTemplates)]
+
+            -- 检查玩家是否有能力生产该装备（已解锁该装备）
+            local canProduce = true
+            for _, itemDef in ipairs(template.items) do
+                if itemDef.equip_id ~= "rifle"
+                    and not EquipmentData.IsUnlocked(state, itemDef.equip_id) then
+                    canProduce = false
+                    break
+                end
+            end
+
+            if canProduce then
+                local order = createOrderFromTemplate(
+                    state, template, route.buyer_power_id, buyerLabel, "military")
+                order.route_id = route.id
+                table.insert(t.order_pool, order)
+            end
         end
     end
 
@@ -275,6 +329,24 @@ function Trade.AcceptOrder(state, orderId)
     -- 消耗 AP
     if not GameState.SpendAP(state, BFT.accept_ap_cost) then
         return false, "行动点不足（需要 " .. BFT.accept_ap_cost .. " AP）"
+    end
+
+    -- 民用订单：接单时立即扣除矿产资源
+    if order.order_type == "civil" then
+        for _, req in ipairs(order.resources_required or {}) do
+            local available = state[req.resource] or 0
+            if available < req.qty then
+                -- 退还 AP
+                state.ap.current = state.ap.current + BFT.accept_ap_cost
+                local label = (BCT.resource_labels and BCT.resource_labels[req.resource]) or req.resource
+                return false, string.format("%s 不足（需 %d，可用 %d）", label, req.qty, available)
+            end
+        end
+        -- 扣除资源
+        for _, req in ipairs(order.resources_required or {}) do
+            state[req.resource] = (state[req.resource] or 0) - req.qty
+        end
+        order.resources_allocated = true
     end
 
     -- 移入进行中列表
@@ -355,10 +427,15 @@ function Trade.AllocateEquipment(state, orderId, allocations)
     return true, "装备分配完成"
 end
 
---- 检查订单是否已满足所有装备需求
+--- 检查订单是否已满足所有需求（装备或资源）
 ---@param order table
 ---@return boolean
 function Trade.IsOrderFulfilled(order)
+    -- 民用订单：资源在接单时已扣除
+    if order.order_type == "civil" then
+        return order.resources_allocated == true
+    end
+    -- 军火订单：检查装备分配
     if not order.items_required then return false end
     local allocated = {}
     for _, item in ipairs(order.items_allocated or {}) do
@@ -392,8 +469,11 @@ function Trade.ShipOrder(state, orderId, escortSquadId)
         return false, "订单尚未处于已接受状态"
     end
 
-    -- 检查装备是否已满足
+    -- 检查需求是否已满足（军火：装备分配完毕；民用：资源已扣除）
     if not Trade.IsOrderFulfilled(order) then
+        if order.order_type == "civil" then
+            return false, "资源尚未扣除，无法发货"
+        end
         return false, "装备尚未全部分配，无法发货"
     end
 
@@ -514,6 +594,13 @@ function Trade.CalcRouteSafety(state, routeId, escortSquadId)
             if sq.id == escortSquadId then
                 safety = safety + BFT.safety_escort_bonus
                     + (sq.veterancy or 0) * BFT.safety_escort_vet_bonus
+                -- 支援装备：战地电台提升贸易安全
+                if sq.support_equip_id and (sq.support_equip_condition or 0) > 0 then
+                    local sd = EquipmentData.SUPPORT_CATALOG[sq.support_equip_id]
+                    if sd and sd.effect_type == "trade_safety" then
+                        safety = safety + sd.effect_value
+                    end
+                end
                 break
             end
         end
@@ -565,6 +652,11 @@ function Trade.SettleDeliveries(state)
                     -- 成功交付
                     order.status = "delivered"
                     local revenue = order.payment_base
+                    -- 家族学位：商学院（trade_profit_pct）—— 贸易收入加成
+                    local degreeTradePct = GameState.GetActiveDegreeEffect and GameState.GetActiveDegreeEffect(state, "trade_profit_pct") or 0
+                    if degreeTradePct > 0 then
+                        revenue = math.floor(revenue * (1 + degreeTradePct))
+                    end
                     state.cash = state.cash + revenue
                     report.total_revenue = report.total_revenue + revenue
                     t.completed_count = t.completed_count + 1
@@ -577,6 +669,10 @@ function Trade.SettleDeliveries(state)
                     state.stats = state.stats or {}
                     state.stats.trades_completed =
                         (state.stats.trades_completed or 0) + 1
+                    if order.order_type == "civil" then
+                        state.stats.civil_trades_completed =
+                            (state.stats.civil_trades_completed or 0) + 1
+                    end
 
                     table.insert(report.deliveries, {
                         order_id = order.id,
@@ -611,32 +707,46 @@ function Trade.SettleDeliveries(state)
                     -- 统一声誉 -
                     GameState.ModifyReputation(state, Balance.REPUTATION.trade_failure_penalty)
 
-                    -- 损失部分装备
-                    local lossCount = math.floor(
-                        #(order.items_allocated or {}) * BFT.failure_loss_ratio)
-                    -- 其余装备返还库存
-                    local m = state.military
-                    m.inventory = m.inventory or {}
-                    for idx, item in ipairs(order.items_allocated or {}) do
-                        if idx > lossCount then
-                            table.insert(m.inventory, {
-                                equip_id = item.equip_id,
-                                condition = math.max(10, (item.condition or 100) - 20),
-                            })
+                    if order.order_type == "civil" then
+                        -- 民用订单失败：资源已消耗，不退还
+                        table.insert(report.failures, {
+                            order_id = order.id,
+                            label = order.template_label or order.id,
+                            buyer = order.buyer_label,
+                            lost_items = 0,
+                            civil = true,
+                        })
+                        GameState.AddLog(state, string.format(
+                            "[贸易] 民用订单「%s」运输失败！已消耗的矿产资源无法追回",
+                            order.template_label or order.id))
+                    else
+                        -- 军火订单失败：损失部分装备，其余返还
+                        local lossCount = math.floor(
+                            #(order.items_allocated or {}) * BFT.failure_loss_ratio)
+                        -- 其余装备返还库存
+                        local m = state.military
+                        m.inventory = m.inventory or {}
+                        for idx, item in ipairs(order.items_allocated or {}) do
+                            if idx > lossCount then
+                                table.insert(m.inventory, {
+                                    equip_id = item.equip_id,
+                                    condition = math.max(10, (item.condition or 100) - 20),
+                                })
+                            end
                         end
+
+                        table.insert(report.failures, {
+                            order_id = order.id,
+                            label = order.template_label or order.id,
+                            buyer = order.buyer_label,
+                            lost_items = lossCount,
+                        })
+
+                        GameState.AddLog(state, string.format(
+                            "[贸易] 订单「%s」运输失败！损失 %d 件装备",
+                            order.template_label or order.id,
+                            lossCount))
                     end
-
-                    table.insert(report.failures, {
-                        order_id = order.id,
-                        label = order.template_label or order.id,
-                        buyer = order.buyer_label,
-                        lost_items = lossCount,
-                    })
-
-                    GameState.AddLog(state, string.format(
-                        "[贸易] 订单「%s」运输失败！损失 %d 件装备",
-                        order.template_label or order.id,
-                        lossCount))
                     -- 不保留已失败订单
                 end
             else
@@ -653,24 +763,30 @@ function Trade.SettleDeliveries(state)
                 t.failed_count = t.failed_count + 1
                 GameState.ModifyReputation(state, Balance.REPUTATION.trade_failure_penalty)
 
-                -- 返还已分配装备
-                local m = state.military
-                m.inventory = m.inventory or {}
-                for _, item in ipairs(order.items_allocated or {}) do
-                    table.insert(m.inventory, {
-                        equip_id = item.equip_id,
-                        condition = item.condition or 100,
-                    })
+                if order.order_type == "civil" then
+                    -- 民用订单过期：资源已消耗，不退还
+                    GameState.AddLog(state, string.format(
+                        "[贸易] 民用订单「%s」已过期，已消耗的矿产无法追回",
+                        order.template_label or order.id))
+                else
+                    -- 军火订单过期：返还已分配装备
+                    local m = state.military
+                    m.inventory = m.inventory or {}
+                    for _, item in ipairs(order.items_allocated or {}) do
+                        table.insert(m.inventory, {
+                            equip_id = item.equip_id,
+                            condition = item.condition or 100,
+                        })
+                    end
+                    GameState.AddLog(state, string.format(
+                        "[贸易] 订单「%s」已过期，装备已退回库存",
+                        order.template_label or order.id))
                 end
 
                 table.insert(report.expired, {
                     order_id = order.id,
                     label = order.template_label or order.id,
                 })
-
-                GameState.AddLog(state, string.format(
-                    "[贸易] 订单「%s」已过期，装备已退回库存",
-                    order.template_label or order.id))
                 -- 不保留过期订单
             else
                 table.insert(keptOrders, order)
@@ -717,23 +833,37 @@ function Trade.QuickFulfill(state, orderId, escortSquadId)
         return false, "行动点不足（需要 " .. quickAP .. " AP）"
     end
 
-    -- 检查库存是否满足所有需求
-    local m = state.military
-    m.inventory = m.inventory or {}
-    local inventoryCounts = {}
-    for _, inv in ipairs(m.inventory) do
-        if not inv.repairing then
-            inventoryCounts[inv.equip_id] = (inventoryCounts[inv.equip_id] or 0) + 1
+    -- 检查需求是否满足（民用：矿产资源；军火：装备库存）
+    local isCivil = order.order_type == "civil"
+
+    if isCivil then
+        -- 民用订单：检查矿产资源
+        for _, req in ipairs(order.resources_required or {}) do
+            local available = state[req.resource] or 0
+            if available < req.qty then
+                local label = (BCT.resource_labels and BCT.resource_labels[req.resource]) or req.resource
+                return false, string.format("%s 不足（需 %d，可用 %d）", label, req.qty, available)
+            end
         end
-    end
-    for _, req in ipairs(order.items_required) do
-        local available = inventoryCounts[req.equip_id] or 0
-        if available < req.qty then
-            local name = (CATALOG[req.equip_id] and CATALOG[req.equip_id].name) or req.equip_id
-            return false, string.format("%s 库存不足（需 %d，可用 %d）", name, req.qty, available)
+    else
+        -- 军火订单：检查装备库存
+        local m = state.military
+        m.inventory = m.inventory or {}
+        local inventoryCounts = {}
+        for _, inv in ipairs(m.inventory) do
+            if not inv.repairing then
+                inventoryCounts[inv.equip_id] = (inventoryCounts[inv.equip_id] or 0) + 1
+            end
         end
-        -- 预扣以检查多项需求不冲突
-        inventoryCounts[req.equip_id] = available - req.qty
+        for _, req in ipairs(order.items_required) do
+            local available = inventoryCounts[req.equip_id] or 0
+            if available < req.qty then
+                local name = (CATALOG[req.equip_id] and CATALOG[req.equip_id].name) or req.equip_id
+                return false, string.format("%s 库存不足（需 %d，可用 %d）", name, req.qty, available)
+            end
+            -- 预扣以检查多项需求不冲突
+            inventoryCounts[req.equip_id] = available - req.qty
+        end
     end
 
     -- 检查路线运输费
@@ -756,24 +886,33 @@ function Trade.QuickFulfill(state, orderId, escortSquadId)
     table.insert(t.active_orders, order)
     table.remove(t.order_pool, orderIdx)
 
-    -- 自动分配装备
-    order.items_allocated = {}
-    for _, req in ipairs(order.items_required) do
-        local needed = req.qty
-        local keptInventory = {}
-        for _, inv in ipairs(m.inventory) do
-            if inv.equip_id == req.equip_id and not inv.repairing and needed > 0 then
-                needed = needed - 1
-                table.insert(order.items_allocated, {
-                    equip_id = inv.equip_id,
-                    condition = inv.condition,
-                    uid = inv.uid,
-                })
-            else
-                table.insert(keptInventory, inv)
-            end
+    if isCivil then
+        -- 民用订单：扣除矿产资源
+        for _, req in ipairs(order.resources_required or {}) do
+            state[req.resource] = (state[req.resource] or 0) - req.qty
         end
-        m.inventory = keptInventory
+        order.resources_allocated = true
+    else
+        -- 军火订单：自动分配装备
+        local m = state.military
+        order.items_allocated = {}
+        for _, req in ipairs(order.items_required) do
+            local needed = req.qty
+            local keptInventory = {}
+            for _, inv in ipairs(m.inventory) do
+                if inv.equip_id == req.equip_id and not inv.repairing and needed > 0 then
+                    needed = needed - 1
+                    table.insert(order.items_allocated, {
+                        equip_id = inv.equip_id,
+                        condition = inv.condition,
+                        uid = inv.uid,
+                    })
+                else
+                    table.insert(keptInventory, inv)
+                end
+            end
+            m.inventory = keptInventory
+        end
     end
 
     -- S1: QuickFulfill 便利溢价
@@ -819,22 +958,33 @@ function Trade.CanQuickFulfill(state, order)
         return false, "行动点不足"
     end
 
-    -- 库存检查
-    local m = state.military
-    m.inventory = m.inventory or {}
-    local inventoryCounts = {}
-    for _, inv in ipairs(m.inventory) do
-        if not inv.repairing then
-            inventoryCounts[inv.equip_id] = (inventoryCounts[inv.equip_id] or 0) + 1
+    if order.order_type == "civil" then
+        -- 民用订单：检查矿产资源
+        for _, req in ipairs(order.resources_required or {}) do
+            local available = state[req.resource] or 0
+            if available < req.qty then
+                local label = (BCT.resource_labels and BCT.resource_labels[req.resource]) or req.resource
+                return false, string.format("%s不足(%d/%d)", label, available, req.qty)
+            end
         end
-    end
-    for _, req in ipairs(order.items_required or {}) do
-        local available = inventoryCounts[req.equip_id] or 0
-        if available < req.qty then
-            local name = (CATALOG[req.equip_id] and CATALOG[req.equip_id].name) or req.equip_id
-            return false, string.format("%s不足(%d/%d)", name, available, req.qty)
+    else
+        -- 军火订单：库存检查
+        local m = state.military
+        m.inventory = m.inventory or {}
+        local inventoryCounts = {}
+        for _, inv in ipairs(m.inventory) do
+            if not inv.repairing then
+                inventoryCounts[inv.equip_id] = (inventoryCounts[inv.equip_id] or 0) + 1
+            end
         end
-        inventoryCounts[req.equip_id] = available - req.qty
+        for _, req in ipairs(order.items_required or {}) do
+            local available = inventoryCounts[req.equip_id] or 0
+            if available < req.qty then
+                local name = (CATALOG[req.equip_id] and CATALOG[req.equip_id].name) or req.equip_id
+                return false, string.format("%s不足(%d/%d)", name, available, req.qty)
+            end
+            inventoryCounts[req.equip_id] = available - req.qty
+        end
     end
 
     -- 运输费检查
@@ -911,14 +1061,27 @@ function Trade.GenerateBonusOrder(state, buyerPowerId)
     -- 获取买家标签：城市（国家）格式
     local buyerLabel = Trade.FormatBuyerLabel(state, routeDef)
 
-    -- 选择模板：战时用战争模板，和平用和平模板
+    -- 选择模板：按概率分配军火/民用，战时/和平
     local isWartime = state.flags and state.flags.at_war
-    local templates = isWartime
-        and TradeRoutesData.WAR_ORDER_TEMPLATES
-        or TradeRoutesData.PEACE_ORDER_TEMPLATES
-    local template = templates[math.random(1, #templates)]
+    local civilRatio = BCT and BCT.civil_order_ratio or 0.40
+    local isCivil = math.random() < civilRatio
 
-    local order = createOrderFromTemplate(state, template, buyerPowerId, buyerLabel)
+    local template, orderType
+    if isCivil then
+        local civTemplates = isWartime
+            and TradeRoutesData.CIVIL_WAR_TEMPLATES
+            or TradeRoutesData.CIVIL_PEACE_TEMPLATES
+        template = civTemplates[math.random(1, #civTemplates)]
+        orderType = "civil"
+    else
+        local milTemplates = isWartime
+            and TradeRoutesData.WAR_ORDER_TEMPLATES
+            or TradeRoutesData.PEACE_ORDER_TEMPLATES
+        template = milTemplates[math.random(1, #milTemplates)]
+        orderType = "military"
+    end
+
+    local order = createOrderFromTemplate(state, template, buyerPowerId, buyerLabel, orderType)
     order.route_id = routeDef.id
     table.insert(t.order_pool, order)
 

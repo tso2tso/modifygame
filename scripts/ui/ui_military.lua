@@ -17,6 +17,7 @@ local F = Config.FONT
 local S = Config.SIZE
 local BMI = Balance.MILITARY
 local CATALOG = EquipmentData.CATALOG
+local SUPPORT_CATALOG = EquipmentData.SUPPORT_CATALOG
 
 local MilitaryPage = {}
 
@@ -356,6 +357,19 @@ function MilitaryPage._BuildSquadCard(state, squads, assigned, unassigned, accen
                                 fontSize = F.label,
                                 fontColor = sq.veterancy >= 3 and C.accent_gold or C.text_muted,
                             },
+                            (function()
+                                if sq.support_equip_id then
+                                    local sd = SUPPORT_CATALOG[sq.support_equip_id]
+                                    if sd then
+                                        return UI.Label {
+                                            text = sd.icon,
+                                            fontSize = F.label,
+                                            fontColor = {180, 160, 220, 255},
+                                        }
+                                    end
+                                end
+                                return nil
+                            end)(),
                         },
                     },
                     -- 右侧：人数 + 耐久 + 战力

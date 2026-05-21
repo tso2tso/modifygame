@@ -141,6 +141,10 @@ function Tech.Start(state, techId)
 
     -- 科技加成：research_speed 缩短研发
     local speedBonus = math.min(state.research_speed_bonus or 0, 0.35)
+    -- 家族天赋：技术奇才（research_speed_pct）
+    local traitResearch = GameState.GetActiveTraitEffect and GameState.GetActiveTraitEffect(state, "research_speed_pct") or 0
+    speedBonus = speedBonus + traitResearch
+    speedBonus = math.min(speedBonus, 0.50)  -- 上限 50%
     if speedBonus > 0 then
         total = math.max(1, math.floor(total * (1 - speedBonus)))
     end

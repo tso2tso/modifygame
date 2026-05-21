@@ -103,8 +103,8 @@ Balance.WORKERS = {
     base_wage        = 8,     -- 工人每季工资
     engineer_wage    = 20,    -- 工程师每季工资
     scholar_wage     = 25,    -- 学者每季工资
-    -- 效率：每 10 名工人产能 +1
-    workers_per_unit = 10,
+    -- 效率：每 5 名工人产能 +1（10→5：使边际工人有正收益，5×8=40₿ < 50₿金价）
+    workers_per_unit = 5,
     -- 招聘费
     hire_cost        = 15,    -- 每招一名工人的费用
     fire_penalty     = 5,     -- 解雇补偿
@@ -213,6 +213,16 @@ Balance.VICTORY = {
         desc = "占领所有可达国家",
         required_countries = "all_reachable",  -- 动态计算
         min_total_control = 100,
+    },
+    -- 经济碾压：即时经济胜利（门槛极高，仅碾压局触发）
+    economic_dominance = {
+        type = "economic_dominance",
+        label = "财阀王朝",
+        desc = "以绝对的财富碾压一切竞争者",
+        min_cash = 50000,
+        min_gold = 100,
+        min_total_control = 150,
+        min_total_assets = 100000,
     },
 }
 
@@ -543,7 +553,25 @@ Balance.FOREIGN_TRADE = {
     diplo_fail_collab = -3,          -- 交付失败 → 买家合作度 -3
 
     -- 通胀乘数
-    inflation_price_exponent = 0.5,  -- 订单报酬随通胀增长的指数
+    inflation_price_exponent = 0.75, -- 订单报酬随通胀增长的指数（0.5→0.75：缩小与生产成本的通胀差距，盈亏平衡点≈5.5×通胀）
+}
+
+-- ============================================================================
+-- 民用商品贸易（矿产出口）
+-- ============================================================================
+Balance.CIVIL_TRADE = {
+    civil_order_ratio = 0.40,        -- 每个订单槽位生成民用订单的概率（40%）
+    -- 民用订单资源名称映射（用于 UI 显示）
+    resource_labels = {
+        copper = "铜锭",
+        gold   = "金锭",
+        coal   = "煤炭",
+    },
+    resource_icons = {
+        copper = "🟤",
+        gold   = "🟡",
+        coal   = "⚫",
+    },
 }
 
 -- ============================================================================
@@ -843,6 +871,10 @@ Balance.FAMILY = {
     trainee_age_min        = 20,   -- 新培养成员最小年龄
     trainee_age_max        = 35,   -- 新培养成员最大年龄
     retirement_warning_age = 55,   -- 退休预警年龄（UI 提示）
+    -- 大学进修（需科技 d6a_university 解锁）
+    university_cost        = 300,  -- 每次进修学费
+    university_duration    = 4,    -- 进修周期（季度）
+    university_max_degrees = 2,    -- 每人最多学位数
 }
 
 -- ============================================================================
@@ -907,7 +939,53 @@ Balance.FOREIGN_OPS = {
     rebuild_min_damage = 0.10,  -- 最低损毁 10%（永远无法完全恢复）
 
     -- 产出系数（相对国内矿同等级基础产出的比例）
-    output_base_ratio = 0.5,    -- 外国矿基础产出 = 国内 50%
+    output_base_ratio = 0.5,    -- 外国矿基础产出 = 国内 50%（Lv1 临时矿点）
+
+    -- 据点升级（Lv2 分叉：高产 vs 堡垒，Lv3 需合作度≥20）
+    upgrade_levels = {
+        -- Lv2: 选择专精方向
+        [2] = {
+            production = {
+                name = "高产矿场",
+                icon = "🏭",
+                cost = 500,
+                ap   = 1,
+                output_ratio  = 0.80,  -- 产出提升至 80%
+                damage_mult   = 1.0,   -- 损毁率不变
+                favor_required = 0,
+            },
+            security = {
+                name = "堡垒矿区",
+                icon = "🏰",
+                cost = 700,
+                ap   = 1,
+                output_ratio  = 0.65,  -- 产出 65%
+                damage_mult   = 0.30,  -- 战时损毁降至 30%
+                favor_required = 0,
+            },
+        },
+        -- Lv3: 终极强化（需合作度≥20）
+        [3] = {
+            production = {
+                name = "工业矿场",
+                icon = "🏗️",
+                cost = 1000,
+                ap   = 2,
+                output_ratio    = 1.0,  -- 满产出
+                copper_per_season = 5,  -- 额外铜产出
+                favor_required  = 20,
+            },
+            security = {
+                name = "要塞矿区",
+                icon = "🛡️",
+                cost = 1200,
+                ap   = 2,
+                output_ratio     = 0.80,  -- 产出 80%
+                wartime_immune   = true,  -- 战时免毁
+                favor_required   = 20,
+            },
+        },
+    },
 }
 
 -- ============================================================================
@@ -943,6 +1021,11 @@ Balance.COPPER = {
         mortar         = 10,   -- T4
         motorized      = 15,   -- T5
         elite_kit      = 25,   -- T6
+        -- 支援装备铜耗
+        medkit         = 2,    -- 战地医疗包
+        scout_gear     = 4,    -- 侦察装具
+        field_radio    = 6,    -- 战地电台
+        siege_kit      = 10,   -- 攻城器材
     },
     maintenance_reduction_per_10 = 0.05,  -- 每持有10铜 → 装备维护费 -5%
     maintenance_reduction_cap    = 0.25,  -- 维护费减免上限 25%

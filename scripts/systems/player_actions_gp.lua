@@ -399,14 +399,18 @@ function PlayerActionsGP.ExecuteAction(state, powerId, actionId)
         return false, reason or "条件不满足"
     end
 
+    -- 家族天赋：巧舌如簧（diplomacy_ap_reduction）—— 外交行动 AP 折扣
+    local traitDiploReduce = GameState.GetActiveTraitEffect and GameState.GetActiveTraitEffect(state, "diplomacy_ap_reduction") or 0
+    local effectiveAP = math.max(0, action.ap_cost - traitDiploReduce)
+
     -- AP 检查（含临时 AP）
     local totalAP = state.ap.current + (state.ap.temp or 0)
-    if totalAP < action.ap_cost then
-        return false, string.format("行动点不足（需要 %d AP）", action.ap_cost)
+    if totalAP < effectiveAP then
+        return false, string.format("行动点不足（需要 %d AP）", effectiveAP)
     end
 
     -- 扣 AP（优先消耗临时 AP）
-    GameState.SpendAP(state, action.ap_cost)
+    GameState.SpendAP(state, effectiveAP)
 
     -- ── 干预惯性机制（P2-2）：连续同姿态行动加成 ──
     local streakKey = powerId .. "_" .. action.stance

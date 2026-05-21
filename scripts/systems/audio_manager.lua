@@ -49,12 +49,52 @@ local SOUND_PATHS = {
     danger_warning  = "Sounds/Effects/danger_warning.ogg",
     game_victory    = "Sounds/Effects/game_victory.ogg",
     game_defeat     = "Sounds/Effects/game_defeat.ogg",
+
+    -- 贸易音效
+    trade_order_accept = "Sounds/Effects/trade_order_accept.ogg",
+    trade_delivery     = "Sounds/Effects/trade_delivery.ogg",
+    trade_failed       = "Sounds/Effects/trade_failed.ogg",
+
+    -- 远征音效
+    expedition_launch  = "Sounds/Effects/expedition_launch.ogg",
+    expedition_victory = "Sounds/Effects/expedition_victory.ogg",
+
+    -- 家族音效
+    family_train       = "Sounds/Effects/family_train.ogg",
+    family_assign      = "Sounds/Effects/family_assign.ogg",
+
+    -- 称号音效
+    title_unlock       = "Sounds/Effects/title_unlock.ogg",
+
+    -- 市场音效
+    stock_buy          = "Sounds/Effects/stock_buy.ogg",
+    stock_sell         = "Sounds/Effects/stock_sell.ogg",
+
+    -- 掠夺音效
+    plunder_success    = "Sounds/Effects/plunder_success.ogg",
 }
 
---- BGM 路径映射
+--- BGM 路径映射（5首时代BGM + 2首结局BGM）
 local BGM_PATHS = {
-    peace = "Sounds/Music/bgm_peace.ogg",
-    war   = "Sounds/Music/bgm_war.ogg",
+    bgm_belle_epoque = "Sounds/Music/bgm_belle_epoque.ogg",
+    bgm_great_war    = "Sounds/Music/bgm_great_war.ogg",
+    bgm_interwar     = "Sounds/Music/bgm_interwar.ogg",
+    bgm_depression   = "Sounds/Music/bgm_depression.ogg",
+    bgm_world_war    = "Sounds/Music/bgm_world_war.ogg",
+    bgm_victory      = "Sounds/Music/bgm_victory.ogg",
+    bgm_defeat       = "Sounds/Music/bgm_defeat.ogg",
+    -- 兼容旧key
+    peace            = "Sounds/Music/bgm_belle_epoque.ogg",
+    war              = "Sounds/Music/bgm_great_war.ogg",
+}
+
+--- 时代ID → BGM名称 映射
+local ERA_BGM_MAP = {
+    [1] = "bgm_belle_epoque",   -- 1904-1913 美好年代
+    [2] = "bgm_great_war",      -- 1914-1918 大战风云
+    [3] = "bgm_interwar",       -- 1919-1940 战间迷局
+    [4] = "bgm_world_war",      -- 1941-1945 二战烽火
+    [5] = "bgm_depression",     -- 1946-1955 战后余烬
 }
 
 -- ============================================================================
@@ -157,12 +197,12 @@ function AudioManager.StopBGM()
     currentBGM_ = nil
 end
 
---- 根据游戏状态自动选择 BGM
+--- 根据游戏状态自动选择 BGM（按时代ID切换）
 ---@param state table 游戏状态
 function AudioManager.UpdateBGM(state)
     if not state or not state.year then return end
     local era = Config.GetEraByYear(state.year)
-    local targetBGM = era.war_stripe and "war" or "peace"
+    local targetBGM = ERA_BGM_MAP[era.id] or "bgm_belle_epoque"
     AudioManager.PlayBGM(targetBGM)
 end
 

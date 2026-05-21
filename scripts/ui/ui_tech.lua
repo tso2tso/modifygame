@@ -48,6 +48,7 @@ local EFFECT_LABELS = {
     unlock_foreign_trade = function() return "解锁跨国贸易" end,
     unlock_short_selling = function() return "解锁股票做空" end,
     unlock_venture       = function() return "解锁商业远征" end,
+    unlock_university    = function() return "解锁萨拉热窝大学" end,
 }
 
 -- ============================================================================

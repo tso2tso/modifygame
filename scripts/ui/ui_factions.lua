@@ -675,7 +675,10 @@ function _CreateGrandPowerCard(state, power, precomputed)
                     local meta = STANCE_META[stanceId]
                     local btnRow = {}
                     for _, act in ipairs(group) do
-                        local enabled = act.available and (state.ap.current + (state.ap.temp or 0)) >= act.ap_cost
+                        -- 家族天赋：巧舌如簧 — 外交 AP 折扣
+                        local _diploReduce = GameState.GetActiveTraitEffect and GameState.GetActiveTraitEffect(state, "diplomacy_ap_reduction") or 0
+                        local _effAP = math.max(0, act.ap_cost - _diploReduce)
+                        local enabled = act.available and (state.ap.current + (state.ap.temp or 0)) >= _effAP
                         local btnColor = enabled and meta.color or C.text_muted
 
                         table.insert(btnRow, UI.Button {

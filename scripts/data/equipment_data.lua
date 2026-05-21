@@ -13,11 +13,11 @@ EquipmentData.CATALOG = {
         name = "步枪",
         tier = 1,
         power_mul = 1.0,
-        prod_turns = 0,    -- 默认装备，无需生产
-        prod_cost = 0,
+        prod_turns = 1,    -- 可生产用于贸易出口（1季）
+        prod_cost = 30,    -- 低成本基础装备
         maintenance = 5,
         icon = "🔫",
-        desc = "标准制式步枪，护卫基础装备。",
+        desc = "标准制式步枪，护卫基础装备。可批量生产用于军火贸易。",
     },
     improved_rifle = {
         id = "improved_rifle",
@@ -27,6 +27,7 @@ EquipmentData.CATALOG = {
         prod_turns = 2,
         prod_cost = 120,
         maintenance = 8,
+        coverage = 10,   -- 每件装备 10 人（个人武器）
         icon = "🎯",
         desc = "改进瞄准与弹药的步枪，射程和精度更高。",
     },
@@ -38,6 +39,7 @@ EquipmentData.CATALOG = {
         prod_turns = 3,
         prod_cost = 250,
         maintenance = 15,
+        coverage = 25,   -- 每件装备 25 人（班组武器）
         icon = "⚙️",
         desc = "重型制压火力，适合阵地防御和火力覆盖。",
     },
@@ -49,6 +51,7 @@ EquipmentData.CATALOG = {
         prod_turns = 4,
         prod_cost = 400,
         maintenance = 22,
+        coverage = 30,   -- 每件装备 30 人（排级支援）
         icon = "💣",
         desc = "间接火力支援武器，攻防兼备。",
     },
@@ -60,6 +63,7 @@ EquipmentData.CATALOG = {
         prod_turns = 5,
         prod_cost = 650,
         maintenance = 35,
+        coverage = 15,   -- 每件装备 15 人（载具）
         icon = "🚗",
         desc = "摩托化载具与重武器，极大提升机动作战能力。",
     },
@@ -71,6 +75,7 @@ EquipmentData.CATALOG = {
         prod_turns = 6,
         prod_cost = 1000,
         maintenance = 50,
+        coverage = 8,    -- 每件装备 8 人（精锐个人套件）
         icon = "⭐",
         desc = "最先进的单兵装备与通讯系统，全面碾压优势。",
     },
@@ -78,6 +83,72 @@ EquipmentData.CATALOG = {
 
 -- 按 tier 排序的装备 ID 列表（方便 UI 遍历）
 EquipmentData.TIER_ORDER = { "rifle", "improved_rifle", "mg", "mortar", "motorized", "elite_kit" }
+
+-- ============================================================================
+-- 支援装备目录（副武器槽）
+-- 不提供战力倍率，仅在特定场景提供特殊效果
+-- ============================================================================
+EquipmentData.SUPPORT_CATALOG = {
+    medkit = {
+        id = "medkit",
+        name = "战地医疗包",
+        tier = 1,
+        effect_type = "casualty_reduction",  -- 战斗损员-25%
+        effect_value = 0.25,
+        prod_turns = 2,
+        prod_cost = 150,
+        maintenance = 8,
+        icon = "🩹",
+        desc = "配备急救物资与止血带，显著降低战斗伤亡。",
+    },
+    scout_gear = {
+        id = "scout_gear",
+        name = "侦察装具",
+        tier = 2,
+        effect_type = "expedition_damage",   -- 远征伤害+15%
+        effect_value = 0.15,
+        prod_turns = 2,
+        prod_cost = 200,
+        maintenance = 10,
+        icon = "🔭",
+        desc = "望远镜与地图工具，提升远征作战效率。",
+    },
+    field_radio = {
+        id = "field_radio",
+        name = "战地电台",
+        tier = 3,
+        effect_type = "trade_safety",        -- 贸易护送安全+10%
+        effect_value = 0.10,
+        prod_turns = 3,
+        prod_cost = 280,
+        maintenance = 12,
+        icon = "📻",
+        desc = "无线通讯设备，提升贸易护送途中的安全保障。",
+    },
+    siege_kit = {
+        id = "siege_kit",
+        name = "攻城器材",
+        tier = 4,
+        effect_type = "siege_damage",        -- 对大国远征伤害+20%
+        effect_value = 0.20,
+        prod_turns = 4,
+        prod_cost = 400,
+        maintenance = 18,
+        icon = "🏰",
+        desc = "重型攻城装备，对大国远征时造成额外伤害。",
+    },
+}
+
+-- 支援装备按 tier 排序（方便 UI 遍历）
+EquipmentData.SUPPORT_TIER_ORDER = { "medkit", "scout_gear", "field_radio", "siege_kit" }
+
+-- 支援装备科技解锁映射
+EquipmentData.SUPPORT_TECH_UNLOCK = {
+    c2_field_fortify = "medkit",
+    c3_machine_gun   = "scout_gear",
+    c5_motorized     = "field_radio",
+    c7_elite_force   = "siege_kit",
+}
 
 -- ============================================================================
 -- 老兵等级
@@ -186,6 +257,44 @@ function EquipmentData.GetUnlockedList(state)
     for _, eid in ipairs(EquipmentData.TIER_ORDER) do
         if EquipmentData.IsUnlocked(state, eid) then
             table.insert(list, EquipmentData.CATALOG[eid])
+        end
+    end
+    return list
+end
+
+-- ============================================================================
+-- 支援装备辅助查询
+-- ============================================================================
+
+--- 获取支援装备数据
+---@param equipId string
+---@return table|nil
+function EquipmentData.GetSupport(equipId)
+    return EquipmentData.SUPPORT_CATALOG[equipId]
+end
+
+--- 检查支援装备是否已解锁
+---@param state table
+---@param equipId string
+---@return boolean
+function EquipmentData.IsSupportUnlocked(state, equipId)
+    local researched = state.tech and state.tech.researched or {}
+    for techId, unlockId in pairs(EquipmentData.SUPPORT_TECH_UNLOCK) do
+        if unlockId == equipId and researched[techId] then
+            return true
+        end
+    end
+    return false
+end
+
+--- 获取所有已解锁支援装备列表
+---@param state table
+---@return table[] list
+function EquipmentData.GetUnlockedSupportList(state)
+    local list = {}
+    for _, eid in ipairs(EquipmentData.SUPPORT_TIER_ORDER) do
+        if EquipmentData.IsSupportUnlocked(state, eid) then
+            table.insert(list, EquipmentData.SUPPORT_CATALOG[eid])
         end
     end
     return list

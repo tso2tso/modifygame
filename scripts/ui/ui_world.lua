@@ -782,10 +782,40 @@ function WorldPage._CreateNodeDrawer(state, region, tile)
         if isActive then
             local act = fo.active[tile.id]
             local dmgPct = math.floor((act.damage or 0) * 100)
+            local curLevel = act.level or 1
+            local specCfg = ForeignOps.GetSpecConfig(act)
+
+            -- 据点等级 & 专精标签
+            local levelLabel = "Lv" .. curLevel
+            if specCfg then
+                levelLabel = levelLabel .. " " .. (specCfg.icon or "") .. (specCfg.name or "")
+            else
+                levelLabel = levelLabel .. " ⛏️ 临时矿点"
+            end
+            table.insert(actionChildren, UI.Panel {
+                width = "100%", flexDirection = "row", alignItems = "center",
+                justifyContent = "space-between",
+                paddingHorizontal = 10, paddingVertical = 4,
+                children = {
+                    UI.Label {
+                        text = levelLabel,
+                        fontSize = F.label, fontWeight = "bold",
+                        fontColor = curLevel >= 2 and C.accent_gold or C.text_secondary,
+                    },
+                    UI.Label {
+                        text = dmgPct > 0 and ("损毁" .. dmgPct .. "%") or "运转正常",
+                        fontSize = F.body_minor,
+                        fontColor = dmgPct > 20 and C.accent_amber or C.accent_green,
+                    },
+                },
+            })
+
+            -- 重建按钮
             if canRebuild then
                 table.insert(actionChildren, UI.Button {
-                    text = string.format("重建（%dAP+%d₿）损毁%d%%",
-                        BFO.rebuild_ap, BFO.rebuild_cash, dmgPct),
+                    text = string.format("重建（%dAP+%d₿）损毁%d%%→%d%%",
+                        BFO.rebuild_ap, BFO.rebuild_cash, dmgPct,
+                        math.max(math.floor(BFO.rebuild_min_damage * 100), dmgPct - math.floor(BFO.rebuild_repair * 100))),
                     fontSize = F.label,
                     fontColor = C.accent_amber,
                     backgroundColor = C.bg_elevated,
@@ -807,17 +837,70 @@ function WorldPage._CreateNodeDrawer(state, region, tile)
                         WorldPage._RefreshDrawer(state)
                     end),
                 })
-            else
-                table.insert(actionChildren, UI.Button {
-                    text = dmgPct > 0 and ("开采中·损毁" .. dmgPct .. "%") or "开采中·运转正常",
-                    fontSize = F.label,
-                    fontColor = dmgPct > 20 and C.accent_amber or C.accent_green,
-                    backgroundColor = C.bg_elevated,
-                    borderRadius = S.radius_btn,
-                    paddingHorizontal = 10,
-                    paddingVertical = 6,
-                    flexGrow = 1,
-                    disabled = true,
+            end
+
+            -- 据点升级按钮
+            local nextLevel = curLevel + 1
+            local nextLevelCfg = BFO.upgrade_levels and BFO.upgrade_levels[nextLevel]
+            if nextLevelCfg then
+                -- Lv2: 选择专精方向（两个按钮）
+                -- Lv3: 沿用已选路线（一个按钮）
+                local specOptions = {}
+                if curLevel == 1 then
+                    -- Lv1→Lv2: 两个专精选项
+                    specOptions = { "production", "security" }
+                elseif act.specialization and nextLevelCfg[act.specialization] then
+                    -- Lv2→Lv3: 沿用已选路线
+                    specOptions = { act.specialization }
+                end
+
+                for _, sp in ipairs(specOptions) do
+                    local spCfg = nextLevelCfg[sp]
+                    if spCfg then
+                        local canUp, upReason = ForeignOps.CanUpgrade(state, tile.id, nextLevel, sp)
+                        local btnLabel = string.format("升级Lv%d %s%s（%dAP+%d₿）",
+                            nextLevel, spCfg.icon or "", spCfg.name or sp,
+                            spCfg.ap, spCfg.cost)
+                        if (spCfg.favor_required or 0) > 0 then
+                            btnLabel = btnLabel .. " 合作≥" .. spCfg.favor_required
+                        end
+                        if not canUp and upReason then
+                            btnLabel = btnLabel .. " - " .. upReason
+                        end
+                        table.insert(actionChildren, UI.Button {
+                            text = btnLabel,
+                            fontSize = F.label,
+                            fontColor = canUp and C.accent_blue or C.text_muted,
+                            backgroundColor = canUp and C.bg_elevated or C.paper_dark,
+                            borderRadius = S.radius_btn,
+                            borderWidth = canUp and 1 or 0,
+                            borderColor = canUp and C.accent_blue or nil,
+                            paddingHorizontal = 10,
+                            paddingVertical = 6,
+                            flexGrow = 1,
+                            disabled = not canUp,
+                            onClick = Config.ClickGuard(function(self)
+                                self.props.disabled = true
+                                local ok, err = ForeignOps.UpgradeOutpost(state, tile.id, nextLevel, sp)
+                                if ok then
+                                    UI.Toast.Show(string.format("据点升级为 %s", spCfg.name or sp),
+                                        { variant = "success", duration = 1.5 })
+                                else
+                                    UI.Toast.Show(err or "无法升级", { variant = "warning", duration = 1.5 })
+                                end
+                                if callbacksRef_ and callbacksRef_.onStateChanged then callbacksRef_.onStateChanged() end
+                                WorldPage._RefreshDrawer(state)
+                            end),
+                        })
+                    end
+                end
+            elseif curLevel >= 3 then
+                -- 已满级
+                table.insert(actionChildren, UI.Label {
+                    text = "✅ 据点已达最高等级",
+                    fontSize = F.body_minor,
+                    fontColor = C.accent_green,
+                    paddingHorizontal = 10, paddingVertical = 4,
                 })
             end
         end

@@ -17,6 +17,18 @@ local F = Config.FONT
 local S = Config.SIZE
 
 local CATALOG = EquipmentData.CATALOG
+local SUPPORT_CATALOG = EquipmentData.SUPPORT_CATALOG
+
+--- 统一装备查找（主武器 + 支援装备）
+---@param equipId string
+---@return table|nil data, boolean isSupport
+local function lookupEquipDisplay(equipId)
+    local d = CATALOG[equipId]
+    if d then return d, false end
+    d = SUPPORT_CATALOG[equipId]
+    if d then return d, true end
+    return nil, false
+end
 
 local EquipModals = {}
 
@@ -290,6 +302,72 @@ function EquipModals.ShowSquadManagement(state, accent)
                         },
                     },
                 },
+                -- 行3.5: 支援装备
+                (function()
+                    if sq.support_equip_id then
+                        local sd = SUPPORT_CATALOG[sq.support_equip_id]
+                        local sCond = sq.support_equip_condition or 100
+                        local sCondColor = sCond >= 60 and C.accent_green
+                            or (sCond >= 30 and C.accent_amber or C.accent_red)
+                        return UI.Panel {
+                            width = "100%",
+                            flexDirection = "row",
+                            alignItems = "center",
+                            gap = 8,
+                            children = {
+                                UI.Label {
+                                    text = "支援",
+                                    fontSize = F.label,
+                                    fontColor = C.text_muted,
+                                },
+                                UI.Label {
+                                    text = sd and (sd.icon .. " " .. sd.name) or sq.support_equip_id,
+                                    fontSize = F.label,
+                                    fontColor = C.text_primary,
+                                },
+                                UI.Panel {
+                                    flexGrow = 1,
+                                    height = 4,
+                                    borderRadius = 2,
+                                    backgroundColor = C.bg_surface,
+                                    overflow = "hidden",
+                                    children = {
+                                        UI.Panel {
+                                            width = tostring(sCond) .. "%",
+                                            height = "100%",
+                                            backgroundColor = sCondColor,
+                                            borderRadius = 2,
+                                        },
+                                    },
+                                },
+                                UI.Label {
+                                    text = sCond .. "%",
+                                    fontSize = F.label,
+                                    fontColor = sCondColor,
+                                },
+                            },
+                        }
+                    else
+                        return UI.Panel {
+                            width = "100%",
+                            flexDirection = "row",
+                            alignItems = "center",
+                            gap = 8,
+                            children = {
+                                UI.Label {
+                                    text = "支援",
+                                    fontSize = F.label,
+                                    fontColor = C.text_muted,
+                                },
+                                UI.Label {
+                                    text = "无",
+                                    fontSize = F.label,
+                                    fontColor = C.text_muted,
+                                },
+                            },
+                        }
+                    end
+                end)(),
                 -- 行4: 操作按钮
                 UI.Panel {
                     width = "100%",
@@ -299,6 +377,9 @@ function EquipModals.ShowSquadManagement(state, accent)
                     children = {
                         miniBtn("换装", C.accent_blue, function()
                             EquipModals._ShowEquipPicker(state, accent, sqLocal)
+                        end),
+                        miniBtn("支援", { 100, 80, 160, 255 }, function()
+                            EquipModals._ShowSupportPicker(state, accent, sqLocal)
                         end),
                         miniBtn("调整", C.accent_amber, function()
                             EquipModals._ShowResizeSquad(state, accent, sqLocal)
@@ -576,6 +657,174 @@ function EquipModals._ShowEquipPicker(state, accent, squad)
     end
 
     showList("🔄 换装 — " .. squad.name, rows)
+end
+
+-- ============================================================================
+-- 支援装备选择子弹窗
+-- ============================================================================
+
+function EquipModals._ShowSupportPicker(state, accent, squad)
+    closeModal()
+
+    local mil = state.military
+    local rows = {}
+
+    -- 当前支援装备
+    if squad.support_equip_id then
+        local sd = SUPPORT_CATALOG[squad.support_equip_id]
+        local sCond = squad.support_equip_condition or 100
+        local sCondColor = sCond >= 60 and C.accent_green
+            or (sCond >= 30 and C.accent_amber or C.accent_red)
+        local sqLocal = squad
+        table.insert(rows, UI.Panel {
+            width = "100%",
+            padding = 10,
+            backgroundColor = C.paper_dark,
+            borderRadius = S.radius_card,
+            flexDirection = "row",
+            justifyContent = "space-between",
+            alignItems = "center",
+            children = {
+                UI.Panel {
+                    flexShrink = 1,
+                    flexDirection = "column",
+                    gap = 2,
+                    children = {
+                        UI.Label {
+                            text = string.format("当前: %s %s",
+                                sd and sd.icon or "?", sd and sd.name or squad.support_equip_id),
+                            fontSize = F.body,
+                            fontWeight = "bold",
+                            fontColor = C.text_primary,
+                        },
+                        UI.Label {
+                            text = string.format("耐久 %d%% | %s",
+                                sCond, sd and sd.desc or ""),
+                            fontSize = F.label,
+                            fontColor = sCondColor,
+                        },
+                    },
+                },
+                miniBtn("卸下", C.accent_red, function()
+                    local ok, msg = Equipment.RemoveSupport(state, sqLocal.id)
+                    UI.Toast.Show(msg, {
+                        variant = ok and "success" or "error",
+                        duration = 1.5,
+                    })
+                    if ok then closeModal(); notifyChanged() end
+                end),
+            },
+        })
+    else
+        table.insert(rows, UI.Panel {
+            width = "100%",
+            padding = 10,
+            backgroundColor = C.paper_dark,
+            borderRadius = S.radius_card,
+            children = {
+                UI.Label {
+                    text = "当前无支援装备",
+                    fontSize = F.body,
+                    fontColor = C.text_muted,
+                },
+            },
+        })
+    end
+
+    -- 可用支援装备（按类型分组，从库存中筛选）
+    local inventory = mil.inventory or {}
+    local supportByEquip = {}
+    for i, item in ipairs(inventory) do
+        if not item.repairing and SUPPORT_CATALOG[item.equip_id] then
+            if not supportByEquip[item.equip_id] then
+                supportByEquip[item.equip_id] = {}
+            end
+            table.insert(supportByEquip[item.equip_id], { index = i, item = item })
+        end
+    end
+
+    local hasOptions = false
+    for _, sid in ipairs(EquipmentData.SUPPORT_TIER_ORDER) do
+        local items = supportByEquip[sid]
+        if items and #items > 0 then
+            hasOptions = true
+            local sd = SUPPORT_CATALOG[sid]
+            table.sort(items, function(a, b) return a.item.condition > b.item.condition end)
+            local best = items[1]
+            local condColor = best.item.condition >= 60 and C.accent_green
+                or (best.item.condition >= 30 and C.accent_amber or C.accent_red)
+            local sidLocal = sid
+            local sqLocal = squad
+
+            table.insert(rows, UI.Panel {
+                width = "100%",
+                padding = 10,
+                backgroundColor = C.bg_elevated,
+                borderRadius = S.radius_card,
+                borderWidth = 1,
+                borderColor = C.border_card,
+                flexDirection = "row",
+                justifyContent = "space-between",
+                alignItems = "center",
+                onPointerUp = Config.TapGuard(function()
+                    local ok, msg = Equipment.AssignSupport(state, sqLocal.id, sidLocal)
+                    UI.Toast.Show(msg, {
+                        variant = ok and "success" or "error",
+                        duration = 1.5,
+                    })
+                    if ok then closeModal(); notifyChanged() end
+                end),
+                children = {
+                    UI.Panel {
+                        flexShrink = 1,
+                        flexDirection = "column",
+                        gap = 2,
+                        children = {
+                            UI.Label {
+                                text = string.format("%s %s — 库存×%d",
+                                    sd.icon, sd.name, #items),
+                                fontSize = F.body_minor,
+                                fontColor = C.text_primary,
+                                pointerEvents = "none",
+                            },
+                            UI.Label {
+                                text = string.format("最佳耐久 %d%% | %s",
+                                    best.item.condition, sd.desc),
+                                fontSize = F.label,
+                                fontColor = condColor,
+                                pointerEvents = "none",
+                            },
+                        },
+                    },
+                    UI.Label {
+                        text = "装备",
+                        fontSize = F.label,
+                        fontWeight = "bold",
+                        fontColor = { 100, 80, 160, 255 },
+                        pointerEvents = "none",
+                    },
+                },
+            })
+        end
+    end
+
+    if not hasOptions and not squad.support_equip_id then
+        table.insert(rows, UI.Panel {
+            width = "100%",
+            padding = 16,
+            justifyContent = "center",
+            alignItems = "center",
+            children = {
+                UI.Label {
+                    text = "库存中没有支援装备。请在装备生产页生产。",
+                    fontSize = F.body,
+                    fontColor = C.text_muted,
+                },
+            },
+        })
+    end
+
+    showList("🔧 支援装备 — " .. squad.name, rows)
 end
 
 -- ============================================================================
@@ -952,7 +1201,7 @@ function EquipModals.ShowProduction(state, accent)
         }
 
         for _, item in ipairs(queue) do
-            local ed = CATALOG[item.equip_id]
+            local ed = lookupEquipDisplay(item.equip_id)
             local label = item.source == "repair" and "维修" or "生产"
             local progress = item.progress / math.max(1, item.total)
             table.insert(queueChildren, UI.Panel {
@@ -994,7 +1243,7 @@ function EquipModals.ShowProduction(state, accent)
         end
 
         for _, item in ipairs(outsource) do
-            local ed = CATALOG[item.equip_id]
+            local ed = lookupEquipDisplay(item.equip_id)
             local progress = item.progress / math.max(1, item.total)
             table.insert(queueChildren, UI.Panel {
                 width = "100%",
@@ -1083,7 +1332,7 @@ function EquipModals.ShowProduction(state, accent)
 
     local hasProdOptions = false
     for _, ed in ipairs(unlocked) do
-        if ed.id ~= "rifle" then
+        do
             hasProdOptions = true
             local edLocal = ed
             local factoryCost = math.floor(ed.prod_cost * inflation)
@@ -1210,6 +1459,119 @@ function EquipModals.ShowProduction(state, accent)
         })
     end
 
+    -- === 支援装备生产 ===
+    local supportUnlocked = EquipmentData.GetUnlockedSupportList(state)
+    if #supportUnlocked > 0 then
+        local supChildren = {
+            UI.Label {
+                text = "可生产支援装备",
+                fontSize = F.subtitle,
+                fontWeight = "bold",
+                fontColor = C.text_primary,
+            },
+        }
+        for _, sd in ipairs(supportUnlocked) do
+            local sdLocal = sd
+            local sCost = math.floor(sd.prod_cost * inflation)
+            local sOutCost = math.floor(
+                sd.prod_cost * EquipmentData.OUTSOURCE.cost_multiplier * inflation)
+            local sCopperNeed = copperCostTable[sd.id] or 0
+            local sHasCopper = copperStock >= sCopperNeed
+
+            local sBtns = {}
+            if hasFactory then
+                local canF = factoryFree > 0 and state.cash >= sCost and sHasCopper
+                table.insert(sBtns, miniBtn(
+                    string.format("🏭%d/%d季", sCost, sd.prod_turns),
+                    C.accent_green,
+                    function()
+                        local ok, msg = Equipment.StartProduction(state, sdLocal.id)
+                        UI.Toast.Show(msg, {
+                            variant = ok and "success" or "error",
+                            duration = 1.5,
+                        })
+                        if ok then closeModal(); notifyChanged() end
+                    end,
+                    not canF
+                ))
+            end
+            local canOut = outsourceFree > 0 and state.cash >= sOutCost and sHasCopper
+            table.insert(sBtns, miniBtn(
+                string.format("📦%d/%d季", sOutCost,
+                    sd.prod_turns + EquipmentData.OUTSOURCE.time_bonus),
+                C.accent_amber,
+                function()
+                    local ok, msg = Equipment.StartOutsource(state, sdLocal.id)
+                    UI.Toast.Show(msg, {
+                        variant = ok and "success" or "error",
+                        duration = 1.5,
+                    })
+                    if ok then closeModal(); notifyChanged() end
+                end,
+                not canOut
+            ))
+
+            local sDescParts = { sd.desc }
+            if sd.maintenance > 0 then
+                table.insert(sDescParts, string.format("维护%d/季", sd.maintenance))
+            end
+            if sCopperNeed > 0 then
+                table.insert(sDescParts, string.format("🟠铜×%d", sCopperNeed))
+            end
+
+            table.insert(supChildren, UI.Panel {
+                width = "100%",
+                padding = 8,
+                backgroundColor = C.bg_elevated,
+                borderRadius = S.radius_card,
+                borderWidth = 1,
+                borderColor = C.border_card,
+                flexDirection = "row",
+                justifyContent = "space-between",
+                alignItems = "center",
+                gap = 6,
+                children = {
+                    UI.Panel {
+                        flexShrink = 1,
+                        flexDirection = "column",
+                        gap = 2,
+                        children = {
+                            UI.Label {
+                                text = string.format("%s %s (T%d)",
+                                    sd.icon, sd.name, sd.tier),
+                                fontSize = F.body_minor,
+                                fontColor = {180, 160, 220, 255},
+                            },
+                            UI.Label {
+                                text = table.concat(sDescParts, " | "),
+                                fontSize = F.label,
+                                fontColor = (sCopperNeed > 0 and not sHasCopper)
+                                    and C.accent_red or C.text_muted,
+                            },
+                        },
+                    },
+                    UI.Panel {
+                        flexDirection = "row",
+                        gap = 4,
+                        children = sBtns,
+                    },
+                },
+            })
+        end
+
+        table.insert(rows, UI.Panel {
+            width = "100%",
+            padding = 10,
+            backgroundColor = C.paper_dark,
+            borderRadius = S.radius_card,
+            borderWidth = 1,
+            borderColor = {50, 40, 70, 255},
+            flexDirection = "column",
+            gap = 6,
+            children = supChildren,
+        })
+    end
+
     -- === 库存 + 维修 ===
     local inventory = mil.inventory or {}
     if #inventory > 0 then
@@ -1224,7 +1586,7 @@ function EquipModals.ShowProduction(state, accent)
 
         for i, item in ipairs(inventory) do
             local iLocal = i
-            local ed = CATALOG[item.equip_id]
+            local ed = lookupEquipDisplay(item.equip_id)
             local condColor = item.condition >= 60 and C.accent_green
                 or (item.condition >= 30 and C.accent_amber or C.accent_red)
             local canRepair = not item.repairing and item.condition < 100

@@ -314,8 +314,11 @@ function Economy.Settle(state)
     -- 工人雇佣成本（科技折扣）
     local hireCostMul = 1.0 + (state.hire_cost_discount or 0)  -- discount 为负值
     hireCostMul = math.max(0.5, hireCostMul)  -- 最低 50% 成本
-    report.worker_expense = math.floor(state.workers.hired * state.workers.wage * laborCostFactor * hireCostMul * (diff.maintenance_mult or 1.0))
-    report.military_expense = math.floor(state.military.guards * state.military.wage * hedgedInflation * (diff.maintenance_mult or 1.0))
+    -- 家族缺陷：挥霍无度（maintenance_pct）—— 维护费加成
+    local flawMaintPct = GameState.GetActiveFlawEffect and GameState.GetActiveFlawEffect(state, "maintenance_pct") or 0
+    local maintMul = (diff.maintenance_mult or 1.0) * (1 + flawMaintPct)
+    report.worker_expense = math.floor(state.workers.hired * state.workers.wage * laborCostFactor * hireCostMul * maintMul)
+    report.military_expense = math.floor(state.military.guards * state.military.wage * hedgedInflation * maintMul)
 
     -- 装备维护费 + 兵工厂维护费
     local equipMaint, factoryMaint = Equipment.CalcMaintenanceCost(state)
@@ -484,6 +487,11 @@ function Economy.Settle(state)
     if civilBonus > 0 then
         taxRate = taxRate * (1 - civilBonus * 0.2)
     end
+    -- 家族天赋：税务专家（tax_rate_reduction）
+    local traitTaxReduce = GameState.GetActiveTraitEffect and GameState.GetActiveTraitEffect(state, "tax_rate_reduction") or 0
+    if traitTaxReduce > 0 then
+        taxRate = taxRate - traitTaxReduce
+    end
     taxRate = math.max(0, math.min(0.35, taxRate))
     -- E1: 收入税（基于本季总收入而非现金存量）
     report.tax = math.max(0, math.floor(grossIncome * taxRate * (diff.tax_mult or 1.0)))
@@ -571,6 +579,11 @@ function Economy._CalcMineOutput(state, mine)
     local coalPowerBonus = isCoalMine and 0 or (state.mine_coal_power_bonus or 0)
     if coalPowerBonus > 0 then
         total = total * (1 + coalPowerBonus)
+    end
+    -- 家族天赋：矿脉直觉（mine_output_pct）
+    local traitMinePct = GameState.GetActiveTraitEffect and GameState.GetActiveTraitEffect(state, "mine_output_pct") or 0
+    if traitMinePct > 0 then
+        total = total * (1 + traitMinePct)
     end
     total = math.max(0, math.floor(total))
 

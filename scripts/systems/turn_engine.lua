@@ -654,6 +654,9 @@ function TurnEngine.EndTurn(state)
 
     -- 在岗成员的腐败倾向会轻微影响监管压力；清廉团队则略微缓和。
     local corruptionAvg = GameState.GetActiveFamilyHiddenAverage(state, "corruption")
+    -- 家族缺陷：贪得无厌（corruption_add）—— 叠加腐败均值
+    local flawCorrupt = GameState.GetActiveFlawEffect and GameState.GetActiveFlawEffect(state, "corruption_add") or 0
+    corruptionAvg = corruptionAvg + flawCorrupt
     if corruptionAvg >= 7 then
         state.regulation_pressure = math.min(100, (state.regulation_pressure or 0) + 1)
     elseif corruptionAvg > 0 and corruptionAvg <= 2 then
@@ -736,12 +739,27 @@ function TurnEngine.EndTurn(state)
         end
     end
 
+    -- 家族学位：公共管理（control_per_season）—— 每季首都控制度被动增长
+    local degreeControlGain = GameState.GetActiveDegreeEffect and GameState.GetActiveDegreeEffect(state, "control_per_season") or 0
+    if degreeControlGain > 0 then
+        for _, r in ipairs(state.regions) do
+            if r.type == "capital" then
+                r.control = math.min(100, (r.control or 0) + degreeControlGain)
+            end
+        end
+    end
+
     -- ========================================
     -- 阶段 5: 武装士气衰减
     -- ========================================
     -- 军务主管加成：减少衰减量（而非全量衰减后再加性恢复）
     local milChiefBonus = GameState.GetPositionBonus(state, "military_chief")
     local decayAmount = Balance.MILITARY.morale_decay  -- 负值，如 -2
+    -- 家族天赋：铁腕治军（morale_decay_mult）—— 衰减量乘以系数（0.50 = 衰减减半）
+    local traitMoraleMult = GameState.GetActiveTraitEffect and GameState.GetActiveTraitEffect(state, "morale_decay_mult") or 0
+    if traitMoraleMult > 0 then
+        decayAmount = math.floor(decayAmount * traitMoraleMult)  -- 负数 × 正小数，向零取整
+    end
     if milChiefBonus > 0 then
         -- 主管减缓衰减：每点 bonus 减少衰减 1 点（向下取整）
         local reduction = math.floor(milChiefBonus * 1.0)
@@ -1357,6 +1375,53 @@ function TurnEngine.EndTurn(state)
         end
     end
 
+    -- ── 缺陷：体弱多病 —— 55岁后每季概率暂离 ──
+    do
+        local FamiliesData = require("data.families_data")
+        for _, member in ipairs((state.family and state.family.members) or {}) do
+            if member.status == "active" and member.flaw then
+                local sickChance = GameState.GetMemberFlawEffect(member, "sick_chance_after_55")
+                if sickChance > 0 and (member.age or 0) >= 55 then
+                    if math.random() < sickChance then
+                        member.status = "disabled"
+                        member.disabled_turns = 1
+                        if member.position then
+                            member.position = nil
+                            member.onboarding_remaining = 0
+                        end
+                        table.insert(report.warnings,
+                            string.format("🤒 %s 因体弱多病暂时卧床，失能 1 季", member.name))
+                        GameState.AddLog(state,
+                            string.format("[家族] %s 因病暂离岗位 1 季", member.name))
+                    end
+                end
+            end
+        end
+    end
+
+    -- ── 缺陷：惹是生非 —— 每季概率触发外交事件 ──
+    do
+        for _, member in ipairs((state.family and state.family.members) or {}) do
+            if member.status == "active" and member.position and member.flaw then
+                local incidentChance = GameState.GetMemberFlawEffect(member, "diplomacy_incident_chance")
+                if incidentChance > 0 and math.random() < incidentChance then
+                    -- 随机降低一个 AI 势力的好感
+                    local factions = state.ai_factions or {}
+                    if #factions > 0 then
+                        local f = factions[math.random(#factions)]
+                        f.attitude = math.min(100, (f.attitude or 0) + 3)
+                        table.insert(report.warnings,
+                            string.format("⚡ %s 惹是生非，导致与 %s 关系恶化",
+                                member.name, f.name))
+                        GameState.AddLog(state,
+                            string.format("[家族] %s 引发外交事件，%s 态度 +3",
+                                member.name, f.name))
+                    end
+                end
+            end
+        end
+    end
+
     if state.family.training then
         state.family.training.progress = state.family.training.progress + 1
         if state.family.training.progress >= state.family.training.total then
@@ -1368,6 +1433,43 @@ function TurnEngine.EndTurn(state)
             table.insert(report.warnings,
                 "新家族成员 " .. state.family.training.member_template.name .. " 培养完成！")
             state.family.training = nil
+        end
+    end
+
+    -- ── 大学进修进度 ──
+    if state.family.university and #state.family.university > 0 then
+        local FamiliesData = require("data.families_data")
+        local completed = {}
+        for i, u in ipairs(state.family.university) do
+            u.progress = u.progress + 1
+            if u.progress >= u.total then
+                table.insert(completed, i)
+                -- 查找成员，授予学位和属性加成
+                for _, m in ipairs(state.family.members) do
+                    if m.id == u.member_id then
+                        m.degrees = m.degrees or {}
+                        table.insert(m.degrees, u.degree_id)
+                        -- 应用属性加成
+                        local degreeDef = FamiliesData.GetDegreeDef(u.degree_id)
+                        if degreeDef and degreeDef.attr_bonus then
+                            for attr, bonus in pairs(degreeDef.attr_bonus) do
+                                m.attrs[attr] = (m.attrs[attr] or 0) + bonus
+                            end
+                        end
+                        table.insert(report.warnings,
+                            string.format("🎓 %s 完成「%s」学位！",
+                                m.name, degreeDef and degreeDef.name or u.degree_id))
+                        GameState.AddLog(state, string.format(
+                            "%s 获得「%s」学位，属性提升",
+                            m.name, degreeDef and degreeDef.name or u.degree_id))
+                        break
+                    end
+                end
+            end
+        end
+        -- 反向移除已完成的进修记录
+        for i = #completed, 1, -1 do
+            table.remove(state.family.university, completed[i])
         end
     end
 

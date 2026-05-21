@@ -13,6 +13,7 @@ local FACTORY = EquipmentData.FACTORY
 local OUTSOURCE = EquipmentData.OUTSOURCE
 local REPAIR = EquipmentData.REPAIR
 local CATALOG = EquipmentData.CATALOG
+local SUPPORT_CATALOG = EquipmentData.SUPPORT_CATALOG
 
 local Equipment = {}
 
@@ -23,10 +24,48 @@ local function genInvUid()
     return _nextInvUid
 end
 
+--- 计算编队在给定人数下所需装备件数
+--- rifle 不消耗库存，返回 0；其他装备按 coverage 字段计算 ceil(size / coverage)
+---@param equipId string
+---@param size number
+---@return number
+local function calcNeededCount(equipId, size)
+    if equipId == "rifle" then return 0 end
+    local ed = CATALOG[equipId]
+    if not ed or not ed.coverage then return 1 end  -- 兼容：无 coverage 字段按1件
+    return math.ceil(size / ed.coverage)
+end
+
+--- 从编队的 equip_items 数组更新 squad.condition 为平均耐久（向下兼容 UI 读取）
+---@param squad table
+local function syncSquadCondition(squad)
+    if not squad.equip_items or #squad.equip_items == 0 then
+        squad.condition = 100
+        return
+    end
+    local total = 0
+    for _, ei in ipairs(squad.equip_items) do
+        total = total + ei.condition
+    end
+    squad.condition = math.floor(total / #squad.equip_items)
+end
+
 --- 确保库存物品有 uid（兼容旧存档）
 ---@param item table
 local function ensureUid(item)
     if not item.uid then item.uid = genInvUid() end
+end
+
+--- 查找装备数据（主武器或支援装备统一查找）
+---@param equipId string
+---@return table|nil data
+---@return boolean isSupport
+local function lookupEquipData(equipId)
+    local d = CATALOG[equipId]
+    if d then return d, false end
+    d = SUPPORT_CATALOG[equipId]
+    if d then return d, true end
+    return nil, false
 end
 
 --- 存档加载后重建 uid 计数器，避免与已有 uid 冲突
@@ -39,6 +78,18 @@ function Equipment.RebuildUidCounter(state)
     end
     for _, item in ipairs(m.production_queue or {}) do
         if item.inv_uid and item.inv_uid > maxUid then maxUid = item.inv_uid end
+    end
+    -- 扫描编队装备项的 uid
+    for _, sq in ipairs(m.squads or {}) do
+        if sq.equip_items then
+            for _, ei in ipairs(sq.equip_items) do
+                if ei.uid and ei.uid > maxUid then maxUid = ei.uid end
+            end
+        end
+        -- 扫描支援装备 uid
+        if sq.support_equip_uid and sq.support_equip_uid > maxUid then
+            maxUid = sq.support_equip_uid
+        end
     end
     _nextInvUid = maxUid
 end
@@ -126,11 +177,26 @@ function Equipment.DisbandSquad(state, squadId)
     local m = state.military
     for i, sq in ipairs(m.squads or {}) do
         if sq.id == squadId then
-            -- 非默认装备回库存
+            -- 非默认装备回库存（按 equip_items 逐件退回）
             if sq.equip_id ~= "rifle" then
                 m.inventory = m.inventory or {}
-                local invItem = { equip_id = sq.equip_id, condition = sq.condition, uid = genInvUid() }
-                table.insert(m.inventory, invItem)
+                if sq.equip_items and #sq.equip_items > 0 then
+                    for _, ei in ipairs(sq.equip_items) do
+                        table.insert(m.inventory, { equip_id = sq.equip_id, condition = ei.condition, uid = genInvUid() })
+                    end
+                else
+                    -- 兼容旧存档：无 equip_items 时退回 1 件
+                    table.insert(m.inventory, { equip_id = sq.equip_id, condition = sq.condition, uid = genInvUid() })
+                end
+            end
+            -- 支援装备回库存
+            if sq.support_equip_id then
+                m.inventory = m.inventory or {}
+                table.insert(m.inventory, {
+                    equip_id = sq.support_equip_id,
+                    condition = sq.support_equip_condition or 100,
+                    uid = genInvUid(),
+                })
             end
             local name = sq.name
             table.remove(m.squads, i)
@@ -140,7 +206,7 @@ function Equipment.DisbandSquad(state, squadId)
     return false, "编队不存在"
 end
 
---- 调整编队人数
+--- 调整编队人数（扩编时自动从库存补充武器，缩编时退回多余武器）
 ---@param state table
 ---@param squadId number
 ---@param newSize number
@@ -163,6 +229,68 @@ function Equipment.ResizeSquad(state, squadId, newSize)
                     return false, "未编队护卫不足（需要 " .. need .. "，可用 " .. avail .. "）"
                 end
             end
+
+            -- 检查扩编后是否需要更多武器
+            if sq.equip_id ~= "rifle" then
+                local oldNeeded = calcNeededCount(sq.equip_id, sq.size)
+                local newNeeded = calcNeededCount(sq.equip_id, newSize)
+                m.inventory = m.inventory or {}
+
+                if newNeeded > oldNeeded then
+                    -- 扩编：需要从库存补充武器
+                    local extraNeeded = newNeeded - oldNeeded
+                    -- 检查库存是否充足
+                    local availCount = 0
+                    for _, item in ipairs(m.inventory) do
+                        if item.equip_id == sq.equip_id and not item.repairing then
+                            availCount = availCount + 1
+                        end
+                    end
+                    if availCount < extraNeeded then
+                        local ed = CATALOG[sq.equip_id]
+                        return false, (ed and ed.name or sq.equip_id) .. " 库存不足（需补充 " .. extraNeeded .. "，库存 " .. availCount .. "）"
+                    end
+                    -- 从库存取出（优先高耐久）
+                    sq.equip_items = sq.equip_items or {}
+                    local taken = 0
+                    -- 按耐久排序后取
+                    local candidates = {}
+                    for i, item in ipairs(m.inventory) do
+                        ensureUid(item)
+                        if item.equip_id == sq.equip_id and not item.repairing then
+                            table.insert(candidates, { idx = i, item = item })
+                        end
+                    end
+                    table.sort(candidates, function(a, b) return a.item.condition > b.item.condition end)
+                    local removeIndices = {}
+                    for _, c in ipairs(candidates) do
+                        if taken >= extraNeeded then break end
+                        table.insert(sq.equip_items, { condition = c.item.condition, uid = genInvUid() })
+                        table.insert(removeIndices, c.idx)
+                        taken = taken + 1
+                    end
+                    -- 从库存移除（倒序避免索引偏移）
+                    table.sort(removeIndices, function(a, b) return a > b end)
+                    for _, idx in ipairs(removeIndices) do
+                        table.remove(m.inventory, idx)
+                    end
+                    syncSquadCondition(sq)
+                elseif newNeeded < oldNeeded then
+                    -- 缩编：退回多余武器到库存
+                    if sq.equip_items and #sq.equip_items > 0 then
+                        local excessCount = oldNeeded - newNeeded
+                        -- 退回耐久最低的
+                        table.sort(sq.equip_items, function(a, b) return a.condition < b.condition end)
+                        for _ = 1, excessCount do
+                            if #sq.equip_items == 0 then break end
+                            local ei = table.remove(sq.equip_items, 1)
+                            table.insert(m.inventory, { equip_id = sq.equip_id, condition = ei.condition, uid = genInvUid() })
+                        end
+                        syncSquadCondition(sq)
+                    end
+                end
+            end
+
             local oldSize = sq.size
             sq.size = newSize
             return true, sq.name .. ": " .. oldSize .. " → " .. newSize .. " 人"
@@ -171,7 +299,7 @@ function Equipment.ResizeSquad(state, squadId, newSize)
     return false, "编队不存在"
 end
 
---- 为编队分配装备（从库存中取出）
+--- 为编队分配装备（从库存中按 coverage 取出所需数量）
 ---@param state table
 ---@param squadId number
 ---@param equipId string
@@ -197,42 +325,169 @@ function Equipment.AssignEquipment(state, squadId, equipId)
         return false, "已装备 " .. equipData.name
     end
 
-    -- 从库存中找到该装备（优先选最高耐久 + 非维修中）
     m.inventory = m.inventory or {}
-    local invIdx = nil
-    local invItem = nil
-    for i, item in ipairs(m.inventory) do
-        ensureUid(item)
-        if item.equip_id == equipId and not item.repairing then
-            if not invItem or item.condition > invItem.condition then
-                invIdx = i
-                invItem = item
+
+    -- 计算新装备需要的件数
+    local neededCount = calcNeededCount(equipId, squad.size)
+
+    if equipId ~= "rifle" then
+        -- 检查库存数量是否充足
+        local candidates = {}
+        for i, item in ipairs(m.inventory) do
+            ensureUid(item)
+            if item.equip_id == equipId and not item.repairing then
+                table.insert(candidates, { idx = i, item = item })
             end
         end
-    end
+        if #candidates < neededCount then
+            return false, equipData.name .. " 库存不足（需要 " .. neededCount .. "，库存 " .. #candidates .. "）"
+        end
 
-    if equipId ~= "rifle" and not invIdx then
-        return false, equipData.name .. " 库存不足"
-    end
+        -- 按耐久从高到低排序，取前 neededCount 件
+        table.sort(candidates, function(a, b) return a.item.condition > b.item.condition end)
+        local removeIndices = {}
+        local newEquipItems = {}
+        for k = 1, neededCount do
+            local c = candidates[k]
+            table.insert(newEquipItems, { condition = c.item.condition, uid = genInvUid() })
+            table.insert(removeIndices, c.idx)
+        end
 
-    -- 当前装备退回库存（非步枪）
-    if squad.equip_id ~= "rifle" then
-        local retItem = { equip_id = squad.equip_id, condition = squad.condition, uid = genInvUid() }
-        table.insert(m.inventory, retItem)
-    end
+        -- 当前装备退回库存（非步枪）
+        if squad.equip_id ~= "rifle" then
+            if squad.equip_items and #squad.equip_items > 0 then
+                for _, ei in ipairs(squad.equip_items) do
+                    table.insert(m.inventory, { equip_id = squad.equip_id, condition = ei.condition, uid = genInvUid() })
+                end
+            else
+                -- 兼容旧存档
+                table.insert(m.inventory, { equip_id = squad.equip_id, condition = squad.condition, uid = genInvUid() })
+            end
+        end
 
-    -- 装备新武器
-    if invIdx then
-        squad.equip_id = invItem.equip_id
-        squad.condition = invItem.condition
-        table.remove(m.inventory, invIdx)
+        -- 从库存移除（倒序）
+        table.sort(removeIndices, function(a, b) return a > b end)
+        for _, idx in ipairs(removeIndices) do
+            table.remove(m.inventory, idx)
+        end
+
+        -- 装备新武器
+        squad.equip_id = equipId
+        squad.equip_items = newEquipItems
+        syncSquadCondition(squad)
     else
-        -- rifle 不需要库存
+        -- 换回步枪：当前装备退回库存
+        if squad.equip_id ~= "rifle" then
+            if squad.equip_items and #squad.equip_items > 0 then
+                for _, ei in ipairs(squad.equip_items) do
+                    table.insert(m.inventory, { equip_id = squad.equip_id, condition = ei.condition, uid = genInvUid() })
+                end
+            else
+                table.insert(m.inventory, { equip_id = squad.equip_id, condition = squad.condition, uid = genInvUid() })
+            end
+        end
         squad.equip_id = "rifle"
+        squad.equip_items = nil
         squad.condition = 100
     end
 
-    return true, squad.name .. " 装备了 " .. equipData.name
+    return true, squad.name .. " 装备了 " .. equipData.name .. (neededCount > 1 and ("×" .. neededCount) or "")
+end
+
+-- ============================================================================
+-- 支援装备分配
+-- ============================================================================
+
+--- 为编队分配支援装备（从库存取出1件）
+---@param state table
+---@param squadId number
+---@param supportEquipId string
+---@return boolean ok
+---@return string msg
+function Equipment.AssignSupport(state, squadId, supportEquipId)
+    local m = state.military
+    local squad = nil
+    for _, sq in ipairs(m.squads or {}) do
+        if sq.id == squadId then squad = sq; break end
+    end
+    if not squad then return false, "编队不存在" end
+
+    local sd = SUPPORT_CATALOG[supportEquipId]
+    if not sd then return false, "支援装备不存在" end
+
+    if not EquipmentData.IsSupportUnlocked(state, supportEquipId) then
+        return false, sd.name .. " 尚未解锁"
+    end
+
+    -- 已有同类支援装备
+    if squad.support_equip_id == supportEquipId then
+        return false, "已装备 " .. sd.name
+    end
+
+    m.inventory = m.inventory or {}
+
+    -- 查找库存中的支援装备（优先高耐久）
+    local bestIdx, bestCond = nil, -1
+    for i, item in ipairs(m.inventory) do
+        if item.equip_id == supportEquipId and not item.repairing then
+            if item.condition > bestCond then
+                bestIdx = i
+                bestCond = item.condition
+            end
+        end
+    end
+    if not bestIdx then
+        return false, sd.name .. " 库存不足"
+    end
+
+    -- 如果已有其他支援装备，先退回库存
+    if squad.support_equip_id then
+        local oldSd = SUPPORT_CATALOG[squad.support_equip_id]
+        table.insert(m.inventory, {
+            equip_id = squad.support_equip_id,
+            condition = squad.support_equip_condition or 100,
+            uid = genInvUid(),
+        })
+    end
+
+    -- 从库存取出新支援装备
+    local item = m.inventory[bestIdx]
+    squad.support_equip_id = supportEquipId
+    squad.support_equip_condition = item.condition
+    squad.support_equip_uid = genInvUid()
+    table.remove(m.inventory, bestIdx)
+
+    return true, squad.name .. " 装备了 " .. sd.name
+end
+
+--- 卸下编队支援装备（退回库存）
+---@param state table
+---@param squadId number
+---@return boolean ok
+---@return string msg
+function Equipment.RemoveSupport(state, squadId)
+    local m = state.military
+    local squad = nil
+    for _, sq in ipairs(m.squads or {}) do
+        if sq.id == squadId then squad = sq; break end
+    end
+    if not squad then return false, "编队不存在" end
+    if not squad.support_equip_id then return false, "该编队没有支援装备" end
+
+    local sd = SUPPORT_CATALOG[squad.support_equip_id]
+    m.inventory = m.inventory or {}
+    table.insert(m.inventory, {
+        equip_id = squad.support_equip_id,
+        condition = squad.support_equip_condition or 100,
+        uid = genInvUid(),
+    })
+
+    local name = sd and sd.name or squad.support_equip_id
+    squad.support_equip_id = nil
+    squad.support_equip_condition = nil
+    squad.support_equip_uid = nil
+
+    return true, squad.name .. " 卸下了 " .. name
 end
 
 -- ============================================================================
@@ -318,18 +573,23 @@ function Equipment.UpgradeFactory(state)
     return true, "开始升级兵工厂至 Lv" .. nextLevel .. "（" .. levelData.build_turns .. " 季）"
 end
 
---- 开始生产装备（工厂）
+--- 开始生产装备（工厂）— 支持主武器和支援装备
 ---@param state table
 ---@param equipId string
 ---@return boolean ok
 ---@return string msg
 function Equipment.StartProduction(state, equipId)
     local m = state.military
-    local equipData = CATALOG[equipId]
+    local equipData, isSupport = lookupEquipData(equipId)
     if not equipData then return false, "装备不存在" end
-    if equipId == "rifle" then return false, "步枪无需生产" end
-    if not EquipmentData.IsUnlocked(state, equipId) then
-        return false, equipData.name .. " 尚未解锁"
+    if isSupport then
+        if not EquipmentData.IsSupportUnlocked(state, equipId) then
+            return false, equipData.name .. " 尚未解锁"
+        end
+    else
+        if not EquipmentData.IsUnlocked(state, equipId) then
+            return false, equipData.name .. " 尚未解锁"
+        end
     end
     if Equipment.GetFactoryFreeSlots(state) < 1 then
         return false, "工厂无空闲槽位"
@@ -361,18 +621,23 @@ function Equipment.StartProduction(state, equipId)
     return true, msg
 end
 
---- 开始代工装备
+--- 开始代工装备 — 支持主武器和支援装备
 ---@param state table
 ---@param equipId string
 ---@return boolean ok
 ---@return string msg
 function Equipment.StartOutsource(state, equipId)
     local m = state.military
-    local equipData = CATALOG[equipId]
+    local equipData, isSupport = lookupEquipData(equipId)
     if not equipData then return false, "装备不存在" end
-    if equipId == "rifle" then return false, "步枪无需生产" end
-    if not EquipmentData.IsUnlocked(state, equipId) then
-        return false, equipData.name .. " 尚未解锁"
+    if isSupport then
+        if not EquipmentData.IsSupportUnlocked(state, equipId) then
+            return false, equipData.name .. " 尚未解锁"
+        end
+    else
+        if not EquipmentData.IsUnlocked(state, equipId) then
+            return false, equipData.name .. " 尚未解锁"
+        end
     end
     if Equipment.GetOutsourceFreeSlots(state) < 1 then
         return false, "代工槽位已满"
@@ -420,7 +685,7 @@ function Equipment.StartRepair(state, invIndex)
     if Equipment.GetFactoryFreeSlots(state) < 1 then
         return false, "工厂无空闲槽位"
     end
-    local equipData = CATALOG[item.equip_id]
+    local equipData = lookupEquipData(item.equip_id)
     if not equipData then return false, "装备数据异常" end
     local cost = math.floor(equipData.prod_cost * REPAIR.cost_ratio * GameState.GetInflationFactor(state))
     if state.cash < cost then
@@ -492,14 +757,14 @@ function Equipment.TickProduction(state)
                     if invItem then
                         invItem.condition = math.min(100, (item.repair_condition or 0) + REPAIR.condition_per_turn)
                         invItem.repairing = nil
-                        local ed = CATALOG[item.equip_id]
+                        local ed = lookupEquipData(item.equip_id)
                         table.insert(messages, (ed and ed.name or item.equip_id) .. " 维修完成（耐久 " .. invItem.condition .. "）")
                     end
                 else
                     -- 生产完成 → 进入库存
                     m.inventory = m.inventory or {}
                     table.insert(m.inventory, { equip_id = item.equip_id, condition = 100, uid = genInvUid() })
-                    local ed = CATALOG[item.equip_id]
+                    local ed = lookupEquipData(item.equip_id)
                     table.insert(messages, (ed and ed.name or item.equip_id) .. " 生产完成，已入库")
                 end
             else
@@ -517,7 +782,7 @@ function Equipment.TickProduction(state)
         if item.progress >= item.total then
             m.inventory = m.inventory or {}
             table.insert(m.inventory, { equip_id = item.equip_id, condition = 100, uid = genInvUid() })
-            local ed = CATALOG[item.equip_id]
+            local ed = lookupEquipData(item.equip_id)
             table.insert(messages, (ed and ed.name or item.equip_id) .. " 代工完成，已入库")
         else
             table.insert(keptOutsource, item)
@@ -543,14 +808,48 @@ function Equipment.OnBattleEnd(state, participatingSquadIds)
         end
 
         if participated then
-            -- 耐久衰减 5-12（T1 步枪不衰减）
+            -- 耐久衰减（T1 步枪不衰减）
             if sq.equip_id ~= "rifle" then
-                local wear = 5 + math.random(0, 7)
-                sq.condition = math.max(0, sq.condition - wear)
-                -- 损毁 → 退回 T1
-                if sq.condition <= 0 then
-                    sq.equip_id = "rifle"
-                    sq.condition = 100
+                if sq.equip_items and #sq.equip_items > 0 then
+                    -- 多件装备：逐件衰减
+                    local kept = {}
+                    for _, ei in ipairs(sq.equip_items) do
+                        local wear = 5 + math.random(0, 7)
+                        ei.condition = math.max(0, ei.condition - wear)
+                        if ei.condition > 0 then
+                            table.insert(kept, ei)
+                        end
+                        -- condition <= 0 的装备视为战损报废，直接丢弃
+                    end
+                    sq.equip_items = kept
+                    if #sq.equip_items == 0 then
+                        -- 全部损毁 → 退回 T1
+                        sq.equip_id = "rifle"
+                        sq.equip_items = nil
+                        sq.condition = 100
+                    else
+                        syncSquadCondition(sq)
+                    end
+                else
+                    -- 兼容旧存档：单件逻辑
+                    local wear = 5 + math.random(0, 7)
+                    sq.condition = math.max(0, sq.condition - wear)
+                    if sq.condition <= 0 then
+                        sq.equip_id = "rifle"
+                        sq.condition = 100
+                    end
+                end
+            end
+
+            -- 支援装备耐久衰减（独立于主武器）
+            if sq.support_equip_id then
+                local sWear = 3 + math.random(0, 5)
+                sq.support_equip_condition = math.max(0, (sq.support_equip_condition or 100) - sWear)
+                if sq.support_equip_condition <= 0 then
+                    -- 支援装备战损报废
+                    sq.support_equip_id = nil
+                    sq.support_equip_condition = nil
+                    sq.support_equip_uid = nil
                 end
             end
 
@@ -605,12 +904,43 @@ function Equipment.OnGuardsLost(state, lostGuards)
     local kept = {}
     for _, sq in ipairs(m.squads) do
         if sq.size >= SQUAD.min_size then
+            -- 缩编后可能需要退回多余装备
+            if sq.equip_id ~= "rifle" and sq.equip_items and #sq.equip_items > 0 then
+                local needed = calcNeededCount(sq.equip_id, sq.size)
+                while #sq.equip_items > needed do
+                    -- 退回耐久最低的
+                    local minIdx, minCond = 1, sq.equip_items[1].condition
+                    for ei_i = 2, #sq.equip_items do
+                        if sq.equip_items[ei_i].condition < minCond then
+                            minIdx = ei_i
+                            minCond = sq.equip_items[ei_i].condition
+                        end
+                    end
+                    local ei = table.remove(sq.equip_items, minIdx)
+                    table.insert(m.inventory, { equip_id = sq.equip_id, condition = ei.condition, uid = genInvUid() })
+                end
+                syncSquadCondition(sq)
+            end
             table.insert(kept, sq)
         else
-            -- 装备回库存
+            -- 装备回库存（全部退回）
+            m.inventory = m.inventory or {}
             if sq.equip_id ~= "rifle" then
-                m.inventory = m.inventory or {}
-                table.insert(m.inventory, { equip_id = sq.equip_id, condition = sq.condition, uid = genInvUid() })
+                if sq.equip_items and #sq.equip_items > 0 then
+                    for _, ei in ipairs(sq.equip_items) do
+                        table.insert(m.inventory, { equip_id = sq.equip_id, condition = ei.condition, uid = genInvUid() })
+                    end
+                else
+                    table.insert(m.inventory, { equip_id = sq.equip_id, condition = sq.condition, uid = genInvUid() })
+                end
+            end
+            -- 支援装备回库存
+            if sq.support_equip_id then
+                table.insert(m.inventory, {
+                    equip_id = sq.support_equip_id,
+                    condition = sq.support_equip_condition or 100,
+                    uid = genInvUid(),
+                })
             end
         end
     end
@@ -668,16 +998,29 @@ function Equipment.CalcMaintenanceCost(state)
     local inflation = GameState.GetInflationFactor(state)
     local equipMaint = 0
 
-    -- 编队装备维护
+    -- 编队装备维护（按实际装备件数 × 单件维护费）
     for _, sq in ipairs(m.squads or {}) do
         local ed = CATALOG[sq.equip_id]
         if ed then
-            equipMaint = equipMaint + ed.maintenance
+            local count = 1
+            if sq.equip_items and #sq.equip_items > 0 then
+                count = #sq.equip_items
+            elseif sq.equip_id ~= "rifle" then
+                count = calcNeededCount(sq.equip_id, sq.size)
+            end
+            equipMaint = equipMaint + ed.maintenance * count
+        end
+        -- 编队支援装备维护（全价，1件）
+        if sq.support_equip_id then
+            local sd = SUPPORT_CATALOG[sq.support_equip_id]
+            if sd then
+                equipMaint = equipMaint + sd.maintenance
+            end
         end
     end
-    -- 库存装备维护（半价）
+    -- 库存装备维护（半价，主武器和支援装备统一）
     for _, item in ipairs(m.inventory or {}) do
-        local ed = CATALOG[item.equip_id]
+        local ed = lookupEquipData(item.equip_id)
         if ed then
             equipMaint = equipMaint + math.floor(ed.maintenance * 0.5)
         end
@@ -703,5 +1046,8 @@ function Equipment.CalcMaintenanceCost(state)
 
     return equipMaint, factoryMaint
 end
+
+--- 公开辅助：计算编队在给定人数下所需装备件数
+Equipment.CalcNeededCount = calcNeededCount
 
 return Equipment

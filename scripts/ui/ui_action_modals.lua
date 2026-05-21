@@ -350,8 +350,19 @@ function ActionModals.ShowDiplomacy(state, accent)
     ActionModals._ShowList("🤝 政治外交 / 情报", rows)
 end
 
+--- 获取外交行动的实际 AP 消耗（考虑巧舌如簧天赋）
+function ActionModals._DiploEffectiveCfg(state, cfg)
+    local traitDiploReduce = GameState.GetActiveTraitEffect and GameState.GetActiveTraitEffect(state, "diplomacy_ap_reduction") or 0
+    if traitDiploReduce > 0 and (cfg.ap or 0) > 0 then
+        local reduced = { ap = math.max(0, (cfg.ap or 0) - traitDiploReduce) }
+        for k, v in pairs(cfg) do if k ~= "ap" then reduced[k] = v end end
+        return reduced
+    end
+    return cfg
+end
+
 function ActionModals._DiploGift(state, faction)
-    local cfg = Balance.DIPLOMACY.gift
+    local cfg = ActionModals._DiploEffectiveCfg(state, Balance.DIPLOMACY.gift)
     if not ActionModals._CanAfford(state, cfg) then
         UI.Toast.Show("资源不足", { variant = "error", duration = 1.2 })
         return
@@ -366,7 +377,7 @@ function ActionModals._DiploGift(state, faction)
 end
 
 function ActionModals._DiploTreaty(state, faction)
-    local cfg = Balance.DIPLOMACY.treaty
+    local cfg = ActionModals._DiploEffectiveCfg(state, Balance.DIPLOMACY.treaty)
     if faction.attitude < cfg.attitude_req then
         UI.Toast.Show(string.format("需要态度 ≥ %d 才能签订协议", cfg.attitude_req),
             { variant = "warning", duration = 1.5 })
@@ -387,7 +398,7 @@ function ActionModals._DiploTreaty(state, faction)
 end
 
 function ActionModals._DiploHostile(state, faction)
-    local cfg = Balance.DIPLOMACY.hostile
+    local cfg = ActionModals._DiploEffectiveCfg(state, Balance.DIPLOMACY.hostile)
     if not ActionModals._CanAfford(state, cfg) then
         UI.Toast.Show("资源不足", { variant = "error", duration = 1.2 })
         return
@@ -596,7 +607,7 @@ function ActionModals.ShowTrade(state, accent)
         else
             local pumpRate = manipCfg.pump.base_success * credMult
             pumpDesc = string.format("%d AP / 市值×15%%（≥%d）  成功率 %.0f%%",
-                manipCfg.pump.ap, manipCfg.pump.min_cash,
+                manipCfg.pump.ap, manipCfg.pump.min_cash_base,
                 pumpRate * 100)
         end
         table.insert(rows, ActionModals._TradeOption(
@@ -606,7 +617,7 @@ function ActionModals.ShowTrade(state, accent)
             function()
                 ActionModals._ShowStockPicker(state, "pump")
             end,
-            not pumpUnlocked or pumpCd > 0 or state.cash < manipCfg.pump.min_cash
+            not pumpUnlocked or pumpCd > 0 or state.cash < manipCfg.pump.min_cash_base
         ))
 
         -- 2) 做空操盘
@@ -624,7 +635,7 @@ function ActionModals.ShowTrade(state, accent)
         else
             local dumpRate = manipCfg.dump.base_success * credMult
             dumpDesc = string.format("%d AP / 市值×20%%（≥%d）  成功率 %.0f%%",
-                manipCfg.dump.ap, manipCfg.dump.min_cash,
+                manipCfg.dump.ap, manipCfg.dump.min_cash_base,
                 dumpRate * 100)
         end
         table.insert(rows, ActionModals._TradeOption(
@@ -634,7 +645,7 @@ function ActionModals.ShowTrade(state, accent)
             function()
                 ActionModals._ShowStockPicker(state, "dump")
             end,
-            not dumpUnlocked or dumpCd > 0 or state.cash < manipCfg.dump.min_cash
+            not dumpUnlocked or dumpCd > 0 or state.cash < manipCfg.dump.min_cash_base
         ))
 
         -- 3) 联合操盘
@@ -655,7 +666,7 @@ function ActionModals.ShowTrade(state, accent)
         else
             local coordRate = manipCfg.coordinated.base_success * credMult
             coordDesc = string.format("%d AP / 固定 %d  成功率 %.0f%%",
-                manipCfg.coordinated.ap, manipCfg.coordinated.fixed_cost,
+                manipCfg.coordinated.ap, manipCfg.coordinated.fixed_cost_base,
                 coordRate * 100)
         end
         table.insert(rows, ActionModals._TradeOption(
@@ -665,7 +676,7 @@ function ActionModals.ShowTrade(state, accent)
             function()
                 ActionModals._ShowCoordinatedPicker(state)
             end,
-            not coordUnlocked or coordCd > 0 or state.cash < manipCfg.coordinated.fixed_cost
+            not coordUnlocked or coordCd > 0 or state.cash < manipCfg.coordinated.fixed_cost_base
         ))
     end
 
@@ -1009,6 +1020,7 @@ function ActionModals._PlunderRaidCaravan(state)
     ActionModals._Spend(state, cfg)
     local ok, msg = Combat.RaidCaravan(state)
     if ok then
+        AudioManager.PlayEffect("plunder_success")
         UI.Toast.Show(msg, { variant = "success", duration = 2.0 })
     else
         UI.Toast.Show(msg, { variant = "error", duration = 2.0 })
@@ -1031,6 +1043,7 @@ function ActionModals._PlunderSeizeVein(state)
     ActionModals._Spend(state, cfg)
     local ok, msg = Combat.SeizeVein(state)
     if ok then
+        AudioManager.PlayEffect("plunder_success")
         UI.Toast.Show(msg, { variant = "success", duration = 2.0 })
     else
         UI.Toast.Show(msg, { variant = "error", duration = 2.0 })
@@ -1053,6 +1066,7 @@ function ActionModals._PlunderExtortForeign(state)
     ActionModals._Spend(state, cfg)
     local ok, msg = Combat.ExtortForeign(state)
     if ok then
+        AudioManager.PlayEffect("plunder_success")
         UI.Toast.Show(msg, { variant = "success", duration = 2.0 })
     else
         UI.Toast.Show(msg, { variant = "error", duration = 2.0 })
@@ -1088,7 +1102,7 @@ function ActionModals._ShowStockPicker(state, mode)
         local diplomBonus = GameState.GetPositionBonus(state, "diplomat")
         local discount = (diplomBonus > 0) and (Balance.MARKET_MANIPULATION.diplomat_discount[discountKey] or 0) or 0
         local actualCost = math.ceil(baseCost * (1 - discount))
-        local finalCost = math.max(cfg.min_cash, actualCost)
+        local finalCost = math.max(cfg.min_cash_base, actualCost)
         local canAfford = state.cash >= finalCost
             and (state.ap.current + (state.ap.temp or 0)) >= cfg.ap
 

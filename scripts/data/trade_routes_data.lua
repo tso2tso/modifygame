@@ -254,6 +254,66 @@ TradeRoutesData.WAR_ORDER_TEMPLATES = {
     },
 }
 
+-- ── 民用商品订单模板（消耗矿产资源而非装备）──
+
+--- 和平时期民用订单模板
+--- 售价参考：矿产市价(copper_price=8, gold_price=50, coal_price=5) × ~1.5 倍利润
+TradeRoutesData.CIVIL_PEACE_TEMPLATES = {
+    {
+        label = "铜锭出口",
+        resources = { { resource = "copper", qty_min = 5, qty_max = 15 } },
+        payment_per_unit = 12,     -- 铜价8，利润50%
+        deadline_turns = 3,
+        risk_level = "low",
+    },
+    {
+        label = "煤炭供应",
+        resources = { { resource = "coal", qty_min = 10, qty_max = 30 } },
+        payment_per_unit = 7,      -- 煤价5，利润40%
+        deadline_turns = 3,
+        risk_level = "low",
+    },
+    {
+        label = "黄金交割",
+        resources = { { resource = "gold", qty_min = 2, qty_max = 6 } },
+        payment_per_unit = 55,     -- 金价50，利润10%（贵金属薄利）
+        deadline_turns = 2,
+        risk_level = "low",
+    },
+}
+
+--- 战争时期民用订单模板（战时溢价，风险更高）
+TradeRoutesData.CIVIL_WAR_TEMPLATES = {
+    {
+        label = "战略矿产",
+        resources = {
+            { resource = "copper", qty_min = 5, qty_max = 10 },
+            { resource = "coal", qty_min = 5, qty_max = 10 },
+        },
+        payment_per_unit = 20,     -- 批次价，战时溢价
+        deadline_turns = 4,
+        risk_level = "medium",
+    },
+    {
+        label = "贵金属急单",
+        resources = { { resource = "gold", qty_min = 3, qty_max = 10 } },
+        payment_per_unit = 80,     -- 金价50，战时溢价60%
+        deadline_turns = 2,
+        risk_level = "medium",
+    },
+    {
+        label = "工业原料包",
+        resources = {
+            { resource = "gold", qty_min = 1, qty_max = 1 },
+            { resource = "copper", qty_min = 8, qty_max = 8 },
+            { resource = "coal", qty_min = 15, qty_max = 15 },
+        },
+        payment_per_unit = 350,    -- 固定批次，整包价
+        deadline_turns = 4,
+        risk_level = "high",
+    },
+}
+
 -- ============================================================================
 -- 公开 API
 -- ============================================================================

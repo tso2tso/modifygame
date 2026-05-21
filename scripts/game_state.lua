@@ -685,6 +685,143 @@ function GameState.DismissVictoryPrompt(state)
     end
 end
 
+-- ============================================================================
+-- 即时胜利检测（全占领 / 经济碾压）
+-- ============================================================================
+
+--- 检查巴尔干霸主（占领 5 个巴尔干小国 + 总控制度达标）
+---@param state table
+---@return table|nil result { type, label, desc, countries_occupied }
+function GameState.CheckDomination(state)
+    local dom = Balance.VICTORY.domination
+    if not dom or not dom.required_countries then return nil end
+
+    local occupied = state.expeditions and state.expeditions.occupied_countries or {}
+    local occupiedSet = {}
+    for _, occ in ipairs(occupied) do
+        occupiedSet[occ.country_id] = true
+    end
+
+    for _, countryId in ipairs(dom.required_countries) do
+        if not occupiedSet[countryId] then
+            return nil
+        end
+    end
+
+    if GameState.CalcTotalControl(state) < (dom.min_total_control or 100) then
+        return nil
+    end
+
+    return {
+        type = "domination",
+        label = dom.label,
+        desc = dom.desc,
+        countries_occupied = #dom.required_countries,
+    }
+end
+
+--- 检查全面统治（占领 europe 中所有国家 + 总控制度达标）
+---@param state table
+---@return table|nil result { type, label, desc, countries_occupied }
+function GameState.CheckWorldDomination(state)
+    local wdom = Balance.VICTORY.world_domination
+    if not wdom then return nil end
+
+    local occupied = state.expeditions and state.expeditions.occupied_countries or {}
+    local occupiedSet = {}
+    for _, occ in ipairs(occupied) do
+        occupiedSet[occ.country_id] = true
+    end
+
+    local totalCountries = 0
+    local totalOccupied = 0
+    for id, country in pairs(state.europe or {}) do
+        if id ~= "bosnia" then
+            totalCountries = totalCountries + 1
+            if occupiedSet[id] then
+                totalOccupied = totalOccupied + 1
+            end
+        end
+    end
+
+    if totalCountries == 0 or totalOccupied < totalCountries then
+        return nil
+    end
+
+    if GameState.CalcTotalControl(state) < (wdom.min_total_control or 100) then
+        return nil
+    end
+
+    return {
+        type = "world_domination",
+        label = wdom.label,
+        desc = wdom.desc,
+        countries_occupied = totalOccupied,
+    }
+end
+
+--- 检查经济碾压（现金/黄金/资产/控制度均超高阈值）
+---@param state table
+---@return table|nil result { type, label, desc }
+function GameState.CheckEconomicDominance(state)
+    local edom = Balance.VICTORY.economic_dominance
+    if not edom then return nil end
+
+    if (state.cash or 0) < (edom.min_cash or 50000) then return nil end
+    if (state.gold or 0) < (edom.min_gold or 100) then return nil end
+    if GameState.CalcTotalControl(state) < (edom.min_total_control or 150) then return nil end
+
+    local totalAssets = GameState.CalcTotalAssets(state)
+    if totalAssets < (edom.min_total_assets or 100000) then return nil end
+
+    return {
+        type = "economic_dominance",
+        label = edom.label,
+        desc = edom.desc,
+    }
+end
+
+--- 统一即时胜利检查（各类型独立，互不阻塞）
+---@param state table
+---@return table|nil instantVictory { type, label, desc, ... }
+function GameState.CheckInstantVictory(state)
+    local claimed = (state.victory and state.victory.instant_claimed) or {}
+
+    -- 按优先级逐个检查，已领取的跳过
+    if not claimed["world_domination"] then
+        local r = GameState.CheckWorldDomination(state)
+        if r then return r end
+    end
+    if not claimed["economic_dominance"] then
+        local r = GameState.CheckEconomicDominance(state)
+        if r then return r end
+    end
+
+    return nil
+end
+
+--- 记录即时胜利成就（按类型独立记录，不互相阻塞）
+---@param state table
+---@param instantVictory table 来自 CheckInstantVictory 的结果
+function GameState.ClaimInstantVictory(state, instantVictory)
+    state.victory = state.victory or { economic = 0, military = 0 }
+    -- instant_claimed 改为 table，按类型记录
+    if type(state.victory.instant_claimed) ~= "table" then
+        state.victory.instant_claimed = {}
+    end
+    state.victory.instant_claimed[instantVictory.type] = true
+    -- 最新一次即时胜利的描述（用于终局结算兼容）
+    state.victory.instant_label = instantVictory.label
+    state.victory.instant_desc = instantVictory.desc
+    -- 同时标记为常规 claimed，使终局结算兼容
+    state.victory.claimed = instantVictory.type
+    state.victory.claimed_year = state.year
+    state.victory.claimed_quarter = state.quarter
+    state.victory.prompt_pending = nil
+    GameState.AddLog(state, string.format(
+        "伟大成就：%s！%s", instantVictory.label, instantVictory.desc))
+end
+
 --- 经济胜利快照验证
 ---@param state table
 ---@return boolean
@@ -815,6 +952,18 @@ function GameState.GetEndingInfo(state)
         ending.variant = "success"
         ending.icon = "★"
         ending.description = "家族在财富、武装与地区影响上全面压过所有竞争势力。"
+    elseif victoryType == "world_domination" then
+        ending.title = "终极胜利：全面统治"
+        ending.resultLabel = "至高胜利"
+        ending.variant = "success"
+        ending.icon = "🌍"
+        ending.description = "欧洲大陆上再无独立势力。科瓦奇家族书写了一个属于矿业家族的帝国传奇。"
+    elseif victoryType == "economic_dominance" then
+        ending.title = "经济胜利：财阀王朝"
+        ending.resultLabel = "伟大胜利"
+        ending.variant = "success"
+        ending.icon = "💎"
+        ending.description = "黄金与资本的洪流淹没了所有竞争者。科瓦奇家族建立了横跨时代的绝对财富霸权。"
     elseif victoryType == "bankrupt" then
         ending.title = "失败：家族破产"
         ending.resultLabel = "失败"
@@ -1055,8 +1204,13 @@ function GameState.AssignPosition(state, memberId, positionId)
                 -- 上岗：设置适应期（称号modifier：适应期缩短）
                 m.position = positionId
                 local onboardReduction = GameState.GetModifierValue(state, "onboarding_reduction")
-                m.onboarding_remaining = math.max(0,
-                    (Balance.FAMILY.onboarding_turns or 2) - onboardReduction)
+                local baseTurns = Balance.FAMILY.onboarding_turns or 2
+                -- 缺陷「刚愎自用」：磨合期翻倍
+                local onboardMult = GameState.GetMemberFlawEffect(m, "onboarding_mult")
+                if onboardMult > 0 then
+                    baseTurns = baseTurns * onboardMult
+                end
+                m.onboarding_remaining = math.max(0, baseTurns - onboardReduction)
                 m.cooldown_turns = 0  -- 上岗清除冷却
             else
                 -- 下岗：即时生效，进入冷却期
@@ -1090,7 +1244,11 @@ function GameState.GetPositionBonus(state, positionId)
     end
     if not posConfig then return 0 end
 
-    local _, bonus = FamiliesData.GetPositionFit(member, posConfig.attr1, posConfig.attr2)
+    local rating, bonus = FamiliesData.GetPositionFit(member, posConfig.attr1, posConfig.attr2)
+    -- 缺陷「眼高手低」：优秀降为良好
+    if rating == "excellent" and GameState.GetMemberFlawEffect(member, "downgrade_excellent") > 0 then
+        bonus = Balance.FAMILY.position_bonus_half or 0.5
+    end
     -- 适应期间仅获得部分加成
     if (member.onboarding_remaining or 0) > 0 then
         local ratio = Balance.FAMILY.onboarding_bonus_ratio or 0.3
@@ -1244,6 +1402,183 @@ function GameState.RetireFamilyMember(state, memberId)
         end
     end
     return false, nil
+end
+
+-- ============================================================================
+-- 天赋 / 缺陷 / 学位 查询
+-- ============================================================================
+
+--- 检查大学是否已解锁（科技 d6a_university 已研发）
+---@param state table
+---@return boolean
+function GameState.IsUniversityUnlocked(state)
+    return state.tech and state.tech.researched and state.tech.researched["d6a_university"] == true
+end
+
+--- 获取某成员的天赋效果值（返回 0 表示无匹配）
+---@param member table
+---@param effectKind string
+---@return number
+function GameState.GetMemberTraitEffect(member, effectKind)
+    if not member.trait then return 0 end
+    local def = FamiliesData.GetTraitDef(member.trait)
+    if def and def.effect_kind == effectKind then
+        return def.effect_value
+    end
+    return 0
+end
+
+--- 获取某成员的缺陷效果值
+---@param member table
+---@param effectKind string
+---@return number
+function GameState.GetMemberFlawEffect(member, effectKind)
+    if not member.flaw then return 0 end
+    local def = FamiliesData.GetFlawDef(member.flaw)
+    if def and def.effect_kind == effectKind then
+        return def.effect_value
+    end
+    return 0
+end
+
+--- 获取某成员所有学位的特定效果总值
+---@param member table
+---@param effectKind string
+---@return number
+function GameState.GetMemberDegreeEffect(member, effectKind)
+    if not member.degrees then return 0 end
+    local total = 0
+    for _, degId in ipairs(member.degrees) do
+        local def = FamiliesData.GetDegreeDef(degId)
+        if def and def.effect_kind == effectKind then
+            total = total + def.effect_value
+        end
+    end
+    return total
+end
+
+--- 汇总所有在岗成员的某类天赋效果（取最大值 —— 天赋不叠加）
+---@param state table
+---@param effectKind string
+---@return number
+function GameState.GetActiveTraitEffect(state, effectKind)
+    local best = 0
+    for _, m in ipairs((state.family and state.family.members) or {}) do
+        if m.status == "active" and m.position then
+            local v = GameState.GetMemberTraitEffect(m, effectKind)
+            if v > best then best = v end
+        end
+    end
+    return best
+end
+
+--- 汇总所有在岗成员的某类缺陷效果（叠加 —— 缺陷惩罚累计）
+---@param state table
+---@param effectKind string
+---@return number
+function GameState.GetActiveFlawEffect(state, effectKind)
+    local total = 0
+    for _, m in ipairs((state.family and state.family.members) or {}) do
+        if m.status == "active" and m.position then
+            total = total + GameState.GetMemberFlawEffect(m, effectKind)
+        end
+    end
+    return total
+end
+
+--- 汇总所有在岗成员的某类学位效果（叠加）
+---@param state table
+---@param effectKind string
+---@return number
+function GameState.GetActiveDegreeEffect(state, effectKind)
+    local total = 0
+    for _, m in ipairs((state.family and state.family.members) or {}) do
+        if m.status == "active" and m.position then
+            total = total + GameState.GetMemberDegreeEffect(m, effectKind)
+        end
+    end
+    return total
+end
+
+--- 开始大学进修
+---@param state table
+---@param memberId string
+---@param degreeId string
+---@return boolean ok
+---@return string msg
+function GameState.StartUniversity(state, memberId, degreeId)
+    if not GameState.IsUniversityUnlocked(state) then
+        return false, "尚未解锁大学（需研发萨拉热窝大学）"
+    end
+
+    -- 检查学位是否存在
+    local degreeDef = FamiliesData.GetDegreeDef(degreeId)
+    if not degreeDef then
+        return false, "无效的学位"
+    end
+
+    -- 查找成员
+    local member = nil
+    for _, m in ipairs(state.family.members) do
+        if m.id == memberId then
+            member = m
+            break
+        end
+    end
+    if not member then return false, "成员不存在" end
+    if member.status ~= "active" then return false, "成员不可用" end
+
+    -- 检查是否正在进修
+    if state.family.university then
+        for _, u in ipairs(state.family.university) do
+            if u.member_id == memberId then
+                return false, "该成员正在进修中"
+            end
+        end
+    end
+
+    -- 检查学位数量上限
+    member.degrees = member.degrees or {}
+    local maxDeg = Balance.FAMILY.university_max_degrees or 2
+    if #member.degrees >= maxDeg then
+        return false, string.format("该成员已获得 %d 个学位，达到上限", maxDeg)
+    end
+
+    -- 检查是否重复学位
+    for _, d in ipairs(member.degrees) do
+        if d == degreeId then
+            return false, "该成员已拥有此学位"
+        end
+    end
+
+    -- 费用（含通胀）
+    local baseCost = Balance.FAMILY.university_cost or 300
+    local cost = math.floor(baseCost * GameState.GetInflationFactor(state))
+    if state.cash < cost then
+        return false, string.format("现金不足（需要 %d）", cost)
+    end
+
+    state.cash = state.cash - cost
+
+    -- 成员离岗（如有）
+    if member.position then
+        member.position = nil
+        member.onboarding_remaining = 0
+    end
+
+    -- 记录进修
+    state.family.university = state.family.university or {}
+    table.insert(state.family.university, {
+        member_id = memberId,
+        degree_id = degreeId,
+        progress  = 0,
+        total     = Balance.FAMILY.university_duration or 4,
+    })
+
+    GameState.AddLog(state, string.format(
+        "%s 进入萨拉热窝大学研修「%s」，预计 %d 季完成",
+        member.name, degreeDef.name, Balance.FAMILY.university_duration or 4))
+    return true, "已开始进修"
 end
 
 --- 通过 hex 模块控制状态重算本地 region 的控制度与 AI 存在度。

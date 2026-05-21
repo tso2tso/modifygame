@@ -207,6 +207,9 @@ function SaveLoad._SerializeState(state)
         claimed_year = state.victory.claimed_year,
         claimed_quarter = state.victory.claimed_quarter,
         prompt_pending = state.victory.prompt_pending,
+        instant_claimed = state.victory.instant_claimed,
+        instant_label = state.victory.instant_label,
+        instant_desc = state.victory.instant_desc,
     }
     data.battle_wins_total = state.battle_wins_total or 0
     data.battle_wins_unclaimed = state.battle_wins_unclaimed or 0
@@ -264,7 +267,11 @@ function SaveLoad._SerializeState(state)
     data.event_drought_counter = state.event_drought_counter or 0
 
     -- 家族成员
-    data.family = { members = {}, training = state.family.training }
+    data.family = {
+        members = {},
+        training = state.family.training,
+        university = state.family.university,  -- 大学进修队列
+    }
     for _, m in ipairs(state.family.members) do
         table.insert(data.family.members, {
             id = m.id,
@@ -280,6 +287,9 @@ function SaveLoad._SerializeState(state)
                 ambition   = m.attrs.ambition,
             },
             hidden = m.hidden,
+            trait = m.trait,        -- 天赋 id
+            flaw = m.flaw,         -- 缺陷 id
+            degrees = m.degrees,   -- 已获学位 id 列表
             position = m.position,
             onboarding_remaining = m.onboarding_remaining or 0,
             status = m.status,
@@ -506,6 +516,8 @@ function SaveLoad._DeserializeState(data)
     data.victory = data.victory or { economic = 0, military = 0 }
     data.family = data.family or { members = {} }
     -- family.training 可以为 nil（表示没有正在培养的成员）
+    -- family.university 大学进修队列迁移：旧存档无此字段
+    -- nil 即无人在读，不需要默认空表（GameState.StartUniversity 会按需初始化）
     -- 旧存档迁移：确保每个家族成员有 onboarding_remaining 字段 + 立绘路径
     local FamiliesData = require("data.families_data")
     for _, m in ipairs(data.family.members or {}) do
@@ -531,6 +543,14 @@ function SaveLoad._DeserializeState(data)
             -- 标记已用的池立绘（防止重复分配）
             FamiliesData.MarkPoolPortraitUsed(m.portraitImage)
         end
+        -- 天赋/缺陷/学位迁移：旧存档没有这些字段，随机补充
+        if m.trait == nil then
+            m.trait = FamiliesData.RandomTraitId()
+        end
+        if m.flaw == nil then
+            m.flaw = FamiliesData.RandomFlawId()
+        end
+        m.degrees = m.degrees or {}
         -- 年龄迁移：旧存档没有 age 字段
         if m.age == nil then
             -- 根据成员 id 推算初始年龄，再加上已过年数
@@ -550,6 +570,13 @@ function SaveLoad._DeserializeState(data)
     data.ai_factions = data.ai_factions or {}
     data.modifiers = data.modifiers or {}
     data.foreign_ops = data.foreign_ops or { scouted = {}, scouting = nil, active = {} }
+    -- 旧存档迁移：据点升级字段（level / specialization）
+    if data.foreign_ops.active then
+        for _, info in pairs(data.foreign_ops.active) do
+            info.level = info.level or 1
+            -- specialization: nil 表示 Lv1 未选专精，无需默认值
+        end
+    end
 
     -- 掠夺/声誉系统（v0.6.0 新增）
     data.reputation = data.reputation or 0
@@ -677,6 +704,14 @@ function SaveLoad._DeserializeState(data)
     data.trade.failed_count = data.trade.failed_count or 0
     data.trade.total_revenue = data.trade.total_revenue or 0
     data.trade.last_quarter_revenue = data.trade.last_quarter_revenue or 0
+    data.trade.civil_trades_completed = data.trade.civil_trades_completed or 0
+    -- 旧存档迁移：为缺少 order_type 的订单补充默认值
+    for _, order in ipairs(data.trade.order_pool) do
+        order.order_type = order.order_type or "military"
+    end
+    for _, order in ipairs(data.trade.active_orders) do
+        order.order_type = order.order_type or "military"
+    end
     -- 旧存档迁移：trade.reputation → 统一声誉
     if data.trade.reputation then
         -- 旧范围 -10~+10 → 新范围按比例叠加到统一声誉
@@ -767,6 +802,9 @@ function SaveLoad._DeserializeState(data)
     data.victory.claimed_year = data.victory.claimed_year
     data.victory.claimed_quarter = data.victory.claimed_quarter
     data.victory.prompt_pending = data.victory.prompt_pending
+    data.victory.instant_claimed = data.victory.instant_claimed
+    data.victory.instant_label = data.victory.instant_label
+    data.victory.instant_desc = data.victory.instant_desc
 
     -- 贷款/破产追踪（v0.4.0 新增保存）
     data.loan_consecutive_defaults = data.loan_consecutive_defaults or 0
@@ -908,6 +946,34 @@ function SaveLoad._DeserializeState(data)
     data.military.production_queue = data.military.production_queue or {}
     data.military.outsource_slots = data.military.outsource_slots or {}
 
+    -- v0.6.x 迁移：旧存档编队无 equip_items，按 coverage 补建
+    do
+        local EquipmentDataMig = require("data.equipment_data")
+        for _, sq in ipairs(data.military.squads) do
+            if sq.equip_id and sq.equip_id ~= "rifle" and not sq.equip_items then
+                local ed = EquipmentDataMig.CATALOG[sq.equip_id]
+                local coverage = ed and ed.coverage
+                local count = coverage and math.ceil(sq.size / coverage) or 1
+                sq.equip_items = {}
+                local cond = sq.condition or 100
+                for _ = 1, count do
+                    table.insert(sq.equip_items, { condition = cond, uid = 0 })
+                end
+                print(string.format("[SaveLoad] 编队迁移：%s 补建 equip_items ×%d (耐久%d)",
+                    sq.name or "?", count, cond))
+            end
+        end
+    end
+
+    -- v0.6.x 迁移：支援装备字段兼容（旧存档无此字段，nil 即无装备）
+    for _, sq in ipairs(data.military.squads) do
+        -- support_equip_id / support_equip_condition / support_equip_uid
+        -- 这些字段 nil 表示无支援装备，无需强制赋默认值
+        -- 仅处理异常情况：有 id 但缺 condition
+        if sq.support_equip_id and not sq.support_equip_condition then
+            sq.support_equip_condition = 100
+        end
+    end
 
     -- 矿山槽位 + 探矿（v0.4.0 新增）
     data.mine_slots_bonus = data.mine_slots_bonus or 0

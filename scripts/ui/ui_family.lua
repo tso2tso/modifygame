@@ -9,6 +9,7 @@ local GameState = require("game_state")
 local FamiliesData = require("data.families_data")
 local Balance = require("data.balance")
 local SaveLoad = require("utils.save_load")
+local AudioManager = require("systems.audio_manager")
 
 local C = Config.COLORS
 local F = Config.FONT
@@ -26,6 +27,65 @@ local uiRoot_ = nil
 local currentModal_ = nil
 ---@type table|nil 重随子弹窗
 local rerollModal_ = nil
+
+-- ============================================================================
+-- 天赋/缺陷/学位 Chip 生成工具
+-- ============================================================================
+
+--- 为成员生成天赋 Chip（绿色）
+function FamilyPage._TraitChip(member)
+    if not member.trait then return nil end
+    local def = FamiliesData.GetTraitDef(member.trait)
+    if not def then return nil end
+    return UI.Chip {
+        label = def.icon .. " " .. def.name,
+        color = "success",
+        variant = "soft",
+        size = "sm",
+    }
+end
+
+--- 为成员生成缺陷 Chip（红色）
+function FamilyPage._FlawChip(member)
+    if not member.flaw then return nil end
+    local def = FamiliesData.GetFlawDef(member.flaw)
+    if not def then return nil end
+    return UI.Chip {
+        label = def.icon .. " " .. def.name,
+        color = "error",
+        variant = "soft",
+        size = "sm",
+    }
+end
+
+--- 为成员生成学位 Chips（蓝色数组）
+function FamilyPage._DegreeChips(member)
+    if not member.degrees or #member.degrees == 0 then return {} end
+    local chips = {}
+    for _, degId in ipairs(member.degrees) do
+        local def = FamiliesData.GetDegreeDef(degId)
+        if def then
+            table.insert(chips, UI.Chip {
+                label = def.icon .. " " .. def.name,
+                color = "primary",
+                variant = "soft",
+                size = "sm",
+            })
+        end
+    end
+    return chips
+end
+
+--- 检查成员是否正在大学进修
+function FamilyPage._IsStudying(state, memberId)
+    if not state.family.university then return false, nil end
+    for _, u in ipairs(state.family.university) do
+        if u.member_id == memberId then
+            return true, u
+        end
+    end
+    return false, nil
+end
 
 -- 属性条颜色映射
 local ATTR_COLORS = {
@@ -190,6 +250,7 @@ function FamilyPage._CreateSummaryCard(state)
                             disabled = state.family.training ~= nil or atMax or not portraitAvailable,
                             onClick = Config.ClickGuard(function()
                                 local ok, msg = GameState.StartFamilyTraining(state)
+                                if ok then AudioManager.PlayEffect("family_train") end
                                 UI.Toast.Show(msg, { variant = ok and "success" or "warning", duration = 1.8 })
                                 if ok and onStateChanged_ then onStateChanged_() end
                             end),
@@ -197,6 +258,31 @@ function FamilyPage._CreateSummaryCard(state)
                     end)(),
                 },
             },
+            -- 大学入口（科技解锁后显示）
+            GameState.IsUniversityUnlocked(state) and UI.Panel {
+                width = "100%",
+                flexDirection = "row",
+                alignItems = "center",
+                gap = 8,
+                children = {
+                    UI.Label {
+                        text = "🎓 萨拉热窝大学",
+                        fontSize = F.body,
+                        fontWeight = "bold",
+                        fontColor = C.accent_gold,
+                    },
+                    UI.Panel { flexGrow = 1 },
+                    UI.Button {
+                        text = string.format("进修（💰%d）", math.floor((Balance.FAMILY.university_cost or 300) * GameState.GetInflationFactor(state))),
+                        fontSize = F.body_minor,
+                        variant = "outlined",
+                        size = "sm",
+                        onClick = Config.ClickGuard(function()
+                            FamilyPage._ShowUniversityModal(state)
+                        end),
+                    },
+                },
+            } or nil,
             UI.Label {
                 text = "分配家族成员到岗位可获得对应方向经营加成，上岗需适应2季度",
                 fontSize = F.body_minor,
@@ -321,6 +407,11 @@ function FamilyPage._CreatePositionCard(state, pos)
                 size = "sm",
             })
         end
+        -- 天赋/缺陷标签
+        local tc = FamilyPage._TraitChip(occupant)
+        if tc then table.insert(statusChips, tc) end
+        local fc = FamilyPage._FlawChip(occupant)
+        if fc then table.insert(statusChips, fc) end
 
         -- 立绘 + 信息 横向布局
         local portraitWidget
@@ -602,18 +693,25 @@ end
 
 --- 创建待命成员行
 function FamilyPage._CreateIdleMemberRow(member, isDisabled, isCooldown)
+    -- 天赋/缺陷/学位 chips
     local traitChips = {}
-    for _, hint in ipairs(FamiliesData.GetHiddenTraitHints(member)) do
-        table.insert(traitChips, UI.Chip {
-            label = hint,
-            color = TRAIT_CHIP_COLORS[hint] or "default",
-            variant = "soft",
-            size = "sm",
-        })
+    local tc = FamilyPage._TraitChip(member)
+    if tc then table.insert(traitChips, tc) end
+    local fc = FamilyPage._FlawChip(member)
+    if fc then table.insert(traitChips, fc) end
+    for _, dc in ipairs(FamilyPage._DegreeChips(member)) do
+        table.insert(traitChips, dc)
     end
+    -- 进修状态
+    local studying, studyInfo = FamilyPage._IsStudying(stateRef_, member.id)
 
     local statusLabel, statusColor
-    if isDisabled then
+    if studying and studyInfo then
+        local deg = FamiliesData.GetDegreeDef(studyInfo.degree_id)
+        statusLabel = "进修中 " .. (studyInfo.progress or 0) .. "/" .. (studyInfo.total or 4)
+        if deg then statusLabel = deg.icon .. " " .. statusLabel end
+        statusColor = "primary"
+    elseif isDisabled then
         statusLabel = "失能 " .. (member.disabled_turns or 0) .. "回合"
         statusColor = "error"
     elseif isCooldown then
@@ -922,6 +1020,16 @@ function FamilyPage._CreateCandidateRow(member, pos)
                         fontSize = F.label,
                         fontColor = C.text_secondary,
                     },
+                    UI.Panel {
+                        flexDirection = "row",
+                        gap = 4,
+                        flexWrap = "wrap",
+                        children = {
+                            FamilyPage._TraitChip(member),
+                            FamilyPage._FlawChip(member),
+                            table.unpack(FamilyPage._DegreeChips(member)),
+                        },
+                    },
                     fromOtherPos and UI.Label {
                         text = "当前在岗：" .. (otherPosName or ""),
                         fontSize = F.label,
@@ -1195,6 +1303,149 @@ function FamilyPage._ShowMemberDetail(member)
         children = attrRows,
     })
 
+    -- 3.5) 天赋 / 缺陷 / 学位
+    do
+        local traitFlawDegreeChildren = {}
+
+        -- 天赋
+        if member.trait then
+            local tDef = FamiliesData.GetTraitDef(member.trait)
+            if tDef then
+                table.insert(traitFlawDegreeChildren, UI.Panel {
+                    width = "100%",
+                    flexDirection = "row",
+                    alignItems = "center",
+                    gap = 8,
+                    children = {
+                        UI.Chip {
+                            label = tDef.icon .. " " .. tDef.name,
+                            color = "success",
+                            variant = "soft",
+                            size = "sm",
+                        },
+                        UI.Label {
+                            text = tDef.effect_desc,
+                            fontSize = F.body_minor,
+                            fontColor = C.accent_green,
+                            flexShrink = 1,
+                        },
+                    },
+                })
+            end
+        end
+
+        -- 缺陷
+        if member.flaw then
+            local fDef = FamiliesData.GetFlawDef(member.flaw)
+            if fDef then
+                table.insert(traitFlawDegreeChildren, UI.Panel {
+                    width = "100%",
+                    flexDirection = "row",
+                    alignItems = "center",
+                    gap = 8,
+                    children = {
+                        UI.Chip {
+                            label = fDef.icon .. " " .. fDef.name,
+                            color = "error",
+                            variant = "soft",
+                            size = "sm",
+                        },
+                        UI.Label {
+                            text = fDef.effect_desc,
+                            fontSize = F.body_minor,
+                            fontColor = C.accent_red,
+                            flexShrink = 1,
+                        },
+                    },
+                })
+            end
+        end
+
+        -- 学位
+        if member.degrees and #member.degrees > 0 then
+            for _, degId in ipairs(member.degrees) do
+                local dDef = FamiliesData.GetDegreeDef(degId)
+                if dDef then
+                    table.insert(traitFlawDegreeChildren, UI.Panel {
+                        width = "100%",
+                        flexDirection = "row",
+                        alignItems = "center",
+                        gap = 8,
+                        children = {
+                            UI.Chip {
+                                label = dDef.icon .. " " .. dDef.name,
+                                color = "primary",
+                                variant = "soft",
+                                size = "sm",
+                            },
+                            UI.Label {
+                                text = dDef.effect_desc,
+                                fontSize = F.body_minor,
+                                fontColor = C.accent_blue or C.text_secondary,
+                                flexShrink = 1,
+                            },
+                        },
+                    })
+                end
+            end
+        end
+
+        -- 进修中状态
+        if stateRef_ then
+            local studying, studyInfo = FamilyPage._IsStudying(stateRef_, member.id)
+            if studying and studyInfo then
+                local sDef = FamiliesData.GetDegreeDef(studyInfo.degree_id)
+                local sLabel = string.format("进修中 %d/%d 季",
+                    studyInfo.progress or 0, studyInfo.total or 4)
+                if sDef then sLabel = sDef.icon .. " " .. sDef.name .. " — " .. sLabel end
+                table.insert(traitFlawDegreeChildren, UI.Panel {
+                    width = "100%",
+                    flexDirection = "row",
+                    alignItems = "center",
+                    gap = 8,
+                    children = {
+                        UI.Chip {
+                            label = "📖 进修中",
+                            color = "info",
+                            variant = "soft",
+                            size = "sm",
+                        },
+                        UI.Label {
+                            text = sLabel,
+                            fontSize = F.body_minor,
+                            fontColor = C.text_secondary,
+                            flexShrink = 1,
+                        },
+                    },
+                })
+            end
+        end
+
+        if #traitFlawDegreeChildren > 0 then
+            table.insert(contentChildren, UI.Divider { color = C.divider })
+            table.insert(contentChildren, UI.Panel {
+                width = "100%",
+                flexDirection = "row",
+                alignItems = "center",
+                gap = 6,
+                children = {
+                    UI.Label {
+                        text = "特质与学位",
+                        fontSize = F.subtitle,
+                        fontWeight = "bold",
+                        fontColor = C.text_secondary,
+                    },
+                },
+            })
+            table.insert(contentChildren, UI.Panel {
+                width = "100%",
+                flexDirection = "column",
+                gap = 4,
+                children = traitFlawDegreeChildren,
+            })
+        end
+    end
+
     -- 4) 内政洞察：满配内政总监时显示隐藏属性数值
     if stateRef_ and GameState.CanRevealHiddenAttrs(stateRef_) then
         local hiddenDefs = {
@@ -1347,6 +1598,7 @@ function FamilyPage._DoAssign(memberId, pos)
             if m.id == memberId then memberName = m.name; break end
         end
         GameState.AddLog(stateRef_, memberName .. " 被任命为" .. pos.name .. "（适应期2季度）")
+        AudioManager.PlayEffect("family_assign")
         UI.Toast.Show(memberName .. " → " .. pos.name, { variant = "success", duration = 1.5 })
 
         FamilyPage._CloseModal()
@@ -1720,6 +1972,370 @@ function FamilyPage._CloseModal()
         currentModal_:Close()
         currentModal_ = nil
     end
+end
+
+-- ============================================================================
+-- 大学进修弹窗
+-- ============================================================================
+
+--- 打开大学弹窗：选择学位 → 选择成员 → 确认入学
+function FamilyPage._ShowUniversityModal(state)
+    FamilyPage._CloseModal()
+    if not state then return end
+
+    local baseCost = Balance.FAMILY.university_cost or 300
+    local cost = math.floor(baseCost * GameState.GetInflationFactor(state))
+    local duration = Balance.FAMILY.university_duration or 4
+    local maxDeg = Balance.FAMILY.university_max_degrees or 2
+
+    -- 当前在学人员
+    local studyingCount = state.family.university and #state.family.university or 0
+
+    -- 学位网格
+    local degreeCards = {}
+    for _, deg in ipairs(FamiliesData.DEGREES) do
+        table.insert(degreeCards, UI.Panel {
+            width = "48%",
+            padding = 10,
+            backgroundColor = C.paper_dark,
+            borderRadius = S.radius_badge,
+            borderWidth = 1,
+            borderColor = C.border_card,
+            flexDirection = "column",
+            gap = 4,
+            children = {
+                UI.Label {
+                    text = deg.icon .. " " .. deg.name,
+                    fontSize = F.body,
+                    fontWeight = "bold",
+                    fontColor = C.text_primary,
+                },
+                UI.Label {
+                    text = deg.effect_desc,
+                    fontSize = F.label,
+                    fontColor = C.accent_green,
+                },
+                UI.Label {
+                    text = deg.desc,
+                    fontSize = F.label,
+                    fontColor = C.text_muted,
+                    whiteSpace = "normal",
+                    lineHeight = 1.3,
+                },
+                UI.Button {
+                    text = "选择此学位",
+                    fontSize = F.label,
+                    variant = "outlined",
+                    size = "sm",
+                    width = "100%",
+                    onClick = Config.ClickGuard(function()
+                        FamilyPage._ShowUniversityMemberPicker(state, deg)
+                    end),
+                },
+            },
+        })
+    end
+
+    -- 当前在学列表
+    local studyingItems = {}
+    if studyingCount > 0 then
+        table.insert(studyingItems, UI.Divider { color = C.divider })
+        table.insert(studyingItems, UI.Label {
+            text = "当前在学",
+            fontSize = F.subtitle,
+            fontWeight = "bold",
+            fontColor = C.text_secondary,
+        })
+        for _, u in ipairs(state.family.university or {}) do
+            local mem = nil
+            for _, m in ipairs(state.family.members) do
+                if m.id == u.member_id then mem = m; break end
+            end
+            local dDef = FamiliesData.GetDegreeDef(u.degree_id)
+            local label = (mem and mem.name or "?") .. " — "
+                .. (dDef and (dDef.icon .. " " .. dDef.name) or "?")
+                .. string.format("（%d/%d季）", u.progress or 0, u.total or 4)
+            table.insert(studyingItems, UI.Label {
+                text = label,
+                fontSize = F.body_minor,
+                fontColor = C.text_secondary,
+            })
+        end
+    end
+
+    -- 组装所有 children（避免 nil 空洞和 table.unpack 陷阱）
+    local scrollChildren = {
+        -- 信息区
+        UI.Panel {
+            width = "100%",
+            flexDirection = "row",
+            flexWrap = "wrap",
+            gap = 12,
+            children = {
+                FamilyPage._StatItem("费用", string.format("💰%d", cost)),
+                FamilyPage._StatItem("学制", string.format("%d季", duration)),
+                FamilyPage._StatItem("在学", tostring(studyingCount) .. "人"),
+                FamilyPage._StatItem("上限", string.format("%d学位/人", maxDeg)),
+            },
+        },
+        UI.Divider { color = C.divider },
+        UI.Label {
+            text = "选择一个学位方向",
+            fontSize = F.subtitle,
+            fontWeight = "bold",
+            fontColor = C.text_secondary,
+        },
+        -- 学位卡片网格
+        UI.Panel {
+            width = "100%",
+            flexDirection = "row",
+            flexWrap = "wrap",
+            gap = 8,
+            justifyContent = "space-between",
+            children = degreeCards,
+        },
+    }
+    for _, item in ipairs(studyingItems) do
+        table.insert(scrollChildren, item)
+    end
+
+    local content = UI.ScrollView {
+        width = "100%",
+        maxHeight = 480,
+        flexShrink = 1,
+        scrollY = true,
+        bounces = false,
+        children = {
+            UI.Panel {
+                width = "100%",
+                flexDirection = "column",
+                gap = 12,
+                padding = S.card_padding,
+                children = scrollChildren,
+            },
+        },
+    }
+
+    currentModal_ = UI.Modal {
+        title = "🎓 萨拉热窝大学",
+        size = "md",
+        closeOnOverlay = true,
+        closeOnEscape = true,
+        showCloseButton = true,
+        onClose = function(self)
+            Config.ConsumeTap()
+            currentModal_ = nil
+            self:Destroy()
+        end,
+    }
+    currentModal_:AddContent(content)
+    if uiRoot_ then
+        uiRoot_:AddChild(currentModal_)
+    end
+    currentModal_:Open()
+end
+
+--- 大学弹窗第二步：选择送哪个成员去进修
+function FamilyPage._ShowUniversityMemberPicker(state, degree)
+    FamilyPage._CloseModal()
+
+    local baseCost = Balance.FAMILY.university_cost or 300
+    local cost = math.floor(baseCost * GameState.GetInflationFactor(state))
+    local maxDeg = Balance.FAMILY.university_max_degrees or 2
+
+    -- 筛选可用成员：活跃、未在进修、学位未满、未拥有此学位
+    local eligible = {}
+    for _, m in ipairs(state.family.members) do
+        if m.status == "active" then
+            local studying = FamilyPage._IsStudying(state, m.id)
+            local degCount = m.degrees and #m.degrees or 0
+            local hasDeg = false
+            if m.degrees then
+                for _, d in ipairs(m.degrees) do
+                    if d == degree.id then hasDeg = true; break end
+                end
+            end
+            if not studying and degCount < maxDeg and not hasDeg then
+                table.insert(eligible, m)
+            end
+        end
+    end
+
+    local rows = {}
+    if #eligible == 0 then
+        table.insert(rows, UI.Label {
+            text = "没有符合条件的成员",
+            fontSize = F.body,
+            fontColor = C.text_muted,
+            paddingVertical = 16,
+            textAlign = "center",
+            width = "100%",
+        })
+    else
+        for _, m in ipairs(eligible) do
+            local posName = nil
+            if m.position then
+                for _, p in ipairs(Config.POSITIONS) do
+                    if p.id == m.position then posName = p.name; break end
+                end
+            end
+            table.insert(rows, UI.Panel {
+                width = "100%",
+                flexDirection = "row",
+                alignItems = "center",
+                gap = 8,
+                paddingVertical = 6,
+                paddingHorizontal = 4,
+                borderRadius = S.radius_badge,
+                backgroundColor = C.paper_dark,
+                children = {
+                    m.portraitImage and UI.Panel {
+                        width = 40,
+                        height = 64,
+                        borderRadius = S.radius_badge,
+                        backgroundImage = m.portraitImage,
+                        backgroundFit = "cover",
+                        borderWidth = 1,
+                        borderColor = C.border_card,
+                        flexShrink = 0,
+                    } or UI.Avatar {
+                        name = m.name,
+                        initials = m.portrait,
+                        size = 28,
+                        shape = "rounded",
+                        backgroundColor = C.paper_mid,
+                    },
+                    UI.Panel {
+                        flexGrow = 1,
+                        flexShrink = 1,
+                        flexDirection = "column",
+                        gap = 2,
+                        children = {
+                            UI.Panel {
+                                flexDirection = "row",
+                                alignItems = "center",
+                                gap = 6,
+                                children = {
+                                    UI.Label {
+                                        text = m.name,
+                                        fontSize = F.body,
+                                        fontWeight = "bold",
+                                        fontColor = C.text_primary,
+                                    },
+                                    FamilyPage._TraitChip(m),
+                                    FamilyPage._FlawChip(m),
+                                },
+                            },
+                            UI.Panel {
+                                flexDirection = "row",
+                                gap = 4,
+                                flexWrap = "wrap",
+                                children = {
+                                    posName and UI.Label {
+                                        text = "在岗：" .. posName .. "（将离岗）",
+                                        fontSize = F.label,
+                                        fontColor = C.accent_amber,
+                                    } or nil,
+                                    (m.degrees and #m.degrees > 0) and UI.Label {
+                                        text = "学位：" .. #m.degrees .. "/" .. maxDeg,
+                                        fontSize = F.label,
+                                        fontColor = C.text_muted,
+                                    } or nil,
+                                },
+                            },
+                        },
+                    },
+                    UI.Button {
+                        text = "送修",
+                        fontSize = F.label,
+                        variant = "primary",
+                        size = "sm",
+                        disabled = state.cash < cost,
+                        onClick = Config.ClickGuard(function()
+                            local ok, msg = GameState.StartUniversity(state, m.id, degree.id)
+                            UI.Toast.Show(msg, { variant = ok and "success" or "warning", duration = 2.0 })
+                            FamilyPage._CloseModal()
+                            if ok and onStateChanged_ then onStateChanged_() end
+                        end),
+                    },
+                },
+            })
+        end
+    end
+
+    -- 组装 children（避免 nil 空洞和 table.unpack 陷阱）
+    local pickerChildren = {
+        UI.Panel {
+            flexDirection = "row",
+            alignItems = "center",
+            gap = 8,
+            children = {
+                UI.Chip {
+                    label = degree.icon .. " " .. degree.name,
+                    color = "primary",
+                    variant = "soft",
+                    size = "md",
+                },
+                UI.Label {
+                    text = degree.effect_desc,
+                    fontSize = F.body,
+                    fontColor = C.accent_green,
+                },
+            },
+        },
+    }
+    if state.cash < cost then
+        table.insert(pickerChildren, UI.Label {
+            text = string.format("现金不足（需要 💰%d，当前 💰%d）", cost, math.floor(state.cash)),
+            fontSize = F.body_minor,
+            fontColor = C.accent_red,
+        })
+    end
+    table.insert(pickerChildren, UI.Divider { color = C.divider })
+    table.insert(pickerChildren, UI.Label {
+        text = "选择成员",
+        fontSize = F.subtitle,
+        fontWeight = "bold",
+        fontColor = C.text_secondary,
+    })
+    for _, row in ipairs(rows) do
+        table.insert(pickerChildren, row)
+    end
+
+    local content = UI.ScrollView {
+        width = "100%",
+        maxHeight = 480,
+        flexShrink = 1,
+        scrollY = true,
+        bounces = false,
+        children = {
+            UI.Panel {
+                width = "100%",
+                flexDirection = "column",
+                gap = 8,
+                padding = S.card_padding,
+                children = pickerChildren,
+            },
+        },
+    }
+
+    currentModal_ = UI.Modal {
+        title = "📖 选择进修成员",
+        size = "md",
+        closeOnOverlay = true,
+        closeOnEscape = true,
+        showCloseButton = true,
+        onClose = function(self)
+            Config.ConsumeTap()
+            currentModal_ = nil
+            self:Destroy()
+        end,
+    }
+    currentModal_:AddContent(content)
+    if uiRoot_ then
+        uiRoot_:AddChild(currentModal_)
+    end
+    currentModal_:Open()
 end
 
 -- ============================================================================
