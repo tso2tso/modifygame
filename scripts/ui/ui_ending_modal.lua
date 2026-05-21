@@ -60,9 +60,9 @@ function EndingModal.Show(state)
 
     -- 播放结算 BGM
     if ending.variant == "success" then
-        AudioManager.PlayBGM("bgm_victory")
+        AudioManager.PlayBGM("peace")
     else
-        AudioManager.PlayBGM("bgm_defeat")
+        AudioManager.PlayBGM("war")
     end
 
     modal_ = UI.Modal {
@@ -440,7 +440,7 @@ function EndingModal.ShowInstantVictory(state, instantVictory)
     EndingModal.Close()
 
     -- 播放胜利 BGM
-    AudioManager.PlayBGM("bgm_victory")
+    AudioManager.PlayBGM("peace")
 
     -- 先记录胜利
     GameState.ClaimInstantVictory(state, instantVictory)
