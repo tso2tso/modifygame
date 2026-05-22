@@ -530,7 +530,8 @@ function MenuPage._ApplyCheat(state)
         "c1_rifled_arms", "c2_logistics", "c3_machine_gun",
         "c4a_fortification", "c5_motorized", "c6a_intelligence", "c7_elite_force",
         "d1_propaganda", "d2_education", "d3_newspaper",
-        "d4a_nationalism", "d5_radio", "d6a_university", "d7_wartime_media",
+        "d4a_nationalism", "d5_radio", "d5b_cinema", "d6a_university", "d7_wartime_media",
+        "d8_cultural_hegemony", "d9_propaganda_art", "d10_cultural_bureau", "d11_cultural_renaissance",
     }
     state.tech = state.tech or { researched = {} }
     state.tech.in_progress = nil
@@ -788,10 +789,91 @@ function MenuPage._ApplyCheat(state)
     state.ap.max = GameState.CalcMaxAP(state)
     state.ap.current = state.ap.max
 
+    -- 25. C5 文化系统初始化 + 拉满
+    local Culture = require("systems.culture")
+    -- 确保 state.culture 结构存在
+    if not state.culture then
+        state.culture = {
+            ci = 0, score = 0,
+            region_cp = {}, cp_level_seen = {},
+            works = {}, sports_cooldown = 0,
+            exhibition_done = false, exhibition_progress = 0,
+            missions = {}, mission_paused = {},
+        }
+    end
+    -- 拉满 CI 和 culture_score
+    state.culture.ci = 200
+    state.culture.score = 800
+    state.victory = state.victory or {}
+    state.victory.culture = 800
+    -- 创建三类作品（剧团×3、电影×3、史诗×3）
+    state.culture.works = {
+        { type = "theater_troupe", location = "sarajevo", created_turn = 1 },
+        { type = "theater_troupe", location = "mostar",   created_turn = 1 },
+        { type = "theater_troupe", location = "banja_luka", created_turn = 1 },
+        { type = "film", theme = "historical", ready = true, released = false,
+          prod_progress = 2, created_turn = 1 },
+        { type = "film", theme = "national",   ready = true, released = false,
+          prod_progress = 2, created_turn = 1 },
+        { type = "film", theme = "industrial", ready = true, released = false,
+          prod_progress = 2, created_turn = 1 },
+        { type = "national_epic", theme = "national",   created_turn = 1 },
+        { type = "national_epic", theme = "religious",  created_turn = 1 },
+        { type = "national_epic", theme = "historical", created_turn = 1 },
+    }
+    -- 将所有已追踪地区的 CP 拉满到 identity 阈值（70）以上
+    if state.europe then
+        for regionId, _ in pairs(state.europe) do
+            Culture.SetRegionCP(state, regionId, 72)
+        end
+    end
+    for _, r in ipairs(state.regions or {}) do
+        Culture.SetRegionCP(state, r.id, 80)
+    end
+    -- 世界博览会已举办（无需再筹备）
+    state.culture.exhibition_done = true
+    state.culture.sports_cooldown = 0
+    state.culture_action_this_turn = false  -- 解除本季行动锁
+    -- 同步 AI 文化分（防止 AI 超越玩家触发错误判断）
+    for _, faction in ipairs(state.ai_factions or {}) do
+        if not faction.is_player then
+            faction.culture_score = math.min(faction.culture_score or 0, 200)
+        end
+    end
+
+    -- 26. C3 大国博弈初始化（确保 state.powers 存在并设置有利参数）
+    local GrandPowers = require("systems.grand_powers")
+    GrandPowers.Init(state)  -- 幂等：已初始化则直接返回
+    -- 降低所有大国军事/经济威胁，提升合作分
+    for _, power in pairs(state.powers or {}) do
+        power.war_fatigue = math.max(power.war_fatigue or 0, 60)  -- 高疲惫 → 扩张意愿低
+        power.military    = math.min(power.military or 0, 40)
+        power.economy     = math.min(power.economy  or 0, 50)
+    end
+    state.collaboration_score = math.max(state.collaboration_score or 0, 60)
+    -- 清除待处理的战争事件
+    state.fronts = state.fronts or {}
+    for _, front in pairs(state.fronts) do
+        front.pending_wars = {}
+    end
+
+    -- 27. A2 占领地区开发政策（对所有已占领国家设置开发政策）
+    if state.expeditions and state.expeditions.occupied_countries then
+        for _, occ in ipairs(state.expeditions.occupied_countries) do
+            if not occ.development_policy then
+                occ.development_policy = "extraction"  -- 默认掠夺性开发
+            end
+            -- 作弊：升级到最高收益政策并提升发展等级
+            occ.development_policy = "exploitation"
+            occ.development_level  = occ.development_level or 3
+            occ.income_per_turn    = math.max(occ.income_per_turn or 0, 600)
+        end
+    end
+
     -- 24. 存档
     SaveLoad.Save(state, SaveLoad.SLOT_AUTO)
 
-    print("[CHEAT] 所有属性已拉满！（含称号+功能解锁+远征HP+贸易订单+装备库存）")
+    print("[CHEAT] 所有属性已拉满！（含称号+功能解锁+远征HP+贸易订单+装备库存+文化系统+大国博弈+占领政策）")
 end
 
 --- 处理统计标题点击（连续 6 次触发作弊）

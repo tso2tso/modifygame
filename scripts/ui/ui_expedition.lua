@@ -11,6 +11,7 @@ local Expedition = require("systems.expedition")
 local Equipment = require("systems.equipment")
 local EquipmentData = require("data.equipment_data")
 local AudioManager = require("systems.audio_manager")
+local PlayerActionsGP = require("systems.player_actions_gp")
 
 local C = Config.COLORS
 local F = Config.FONT
@@ -39,10 +40,273 @@ function ExpeditionPanel.EnsureInit(state, callbacks)
     onStateChanged_ = callbacks and callbacks.onStateChanged or nil
 end
 
---- 构建远征面板内容（被 ui_world.lua 的 _SwitchSubTab 调用）
----@param state table
----@param callbacks table
----@return table widget
+-- ============================================================================
+-- C3: 大国博弈 UI 构建函数（提前定义，供 _BuildContent 调用）
+-- ============================================================================
+
+--- 显示活跃暗中支援卡片
+function ExpeditionPanel._BuildCovertSupportCard(state, rec)
+    local intelText = string.format("情报 -%d", rec.intel_spent or 0)
+    local turnText  = string.format("第 %d 季发起", rec.turn or 0)
+    return UI.Panel {
+        width = "100%",
+        flexDirection = "row",
+        alignItems = "center",
+        gap = 8,
+        padding = 8,
+        backgroundColor = { 60, 20, 80, 200 },
+        borderRadius = S.radius_card,
+        borderWidth = 1,
+        borderColor = { 138, 43, 226, 180 },
+        children = {
+            UI.Label { text = "🕵️", fontSize = 18 },
+            UI.Panel {
+                flexGrow = 1,
+                gap = 2,
+                children = {
+                    UI.Label {
+                        text = string.format("暗中支援：%s", rec.power_label or rec.powerId),
+                        fontSize = F.body_minor,
+                        fontColor = { 200, 160, 240, 255 },
+                        fontWeight = "bold",
+                    },
+                    UI.Label {
+                        text = string.format("%s  %s  本季战力+15%%", intelText, turnText),
+                        fontSize = F.label,
+                        fontColor = C.text_muted,
+                    },
+                },
+            },
+            UI.Label {
+                text = "活跃",
+                fontSize = F.label,
+                fontColor = { 180, 120, 255, 255 },
+                fontWeight = "bold",
+            },
+        },
+    }
+end
+
+--- 显示待触发煽动战争卡片
+function ExpeditionPanel._BuildIncitedWarCard(state, inc)
+    local pA = state.powers and state.powers[inc.attacker]
+    local pB = state.powers and state.powers[inc.defender]
+    local aLabel = pA and pA.label or inc.attacker
+    local bLabel = pB and pB.label or inc.defender
+    local turnsLeft = (inc.trigger_turn or 0) - (state.turn or 0)
+    turnsLeft = math.max(0, turnsLeft)
+    local country = state.europe and state.europe[inc.target]
+    local tLabel = country and country.label or inc.target
+
+    return UI.Panel {
+        width = "100%",
+        flexDirection = "row",
+        alignItems = "center",
+        gap = 8,
+        padding = 8,
+        backgroundColor = { 80, 30, 10, 200 },
+        borderRadius = S.radius_card,
+        borderWidth = 1,
+        borderColor = { 220, 100, 30, 180 },
+        children = {
+            UI.Label { text = "⚡", fontSize = 18 },
+            UI.Panel {
+                flexGrow = 1,
+                gap = 2,
+                children = {
+                    UI.Label {
+                        text = string.format("煽动：%s 攻 %s", aLabel, bLabel),
+                        fontSize = F.body_minor,
+                        fontColor = { 240, 160, 80, 255 },
+                        fontWeight = "bold",
+                    },
+                    UI.Label {
+                        text = string.format("目标：%s  还剩 %d 季触发", tLabel, turnsLeft),
+                        fontSize = F.label,
+                        fontColor = C.text_muted,
+                    },
+                },
+            },
+            UI.Label {
+                text = turnsLeft <= 0 and "即将触发" or string.format("%d季", turnsLeft),
+                fontSize = F.label,
+                fontColor = turnsLeft <= 0 and { 255, 80, 30, 255 } or { 220, 160, 60, 255 },
+                fontWeight = "bold",
+            },
+        },
+    }
+end
+
+--- 大国博弈操作面板：暗中支援按钮列表 + 煽动战争按钮列表
+function ExpeditionPanel._BuildGrandPowerOpsPanel(state, inciteTargets)
+    local BG = Balance.GP or {}
+    local intel = state.intelligence or 0
+    local ap = (state.ap and state.ap.current or 0) + (state.ap and state.ap.temp or 0)
+    local children = {}
+
+    -- 资源状态行
+    table.insert(children, UI.Panel {
+        width = "100%",
+        flexDirection = "row",
+        gap = 12,
+        paddingBottom = 6,
+        children = {
+            UI.Label {
+                text = string.format("情报：%d", intel),
+                fontSize = F.label,
+                fontColor = { 160, 200, 255, 255 },
+            },
+            UI.Label {
+                text = string.format("AP：%d", ap),
+                fontSize = F.label,
+                fontColor = C.text_secondary,
+            },
+        },
+    })
+
+    -- 暗中支援：列出活跃大国中 war_fatigue > 0 的目标
+    local supportCandidates = {}
+    for powId, p in pairs(state.powers or {}) do
+        if p.active and (p.war_fatigue or 0) > 0 and (p.attitude_to_player or 0) >= -40 then
+            -- 检查是否已支援
+            local alreadySupporting = (state._covert_supports or {})[powId] ~= nil
+            table.insert(supportCandidates, {
+                powId = powId, label = p.label or powId,
+                fatigue = p.war_fatigue or 0, already = alreadySupporting,
+                intelNeed = math.max(1, math.floor((p.stability or 5) * (BG.covert_support_intel_ratio or 0.5))),
+            })
+        end
+    end
+    table.sort(supportCandidates, function(a, b) return a.label < b.label end)
+
+    if #supportCandidates > 0 then
+        table.insert(children, UI.Label {
+            text = "暗中支援（消耗 1AP + 情报）",
+            fontSize = F.label,
+            fontColor = { 180, 120, 255, 255 },
+            fontWeight = "bold",
+            paddingTop = 4,
+        })
+        for _, cand in ipairs(supportCandidates) do
+            local canDo = (not cand.already) and (intel >= cand.intelNeed) and (ap >= 1)
+            local btnColor = canDo and { 100, 50, 150, 230 } or { 50, 50, 60, 180 }
+            local captureId = cand.powId
+            table.insert(children, UI.Panel {
+                width = "100%",
+                flexDirection = "row",
+                alignItems = "center",
+                gap = 6,
+                children = {
+                    UI.Panel {
+                        flexGrow = 1,
+                        children = {
+                            UI.Label {
+                                text = string.format("%s  战争疲劳:%d  需情报:%d",
+                                    cand.label, cand.fatigue, cand.intelNeed),
+                                fontSize = F.label,
+                                fontColor = canDo and C.text_primary or C.text_muted,
+                            },
+                        },
+                    },
+                    UI.Button {
+                        text = cand.already and "已支援" or "支援",
+                        fontSize = F.label,
+                        disabled = not canDo,
+                        backgroundColor = btnColor,
+                        paddingHorizontal = 8,
+                        paddingVertical = 3,
+                        onClick = function()
+                            if not canDo then return end
+                            local ok, msg = PlayerActionsGP.CovertSupport(state, captureId)
+                            if ok then
+                                AudioManager.PlaySFX("click")
+                                if ExpeditionPanel._RefreshCallback then
+                                    ExpeditionPanel._RefreshCallback()
+                                end
+                            end
+                            GameState.AddLog(state, "[C3] " .. (msg or ""))
+                        end,
+                    },
+                },
+            })
+        end
+    end
+
+    -- 煽动战争：列出可配对
+    if #inciteTargets > 0 then
+        local intelNeed = BG.incite_war_intel_cost or 200
+        local apNeed = BG.incite_war_ap or 3
+        table.insert(children, UI.Label {
+            text = string.format("煽动战争（%dAP + %d情报）", apNeed, intelNeed),
+            fontSize = F.label,
+            fontColor = { 240, 160, 80, 255 },
+            fontWeight = "bold",
+            paddingTop = 6,
+        })
+        for _, pair in ipairs(inciteTargets) do
+            local canDo = (not pair.already) and (intel >= intelNeed) and (ap >= apNeed)
+            local captureA, captureB = pair.powA, pair.powB
+            table.insert(children, UI.Panel {
+                width = "100%",
+                flexDirection = "row",
+                alignItems = "center",
+                gap = 6,
+                children = {
+                    UI.Panel {
+                        flexGrow = 1,
+                        children = {
+                            UI.Label {
+                                text = string.format("%s → %s（目标：%s）",
+                                    pair.powA_label, pair.powB_label, pair.target_label),
+                                fontSize = F.label,
+                                fontColor = canDo and C.text_primary or C.text_muted,
+                            },
+                        },
+                    },
+                    UI.Button {
+                        text = pair.already and "已煽动" or "煽动",
+                        fontSize = F.label,
+                        disabled = not canDo,
+                        backgroundColor = canDo and { 150, 60, 10, 230 } or { 50, 50, 60, 180 },
+                        paddingHorizontal = 8,
+                        paddingVertical = 3,
+                        onClick = function()
+                            if not canDo then return end
+                            local ok, msg = PlayerActionsGP.ExecuteInciteWar(state, captureA, captureB)
+                            if ok then
+                                AudioManager.PlaySFX("click")
+                                if ExpeditionPanel._RefreshCallback then
+                                    ExpeditionPanel._RefreshCallback()
+                                end
+                            end
+                            GameState.AddLog(state, "[C3] " .. (msg or ""))
+                        end,
+                    },
+                },
+            })
+        end
+    end
+
+    if #children == 1 then  -- 只有资源行
+        return UI.Panel { width = "100%", height = 1 }  -- 空占位
+    end
+
+    return UI.Panel {
+        width = "100%",
+        padding = 8,
+        gap = 4,
+        backgroundColor = { 20, 10, 35, 180 },
+        borderRadius = S.radius_card,
+        borderWidth = 1,
+        borderColor = { 80, 30, 120, 150 },
+        children = children,
+    }
+end
+
+-- ============================================================================
+-- Build 入口
+-- ============================================================================
+
 function ExpeditionPanel.Build(state, callbacks)
     stateRef_ = state
     onStateChanged_ = callbacks and callbacks.onStateChanged or nil
@@ -83,7 +347,57 @@ function ExpeditionPanel._BuildContent(state)
         end
     end
 
-    -- 5. 可攻击目标
+    -- 5. C1 战略态势（钳形攻势提示）
+    local pincerCombos = Expedition.GetPincerCombinations(state)
+    if #pincerCombos > 0 then
+        table.insert(children, ExpeditionPanel._SectionDivider("战略态势", C.accent_amber))
+        table.insert(children, ExpeditionPanel._BuildPincerHintCard(state, pincerCombos))
+    end
+
+    -- 5.5 C2 外交路线
+    local dipActive = state.expeditions.diplomacy_active or {}
+    local dipActiveCount = 0
+    for _ in pairs(dipActive) do dipActiveCount = dipActiveCount + 1 end
+    local dipTargets = Expedition.GetDiplomacyTargets(state)
+    if dipActiveCount > 0 or #dipTargets > 0 then
+        table.insert(children, ExpeditionPanel._SectionDivider(
+            string.format("外交路线 (%d活跃)", dipActiveCount), C.accent_blue))
+        -- 活跃外交记录
+        for countryId, rec in pairs(dipActive) do
+            table.insert(children, ExpeditionPanel._BuildDiplomacyCard(state, rec))
+        end
+        -- 可发起的目标
+        if #dipTargets > 0 then
+            table.insert(children, ExpeditionPanel._BuildDiplomacyTargetList(state, dipTargets))
+        end
+    end
+
+    -- 5.8 C3 大国博弈（暗中支援 + 煽动战争）
+    do
+        local covertList = PlayerActionsGP.GetCovertSupportList(state)
+        local inciteTargets = PlayerActionsGP.GetInciteTargets(state)
+        local incitePending = state._incited_wars or {}
+        local hasC3 = (#covertList > 0) or (#inciteTargets > 0) or (#incitePending > 0)
+        if hasC3 then
+            local covertCount = #covertList
+            local inciteCount = #incitePending
+            table.insert(children, ExpeditionPanel._SectionDivider(
+                string.format("大国博弈（%d支援/%d煽动）", covertCount, inciteCount),
+                { 138, 43, 226, 255 }))  -- 紫色
+            -- 活跃暗中支援
+            for _, rec in ipairs(covertList) do
+                table.insert(children, ExpeditionPanel._BuildCovertSupportCard(state, rec))
+            end
+            -- 待触发的煽动记录
+            for _, inc in ipairs(incitePending) do
+                table.insert(children, ExpeditionPanel._BuildIncitedWarCard(state, inc))
+            end
+            -- 可操作面板（支援 + 煽动入口）
+            table.insert(children, ExpeditionPanel._BuildGrandPowerOpsPanel(state, inciteTargets))
+        end
+    end
+
+    -- 6. 可攻击目标
     local targets = Expedition.GetValidTargets(state)
     if #targets > 0 then
         table.insert(children, ExpeditionPanel._SectionDivider("可攻击目标", C.accent_amber))
@@ -1080,6 +1394,58 @@ function ExpeditionPanel._BuildOccupiedCard(state, occ)
     local sinceTurn = occ.since_turn or 0
     local heldTurns = (state.turn_count or 0) - sinceTurn
 
+    -- A2: 稳定度数据
+    local stab = occ.stability_control or 40
+    local stabThreshold = BE.stability_threshold or 50
+    local stabPct = stab / 100
+    local stabColor = stab >= stabThreshold and C.accent_green or C.accent_amber
+    local BP = BE.policies or {}
+    local currentPolicyId = occ.development_policy or "tax"
+    local currentPolCfg = BP[currentPolicyId] or {}
+    local lockTurn = occ.policy_lock_turn or 0
+    local currentTurn = state.turn_count or 0
+    local isLocked = lockTurn > currentTurn
+    local delayLeft = occ.policy_delay_remaining or 0
+
+    -- A2: 策略状态标签
+    local policyStatusText = currentPolCfg.name or currentPolicyId
+    if delayLeft > 0 then
+        policyStatusText = policyStatusText .. string.format("（%d季后生效）", delayLeft)
+    end
+    if isLocked then
+        policyStatusText = policyStatusText .. string.format("（锁定%d季）", lockTurn - currentTurn)
+    end
+
+    -- A2: 策略按钮行（仅在未锁定时可点击切换）
+    local policyButtons = {}
+    local policyOrder = { "tax", "industrial", "puppet", "culture" }
+    for _, pid in ipairs(policyOrder) do
+        local pcfg = BP[pid] or {}
+        local isCurrent = (pid == currentPolicyId)
+        local btnText = pcfg.name or pid
+        local btnVariant = isCurrent and "primary" or "ghost"
+        local btnDisabled = isLocked and not isCurrent
+        table.insert(policyButtons, UI.Button {
+            text = btnText,
+            variant = btnVariant,
+            fontSize = F.label,
+            paddingHorizontal = 6,
+            paddingVertical = 3,
+            opacity = btnDisabled and 0.5 or 1.0,
+            onClick = function(self)
+                if btnDisabled then
+                    UI.Toast.Show(string.format("策略锁定中（还需 %d 季）", lockTurn - currentTurn), { variant = "warning", duration = 2.0 })
+                    return
+                end
+                local ok, msg = Expedition.SetPolicy(state, occ.country_id, pid)
+                UI.Toast.Show(msg, { variant = ok and "success" or "error", duration = ok and 2.0 or 3.0 })
+                if ok then
+                    if onStateChanged_ then onStateChanged_() end
+                end
+            end,
+        })
+    end
+
     return UI.Panel {
         width = "100%",
         backgroundColor = C.paper_dark,
@@ -1090,6 +1456,7 @@ function ExpeditionPanel._BuildOccupiedCard(state, occ)
         flexDirection = "column",
         gap = 4,
         children = {
+            -- 标题行
             UI.Panel {
                 width = "100%",
                 flexDirection = "row",
@@ -1117,6 +1484,7 @@ function ExpeditionPanel._BuildOccupiedCard(state, occ)
                     },
                 },
             },
+            -- 收入行
             UI.Panel {
                 width = "100%",
                 flexDirection = "row",
@@ -1130,11 +1498,436 @@ function ExpeditionPanel._BuildOccupiedCard(state, occ)
                         (netIncome >= 0 and "+" or "") .. Config.FormatNumber(netIncome), netColor),
                 },
             },
+            -- A2: 稳定度条
+            UI.Panel {
+                width = "100%",
+                flexDirection = "row",
+                alignItems = "center",
+                gap = 6,
+                children = {
+                    UI.Label {
+                        text = "稳定度",
+                        fontSize = F.label,
+                        fontColor = C.text_secondary,
+                        width = 44,
+                    },
+                    UI.ProgressBar {
+                        value = stabPct,
+                        flexGrow = 1,
+                        height = 6,
+                        borderRadius = 3,
+                        trackColor = C.bg_surface,
+                        fillColor = stabColor,
+                    },
+                    UI.Label {
+                        text = string.format("%d%%", math.floor(stab)),
+                        fontSize = F.label,
+                        fontColor = stabColor,
+                        width = 34,
+                        textAlign = "right",
+                    },
+                },
+            },
+            -- A2: 当前策略行
+            UI.Panel {
+                width = "100%",
+                flexDirection = "row",
+                justifyContent = "space-between",
+                alignItems = "center",
+                children = {
+                    UI.Label {
+                        text = "发展策略",
+                        fontSize = F.label,
+                        fontColor = C.text_secondary,
+                    },
+                    UI.Label {
+                        text = policyStatusText,
+                        fontSize = F.label,
+                        fontColor = isLocked and C.accent_amber or C.accent_green,
+                    },
+                },
+            },
+            -- A2: 策略切换按钮（折叠在一行）
+            UI.Panel {
+                width = "100%",
+                flexDirection = "row",
+                flexWrap = "wrap",
+                gap = 4,
+                children = policyButtons,
+            },
         },
     }
 end
 
 -- _BuildHistoryCard 已移除，战绩已合并到概览卡片中
+
+-- ============================================================================
+-- C2 外交路线卡片
+-- ============================================================================
+
+local TREATY_LABEL = {
+    trade_concession  = "贸易特许",
+    protection        = "保护协议",
+    military_alliance = "军事同盟",
+    vassal            = "臣服关系",
+    broken            = "关系破裂",
+}
+local TREATY_COLOR = {
+    trade_concession  = { r=0.2,  g=0.7,  b=0.9,  a=1 },
+    protection        = { r=0.2,  g=0.8,  b=0.3,  a=1 },
+    military_alliance = { r=0.9,  g=0.4,  b=0.2,  a=1 },
+    vassal            = { r=0.8,  g=0.7,  b=0.1,  a=1 },
+    broken            = { r=0.5,  g=0.2,  b=0.2,  a=1 },
+}
+
+--- 活跃外交记录卡片（渗透进度或协议状态）
+---@param state table
+---@param rec table  diplomacy_record
+---@return table widget
+function ExpeditionPanel._BuildDiplomacyCard(state, rec)
+    local C2 = Config.COLORS
+    local hasTreaty = rec.treaty_type ~= nil
+    local treatyLabel = hasTreaty and (TREATY_LABEL[rec.treaty_type] or rec.treaty_type) or "渗透中"
+    local treatyColor = hasTreaty and (TREATY_COLOR[rec.treaty_type] or C2.text_muted)
+        or C2.accent_blue
+
+    -- 进度条（渗透阶段）
+    local progressRow = nil
+    if not hasTreaty then
+        local pct = (rec.influence_pool and rec.influence_pool > 0)
+            and math.min(1.0, rec.influence_progress / rec.influence_pool) or 0
+        local pctText = string.format("%d / %d", rec.influence_progress, rec.influence_pool)
+        progressRow = UI.Panel {
+            width = "100%",
+            flexDirection = "column",
+            gap = 3,
+            marginTop = 4,
+            children = {
+                UI.Panel {
+                    width = "100%",
+                    flexDirection = "row",
+                    justifyContent = "space-between",
+                    children = {
+                        UI.Label { text = "影响力进度", fontSize = 10, color = C2.text_muted },
+                        UI.Label { text = pctText, fontSize = 10, color = C2.text_muted },
+                    },
+                },
+                UI.Panel {
+                    width = "100%",
+                    height = 6,
+                    backgroundColor = { r=0.15, g=0.15, b=0.15, a=1 },
+                    borderRadius = 3,
+                    children = {
+                        UI.Panel {
+                            width = string.format("%d%%", math.floor(pct * 100)),
+                            height = 6,
+                            backgroundColor = C2.accent_blue,
+                            borderRadius = 3,
+                        },
+                    },
+                },
+            },
+        }
+    else
+        -- 协议状态：显示每季收入/效果
+        local effectText = ""
+        if rec.treaty_type == "protection" then
+            effectText = string.format("+%d 克朗/季", BE.diplomacy_protection_income or 50)
+        elseif rec.treaty_type == "vassal" then
+            effectText = string.format("+%d 克朗/季（5%%反叛风险）", BE.diplomacy_vassal_income or 60)
+        elseif rec.treaty_type == "trade_concession" then
+            effectText = string.format("贸易路线利润+%d%%", math.floor((BE.diplomacy_trade_bonus or 0.20) * 100))
+        elseif rec.treaty_type == "military_alliance" then
+            effectText = "守备+1等效编队"
+        end
+        progressRow = UI.Label {
+            text = effectText,
+            fontSize = 11,
+            color = treatyColor,
+            marginTop = 4,
+        }
+    end
+
+    -- 取消按钮
+    local cancelBtn = UI.Button {
+        text = "撤回",
+        variant = "ghost",
+        fontSize = 11,
+        padding = 4,
+        onClick = Config.ClickGuard(function()
+            local ok, msg = Expedition.CancelDiplomacy(state, rec.country_id)
+            UI.Toast.Show(msg, { variant = ok and "success" or "error", duration = ok and 2.0 or 3.0 })
+            if ok and onStateChanged_ then onStateChanged_() end
+        end),
+    }
+
+    return UI.Panel {
+        width = "100%",
+        flexDirection = "column",
+        padding = 10,
+        gap = 4,
+        backgroundColor = { r=0.08, g=0.10, b=0.14, a=0.95 },
+        borderRadius = 8,
+        borderWidth = 1,
+        borderColor = treatyColor,
+        children = {
+            UI.Panel {
+                width = "100%",
+                flexDirection = "row",
+                alignItems = "center",
+                justifyContent = "space-between",
+                children = {
+                    UI.Panel {
+                        flexDirection = "row",
+                        alignItems = "center",
+                        gap = 8,
+                        children = {
+                            UI.Label {
+                                text = "🤝",
+                                fontSize = 18,
+                            },
+                            UI.Panel {
+                                flexDirection = "column",
+                                gap = 2,
+                                children = {
+                                    UI.Label {
+                                        text = rec.label,
+                                        fontSize = 14,
+                                        fontWeight = "bold",
+                                        color = C2.text_primary,
+                                    },
+                                    UI.Label {
+                                        text = treatyLabel,
+                                        fontSize = 11,
+                                        color = treatyColor,
+                                    },
+                                },
+                            },
+                        },
+                    },
+                    cancelBtn,
+                },
+            },
+            progressRow,
+        },
+    }
+end
+
+--- 可发起外交施压的目标列表
+---@param state table
+---@param targets table[]
+---@return table widget
+function ExpeditionPanel._BuildDiplomacyTargetList(state, targets)
+    local C2 = Config.COLORS
+    local dipInf = state.diplomatic_influence or 0
+    local infCost = BE.diplomacy_influence_cost or 20
+    local rows = {}
+
+    -- 显示外交影响力资源
+    table.insert(rows, UI.Panel {
+        width = "100%",
+        flexDirection = "row",
+        alignItems = "center",
+        justifyContent = "space-between",
+        marginBottom = 4,
+        children = {
+            UI.Label {
+                text = string.format("🌐 全局外交影响力：%d", dipInf),
+                fontSize = 12,
+                color = dipInf >= infCost and C2.accent_blue or C2.text_muted,
+            },
+            UI.Label {
+                text = string.format("每季 +%d", BE.diplomacy_influence_per_turn or 5),
+                fontSize = 10,
+                color = C2.text_muted,
+            },
+        },
+    })
+
+    for _, t in ipairs(targets) do
+        local canAfford = dipInf >= infCost and t.charisma_ok
+        local reasonText = ""
+        if not t.charisma_ok then
+            reasonText = string.format("外交官魅力不足（需≥%d，当前%d）",
+                BE.diplomacy_charisma_req or 3, t.charisma)
+        elseif dipInf < infCost then
+            reasonText = string.format("影响力不足（需%d，当前%d）", infCost, dipInf)
+        else
+            reasonText = string.format("稳定度%d | %d条贸易路线 | 需约%d季",
+                t.stability, t.routes,
+                math.ceil(t.pool / math.max(1, t.charisma * 3 + t.routes * 2 - t.stability * 1.5)))
+        end
+
+        table.insert(rows, UI.Panel {
+            width = "100%",
+            flexDirection = "row",
+            alignItems = "center",
+            justifyContent = "space-between",
+            padding = 8,
+            gap = 6,
+            backgroundColor = { r=0.10, g=0.10, b=0.10, a=0.9 },
+            borderRadius = 6,
+            children = {
+                UI.Panel {
+                    flex = 1,
+                    flexDirection = "column",
+                    gap = 2,
+                    children = {
+                        UI.Label {
+                            text = t.label,
+                            fontSize = 13,
+                            fontWeight = "bold",
+                            color = canAfford and C2.text_primary or C2.text_muted,
+                        },
+                        UI.Label {
+                            text = reasonText,
+                            fontSize = 10,
+                            color = C2.text_muted,
+                        },
+                    },
+                },
+                UI.Button {
+                    text = string.format("施压（%dAP+%d影响力）",
+                        BE.diplomacy_ap_cost or 1, infCost),
+                    variant = canAfford and "primary" or "ghost",
+                    fontSize = 11,
+                    opacity = canAfford and 1.0 or 0.5,
+                    onClick = Config.ClickGuard(function()
+                        if not canAfford then
+                            UI.Toast.Show(reasonText, { variant = "warning", duration = 3.0 })
+                            return
+                        end
+                        local ok, msg = Expedition.LaunchDiplomacy(state, t.country_id)
+                        UI.Toast.Show(msg, { variant = ok and "success" or "error", duration = ok and 2.0 or 3.0 })
+                        if ok and onStateChanged_ then onStateChanged_() end
+                    end),
+                },
+            },
+        })
+    end
+
+    return UI.Panel {
+        width = "100%",
+        flexDirection = "column",
+        gap = 6,
+        padding = 10,
+        backgroundColor = { r=0.06, g=0.08, b=0.12, a=0.95 },
+        borderRadius = 8,
+        children = rows,
+    }
+end
+
+-- ============================================================================
+-- C1 钳形攻势提示卡片
+-- ============================================================================
+
+--- 战略态势：展示所有相邻可攻击/活跃组合，提示玩家钳形攻势机会
+---@param state table
+---@param combos table[]
+---@return table widget
+function ExpeditionPanel._BuildPincerHintCard(state, combos)
+    local C2 = Config.COLORS
+    local rows = {}
+
+    for _, combo in ipairs(combos) do
+        local statusIcon, statusText, rowBg
+        if combo.is_active then
+            -- 两侧都已激活 → 钳形进行中
+            statusIcon = "⚔⚔"
+            statusText = "钳形进行中（防御-15%，成功率+5%）"
+            rowBg = { r=0.12, g=0.25, b=0.12, a=0.9 }
+        elseif combo.a_active then
+            -- A 侧已激活，B 侧可发动
+            statusIcon = "⚔◉"
+            statusText = string.format("对%s追加远征可激活钳形！", combo.b_label)
+            rowBg = { r=0.25, g=0.18, b=0.05, a=0.9 }
+        elseif combo.b_active then
+            -- B 侧已激活，A 侧可发动
+            statusIcon = "◉⚔"
+            statusText = string.format("对%s追加远征可激活钳形！", combo.a_label)
+            rowBg = { r=0.25, g=0.18, b=0.05, a=0.9 }
+        else
+            -- 两侧均未发动 → 提示机会
+            statusIcon = "◎"
+            statusText = "同时发动可激活钳形攻势"
+            rowBg = { r=0.15, g=0.15, b=0.15, a=0.8 }
+        end
+
+        table.insert(rows, UI.Panel {
+            width = "100%",
+            flexDirection = "row",
+            alignItems = "center",
+            padding = 8,
+            gap = 8,
+            backgroundColor = rowBg,
+            borderRadius = 6,
+            children = {
+                UI.Label {
+                    text = statusIcon,
+                    fontSize = 16,
+                    width = 28,
+                    textAlign = "center",
+                },
+                UI.Panel {
+                    flex = 1,
+                    flexDirection = "column",
+                    gap = 2,
+                    children = {
+                        UI.Label {
+                            text = string.format("%s  ↔  %s", combo.a_label, combo.b_label),
+                            fontSize = 13,
+                            fontWeight = "bold",
+                            color = combo.is_active and C2.accent_green or C2.text_primary,
+                        },
+                        UI.Label {
+                            text = statusText,
+                            fontSize = 11,
+                            color = combo.is_active and C2.accent_green or C2.accent_amber,
+                        },
+                    },
+                },
+            },
+        })
+    end
+
+    return UI.Panel {
+        width = "100%",
+        flexDirection = "column",
+        gap = 6,
+        padding = 10,
+        backgroundColor = { r=0.08, g=0.08, b=0.08, a=0.95 },
+        borderRadius = 8,
+        children = {
+            UI.Panel {
+                width = "100%",
+                flexDirection = "row",
+                alignItems = "center",
+                gap = 6,
+                marginBottom = 4,
+                children = {
+                    UI.Label {
+                        text = "🗺 钳形攻势分析",
+                        fontSize = 13,
+                        fontWeight = "bold",
+                        color = C2.accent_amber,
+                    },
+                    UI.Label {
+                        text = string.format("（%d 个相邻组合）", #combos),
+                        fontSize = 11,
+                        color = C2.text_muted,
+                    },
+                },
+            },
+            table.unpack(rows),
+            UI.Label {
+                text = "💡 同时发动两侧远征额外消耗 1 AP，换取防御-15%/成功率+5%",
+                fontSize = 10,
+                color = C2.text_muted,
+                marginTop = 4,
+            },
+        },
+    }
+end
 
 -- ============================================================================
 -- HP 血条组件

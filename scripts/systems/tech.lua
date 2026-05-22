@@ -173,6 +173,11 @@ function Tech.Tick(state, report)
     if bonus > 0 and math.random() < bonus * 0.4 then
         ip.progress = ip.progress + 1
     end
+    -- A4 科技顾问专精：knowledge 属性每点 +2% 研究进度概率额外 +1（上限 20%）
+    local specResearchSpeed = GameState.GetModifierValue(state, "spec_research_speed")
+    if specResearchSpeed > 0 and math.random() < specResearchSpeed then
+        ip.progress = ip.progress + 1
+    end
     if ip.progress >= ip.total then
         Tech.Complete(state, ip.id)
         state.tech.in_progress = nil

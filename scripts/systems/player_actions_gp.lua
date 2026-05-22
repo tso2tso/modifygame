@@ -327,6 +327,269 @@ ACTIONS.sabotage_supply = {
 }
 
 -- ============================================================================
+-- C3: 大国博弈行动（不挂在 ACTIONS 表中，用独立公开 API 调用）
+-- ============================================================================
+
+--- 暗中支援：秘密向某大国在当前冲突中的一方提供战力加成
+--- 消耗：1 AP + 情报 × stability/2
+--- @param state table
+--- @param powerId string 受援大国 ID（攻击方）
+--- @return boolean, string
+function PlayerActionsGP.CovertSupport(state, powerId)
+    local BG = Balance.GP
+    if not BG then return false, "C3常量未初始化" end
+
+    local power = state.powers and state.powers[powerId]
+    if not power or not power.active then return false, "大国不活跃" end
+    if (power.war_fatigue or 0) <= 0 then return false, "该国未在战争中" end
+    if (power.attitude_to_player or 0) < -40 then return false, "关系过差，无法秘密合作" end
+
+    -- AP 检查
+    local apCost = BG.covert_support_ap
+    local totalAP = (state.ap.current or 0) + (state.ap.temp or 0)
+    if totalAP < apCost then return false, string.format("行动点不足（需 %d AP）", apCost) end
+
+    -- 情报检查
+    local intelCost = math.floor((power.stability or 5) * BG.covert_support_intel_ratio)
+    intelCost = math.max(1, intelCost)
+    if (state.intelligence or 0) < intelCost then
+        return false, string.format("情报不足（需 %d，当前 %d）", intelCost, state.intelligence or 0)
+    end
+
+    -- 扣除资源
+    GameState.SpendAP(state, apCost)
+    state.intelligence = (state.intelligence or 0) - intelCost
+
+    -- 写入修正器：本季战力 +15%
+    local modKey = "covert_military_bonus_" .. powerId
+    state.modifiers = state.modifiers or {}
+    state.modifiers[modKey] = BG.covert_military_bonus
+
+    -- 记录暗中支援状态（结算时用）
+    state._covert_supports = state._covert_supports or {}
+    state._covert_supports[powerId] = {
+        turn         = state.turn,
+        intel_spent  = intelCost,
+        instigator   = "player",
+    }
+
+    GameState.AddLog(state, string.format(
+        "暗中支援 %s（消耗 %d 情报），本季战力+15%%", power.label, intelCost))
+    return true, string.format("暗中支援 %s，消耗 %d 情报", power.label, intelCost)
+end
+
+--- 结算暗中支援：在大国征服事件处理后调用（检测被发现 + 结算好感）
+--- @param state table
+--- @param powerId string 受援大国 ID
+--- @param won boolean 受援方是否赢了（此季完成征服）
+function PlayerActionsGP.SettleCovertSupport(state, powerId, won)
+    local BG = Balance.GP
+    local supports = state._covert_supports or {}
+    local rec = supports[powerId]
+    if not rec then return end
+
+    local power = state.powers[powerId]
+    if not power then
+        state._covert_supports[powerId] = nil
+        return
+    end
+
+    if won then
+        -- 支援方赢：好感 +20
+        power.attitude_to_player = math.min(100, (power.attitude_to_player or 0) + BG.covert_win_attitude)
+        GameState.AddLog(state, string.format("暗中支援成效：%s 取得胜利，好感 +%d", power.label, BG.covert_win_attitude))
+    end
+
+    -- 被发现检测（20%）
+    if math.random() < BG.covert_detected_chance then
+        -- 找对立方（有己方征服目标被对方保护的大国）
+        local enemyId = nil
+        for pid, p in pairs(state.powers or {}) do
+            if pid ~= powerId and p.active and (p.attitude_to_player or 0) > -80 then
+                enemyId = pid
+                break
+            end
+        end
+        power.attitude_to_player = math.max(-100, (power.attitude_to_player or 0) - BG.covert_detected_att_loss)
+        state.collaboration_score = (state.collaboration_score or 0) + BG.covert_detected_collab
+        state.aggression_level = math.min(10, (state.aggression_level or 0) + BG.covert_detected_aggress)
+        if enemyId and state.powers[enemyId] then
+            state.powers[enemyId].attitude_to_player = math.max(-100,
+                (state.powers[enemyId].attitude_to_player or 0) - BG.covert_detected_att_loss)
+        end
+        GameState.AddLog(state, string.format(
+            "暗中支援 %s 阴谋败露！好感 -%d，侵略度 +%d",
+            power.label, BG.covert_detected_att_loss, BG.covert_detected_aggress))
+    end
+
+    -- 清除修正器和记录
+    if state.modifiers then
+        state.modifiers["covert_military_bonus_" .. powerId] = nil
+    end
+    state._covert_supports[powerId] = nil
+end
+
+--- 检查煽动战争条件
+--- @param state table
+--- @param powA string 攻击方大国 ID
+--- @param powB string 防守方大国 ID（拥有 A 方战争目标）
+--- @return boolean, string
+function PlayerActionsGP.CanInciteWar(state, powA, powB)
+    local BG = Balance.GP
+    local pA = state.powers and state.powers[powA]
+    local pB = state.powers and state.powers[powB]
+    if not pA or not pA.active then return false, "攻击方大国不活跃" end
+    if not pB or not pB.active then return false, "目标大国不活跃" end
+    if powA == powB then return false, "不能煽动同一大国" end
+
+    -- 检查 A 是否有 B 主权的战争目标
+    local hasGoals = false
+    for _, goalId in ipairs(pA.war_goals or {}) do
+        local country = state.europe and state.europe[goalId]
+        if country and country.sovereign == powB then
+            hasGoals = true
+            break
+        end
+    end
+    if not hasGoals then return false, powA .. " 对 " .. powB .. " 无领土积怨" end
+
+    -- 检查未被剧本锁定
+    if state._branch_war_accelerated then return false, "当前历史进程已被锁定（战争加速中）" end
+    if (state._branch_war_delayed or 0) > 0 then return false, "当前历史进程已被锁定（战争推迟中）" end
+
+    -- 检查是否已有相同煽动记录
+    for _, inc in ipairs(state._incited_wars or {}) do
+        if inc.attacker == powA then return false, "已有针对 " .. powA .. " 的煽动计划" end
+    end
+
+    return true
+end
+
+--- 执行煽动战争
+--- @param state table
+--- @param powA string 攻击方大国 ID
+--- @param powB string 防守方大国 ID
+--- @return boolean, string
+function PlayerActionsGP.ExecuteInciteWar(state, powA, powB)
+    local BG = Balance.GP
+
+    -- 前置检查
+    local ok, reason = PlayerActionsGP.CanInciteWar(state, powA, powB)
+    if not ok then return false, reason end
+
+    -- AP 检查
+    local apCost = BG.incite_war_ap
+    local totalAP = (state.ap.current or 0) + (state.ap.temp or 0)
+    if totalAP < apCost then return false, string.format("行动点不足（需 %d AP）", apCost) end
+
+    -- 情报检查
+    local intelCost = BG.incite_war_intel_cost
+    if (state.intelligence or 0) < intelCost then
+        return false, string.format("情报不足（需 %d，当前 %d）", intelCost, state.intelligence or 0)
+    end
+
+    -- 成功率检测
+    if math.random() >= BG.incite_success_rate then
+        -- 失败：扣除情报
+        state.intelligence = (state.intelligence or 0) - math.floor(intelCost * 0.5)
+        GameState.AddLog(state, string.format("煽动 %s 攻打 %s 失败，情报浪费",
+            state.powers[powA].label, state.powers[powB].label))
+        return false, "煽动失败（情报消耗减半）"
+    end
+
+    -- 扣除资源
+    GameState.SpendAP(state, apCost)
+    state.intelligence = (state.intelligence or 0) - intelCost
+
+    -- 找 A 方战争目标中属于 B 主权的地区
+    local targetCountryId = nil
+    for _, goalId in ipairs(state.powers[powA].war_goals or {}) do
+        local country = state.europe and state.europe[goalId]
+        if country and country.sovereign == powB then
+            targetCountryId = goalId
+            break
+        end
+    end
+    if not targetCountryId then
+        return false, "无法找到合适的冲突目标地区"
+    end
+
+    -- 写入煽动记录
+    state._incited_wars = state._incited_wars or {}
+    table.insert(state._incited_wars, {
+        attacker     = powA,
+        defender     = powB,
+        target       = targetCountryId,
+        trigger_turn = (state.turn or 0) + BG.incite_trigger_turns,
+        instigator   = "player",
+    })
+
+    local pA = state.powers[powA]
+    local pB = state.powers[powB]
+    GameState.AddLog(state, string.format(
+        "成功煽动 %s 对 %s 发起战争！%d季后冲突爆发（消耗 %d 情报，%d AP）",
+        pA.label, pB.label, BG.incite_trigger_turns, intelCost, apCost))
+    return true, string.format("煽动 %s 攻打 %s，%d季后爆发冲突", pA.label, pB.label, BG.incite_trigger_turns)
+end
+
+--- 获取可煽动的大国配对列表（供 UI 展示）
+--- @param state table
+--- @return table []{ powA, powA_label, powB, powB_label, target, target_label }
+function PlayerActionsGP.GetInciteTargets(state)
+    local result = {}
+    local seen = {}
+    for powA, pA in pairs(state.powers or {}) do
+        if not pA.active then goto cont_a end
+        for _, goalId in ipairs(pA.war_goals or {}) do
+            local country = state.europe and state.europe[goalId]
+            if not country then goto cont_goal end
+            local powB = country.sovereign
+            if powB == powA or powB == "player" then goto cont_goal end
+            local pB = state.powers[powB]
+            if not pB or not pB.active then goto cont_goal end
+            local key = powA .. ":" .. powB
+            if seen[key] then goto cont_goal end
+            seen[key] = true
+            -- 检查是否已煽动
+            local alreadyIncited = false
+            for _, inc in ipairs(state._incited_wars or {}) do
+                if inc.attacker == powA then alreadyIncited = true; break end
+            end
+            table.insert(result, {
+                powA        = powA,
+                powA_label  = pA.label or powA,
+                powB        = powB,
+                powB_label  = pB.label or powB,
+                target      = goalId,
+                target_label = country.label or goalId,
+                already     = alreadyIncited,
+            })
+            ::cont_goal::
+        end
+        ::cont_a::
+    end
+    table.sort(result, function(a, b) return a.powA < b.powA end)
+    return result
+end
+
+--- 获取活跃的暗中支援列表（供 UI 展示）
+--- @param state table
+--- @return table []{ powerId, power_label, turn, intel_spent }
+function PlayerActionsGP.GetCovertSupportList(state)
+    local result = {}
+    for powerId, rec in pairs(state._covert_supports or {}) do
+        local power = state.powers and state.powers[powerId]
+        table.insert(result, {
+            powerId     = powerId,
+            power_label = power and power.label or powerId,
+            turn        = rec.turn,
+            intel_spent = rec.intel_spent,
+        })
+    end
+    return result
+end
+
+-- ============================================================================
 -- 公开 API
 -- ============================================================================
 

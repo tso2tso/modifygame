@@ -340,6 +340,21 @@ function ActionModals.ShowDiplomacy(state, accent)
                             C.accent_red,
                             function() ActionModals._DiploHostile(state, factionLocal) end,
                             not ActionModals._CanAfford(state, Balance.DIPLOMACY.hostile)),
+                        -- C4-2 外交谈判：1AP + 情报×20 → +20好感（8季冷却）
+                        (function()
+                            local nego = Balance.AI.negotiate or {}
+                            local cdKey = "negotiate_cd_" .. (factionLocal.id or factionLocal.name or "?")
+                            state._negotiate_cooldowns = state._negotiate_cooldowns or {}
+                            local cd = state._negotiate_cooldowns[cdKey] or 0
+                            local canNego = cd == 0
+                                and (state.ap.current + (state.ap.temp or 0)) >= (nego.ap_cost or 1)
+                                and (state.intel or 0) >= (nego.intel_cost or 20)
+                            local label = cd > 0 and string.format("谈判(%d季)", cd) or "谈判"
+                            return actionBtn(label,
+                                { 200, 160, 80, 255 },
+                                function() ActionModals._DiploNegotiate(state, factionLocal) end,
+                                not canNego)
+                        end)(),
                     },
                 },
             },
@@ -406,9 +421,55 @@ function ActionModals._DiploHostile(state, faction)
     ActionModals._Spend(state, cfg)
     faction.attitude = math.max(-100, faction.attitude + cfg.attitude)
     faction.pact_remaining = 0
+    -- C4-2 行为性敌意：主动宣布敌对 → 其他 AI 也受波及
+    local sanctionPenalty = Balance.AI.behavior_penalty and Balance.AI.behavior_penalty.trigger_sanction or -5
+    for _, f in ipairs(state.ai_factions or {}) do
+        if not f.defeated and not f.collapsed and f.id ~= faction.id then
+            f.attitude = math.max(-100, (f.attitude or 0) + sanctionPenalty)
+        end
+    end
     GameState.AddLog(state, string.format("[外交] 与 %s 断交，态度 %d",
         faction.name, faction.attitude))
     UI.Toast.Show("已宣布敌对", { variant = "warning", duration = 1.5 })
+    closeModal()
+    notifyChanged()
+end
+
+--- C4-2 外交谈判（消耗 1AP + 情报×20，好感 +20，8季冷却）
+function ActionModals._DiploNegotiate(state, faction)
+    local cfg = Balance.AI.negotiate or { ap_cost=1, intel_cost=20, attitude_gain=20, cooldown=8 }
+    -- 冷却检查
+    local cdKey = "negotiate_cd_" .. (faction.id or faction.name or "?")
+    state._negotiate_cooldowns = state._negotiate_cooldowns or {}
+    local cd = state._negotiate_cooldowns[cdKey] or 0
+    if cd > 0 then
+        UI.Toast.Show(string.format("外交谈判冷却中（还需 %d 季）", cd),
+            { variant = "warning", duration = 1.8 })
+        return
+    end
+    -- 费用检查
+    local totalAP = state.ap.current + (state.ap.temp or 0)
+    if totalAP < cfg.ap_cost then
+        UI.Toast.Show(string.format("行动点不足（需要 %d AP）", cfg.ap_cost),
+            { variant = "error", duration = 1.2 })
+        return
+    end
+    if (state.intel or 0) < cfg.intel_cost then
+        UI.Toast.Show(string.format("情报不足（需要 %d）", cfg.intel_cost),
+            { variant = "error", duration = 1.2 })
+        return
+    end
+    -- 扣费
+    GameState.SpendAP(state, cfg.ap_cost)
+    state.intel = (state.intel or 0) - cfg.intel_cost
+    -- 好感
+    local attCap = (Balance.AI.positive_triggers and Balance.AI.positive_triggers.attitude_cap) or 80
+    faction.attitude = math.min(attCap, (faction.attitude or 0) + cfg.attitude_gain)
+    -- 设置冷却
+    state._negotiate_cooldowns[cdKey] = cfg.cooldown
+    GameState.AddLog(state, string.format("[外交谈判] 与 %s 展开谈判，态度 +%d（冷却 %d 季）",
+        faction.name, cfg.attitude_gain, cfg.cooldown))
+    UI.Toast.Show("谈判成功，关系改善", { variant = "success", duration = 1.8 })
     closeModal()
     notifyChanged()
 end

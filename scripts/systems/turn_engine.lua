@@ -16,6 +16,8 @@ local Equipment = require("systems.equipment")
 local Trade = require("systems.trade")
 local Expedition = require("systems.expedition")
 local Venture = require("systems.venture")
+local PlayerActionsGP = require("systems.player_actions_gp")
+local Culture         = require("systems.culture")
 local MapTilesData = require("data.map_tiles_data")
 local RegionsData = require("data.regions_data")
 
@@ -133,6 +135,21 @@ local function PickAIExpansionRegion(state, faction)
     return bestRegion
 end
 
+-- 压制专用：选玩家控制度最高且 AI 有存在度的地区（优先打击玩家核心区）
+local function PickAISuppressRegion(state, faction)
+    local best, bestScore = nil, -1
+    for _, r in ipairs(state.regions or {}) do
+        r.ai_presence = r.ai_presence or {}
+        local playerControl = r.control or 0
+        local aiPresence = r.ai_presence[faction.id] or 0
+        if aiPresence > 0 and playerControl > bestScore then
+            best = r
+            bestScore = playerControl
+        end
+    end
+    return best
+end
+
 --- 回合结算结果
 ---@class TurnReport
 ---@field economy EconomyReport
@@ -155,6 +172,70 @@ function TurnEngine.EndTurn(state)
 
     MapTilesData.EnsureState(state)
     MapTilesData.SyncTilesFromRegions(state)
+
+    -- ========================================
+    -- 阶段 0.5: 岗位专精加成刷新（upsert modifier，防止累积）
+    -- ========================================
+    do
+        local BF = Balance.FAMILY
+        local onboardRatio = BF.onboarding_bonus_ratio or 0.3
+
+        -- 辅助：根据成员属性和适应期计算实际加成系数
+        local function calcSpecBonus(member, attrName, fullBonus)
+            if not member then return 0 end
+            local attrVal = member[attrName] or 0
+            local bonus = attrVal * fullBonus
+            if (member.onboarding_remaining or 0) > 0 then
+                bonus = bonus * onboardRatio
+            end
+            return bonus
+        end
+
+        -- 矿业主管：management → mine_output_mult 加成（每点 +3%，上限 30%）
+        local mineDirector = GameState.GetMemberAtPosition(state, "mine_director")
+        if mineDirector then
+            local bonus = math.min(calcSpecBonus(mineDirector, "management", 0.03), 0.30)
+            GameState.SetModifier(state, "spec_mine_director", "mine_output_mult", bonus)
+        else
+            GameState.RemoveModifier(state, "spec_mine_director")
+        end
+
+        -- 军务主管：strategy → spec_expedition_dmg 加成（每点 +2%，上限 20%）
+        local milChief = GameState.GetMemberAtPosition(state, "military_chief")
+        if milChief then
+            local bonus = math.min(calcSpecBonus(milChief, "strategy", 0.02), 0.20)
+            GameState.SetModifier(state, "spec_military_chief", "spec_expedition_dmg", bonus)
+        else
+            GameState.RemoveModifier(state, "spec_military_chief")
+        end
+
+        -- 民政主管：management → spec_passive_control 加成（每点 +0.5，上限 5）
+        local civilDirector = GameState.GetMemberAtPosition(state, "civil_director")
+        if civilDirector then
+            local bonus = math.min(calcSpecBonus(civilDirector, "management", 0.5), 5.0)
+            GameState.SetModifier(state, "spec_civil_director", "spec_passive_control", bonus)
+        else
+            GameState.RemoveModifier(state, "spec_civil_director")
+        end
+
+        -- 科技顾问：knowledge → spec_research_speed 加成（每点 +2%，上限 20%）
+        local techAdvisor = GameState.GetMemberAtPosition(state, "tech_advisor")
+        if techAdvisor then
+            local bonus = math.min(calcSpecBonus(techAdvisor, "knowledge", 0.02), 0.20)
+            GameState.SetModifier(state, "spec_tech_advisor", "spec_research_speed", bonus)
+        else
+            GameState.RemoveModifier(state, "spec_tech_advisor")
+        end
+
+        -- 外交官：charisma → spec_aggression_decay 加成（每点 +0.1/季，上限 1.0）
+        local diplomat = GameState.GetMemberAtPosition(state, "diplomat")
+        if diplomat then
+            local bonus = math.min(calcSpecBonus(diplomat, "charisma", 0.1), 1.0)
+            GameState.SetModifier(state, "spec_diplomat", "spec_aggression_decay", bonus)
+        else
+            GameState.RemoveModifier(state, "spec_diplomat")
+        end
+    end
 
     -- ========================================
     -- 阶段 0: 通胀推进（影响本季价格）
@@ -749,6 +830,17 @@ function TurnEngine.EndTurn(state)
         end
     end
 
+    -- A4 民政主管专精：spec_passive_control —— 每季所有地区控制度被动增长（上限 5 点）
+    local specPassiveControl = GameState.GetModifierValue(state, "spec_passive_control")
+    if specPassiveControl > 0 then
+        local gain = math.floor(specPassiveControl)
+        if gain > 0 then
+            for _, r in ipairs(state.regions) do
+                r.control = math.min(100, (r.control or 0) + gain)
+            end
+        end
+    end
+
     -- ========================================
     -- 阶段 5: 武装士气衰减
     -- ========================================
@@ -779,12 +871,18 @@ function TurnEngine.EndTurn(state)
         local aiConfig = Balance.AI[faction.type]
         if aiConfig then
             if faction.defeated then goto continue_faction end
+            -- 攻击冷却递减（每季 -1）
+            if faction.attack_cooldown and faction.attack_cooldown > 0 then
+                faction.attack_cooldown = faction.attack_cooldown - 1
+            end
             -- ── 瘫痪状态检测 ──
             local colCfg = Balance.AI.collapse
             if not faction.collapsed then
                 -- 检查是否应该进入瘫痪
                 if faction.power <= colCfg.power_threshold
                     and faction.cash <= colCfg.cash_threshold then
+                    -- 记录崩溃前战力，用于正比恢复计算
+                    faction.pre_collapse_power = math.max(faction.power or 0, 1)
                     faction.collapsed = true
                     faction.collapsed_seasons = 0
                     GameState.AddLog(state, string.format(
@@ -817,12 +915,27 @@ function TurnEngine.EndTurn(state)
                     faction.attitude = math.min(0, faction.attitude + 3)
                 end
                 -- 到达恢复期限：注入资源，解除瘫痪
-                if faction.collapsed_seasons >= (colCfg.recovery_seasons or 6) then
+                -- 玩家在其区域保持高控制度（≥60）时恢复时间延长至9季
+                local recoverySeasonsNeeded = colCfg.recovery_seasons or 6
+                local playerHighControl = false
+                for _, r in ipairs(state.regions or {}) do
+                    if (r.ai_presence and (r.ai_presence[faction.id] or 0) > 0)
+                        and (r.control or 0) >= 60 then
+                        playerHighControl = true
+                        break
+                    end
+                end
+                if playerHighControl then recoverySeasonsNeeded = 9 end
+                if faction.collapsed_seasons >= recoverySeasonsNeeded then
                     faction.collapsed = false
                     faction.collapsed_seasons = nil
-                    faction.cash = (faction.cash or 0) + (colCfg.recovery_cash or 400)
-                    faction.power = math.min(100,
-                        (faction.power or 0) + (colCfg.recovery_power or 20))
+                    -- 正比恢复：被打越惨，复活越弱；最低 0.3 系数（保证 120 现金 / 6 战力）
+                    local recoveryMult = math.max(0.3, (faction.pre_collapse_power or 20) / 100)
+                    faction.pre_collapse_power = nil
+                    local recoveryCap = 100 + math.floor(math.max(0, (state.year or 1878) - 1878) / 10) * 5
+                    faction.cash  = (faction.cash or 0) + math.floor((colCfg.recovery_cash or 400) * recoveryMult)
+                    faction.power = math.min(recoveryCap,
+                        (faction.power or 0) + math.floor((colCfg.recovery_power or 20) * recoveryMult))
                     GameState.AddLog(state, string.format(
                         "⚡ %s 势力重组，恢复活动！", faction.name))
                     table.insert(report.ai_changes,
@@ -872,19 +985,11 @@ function TurnEngine.EndTurn(state)
             end
 
             -- 势力增长（每季 +2，上限随时代/战况浮动）
-            local powerCap = 100
-            -- 时代递增：后期 AI 更强
-            if eraScaling then
-                for i = #eraScaling, 1, -1 do
-                    if state.year >= eraScaling[i].year then
-                        powerCap = eraScaling[i].power_cap or powerCap
-                        break
-                    end
-                end
-            end
-            -- 战时临时上限提升
+            -- 战力上限公式：100 + floor((year-1878)/10)*5，每10年+5点，1946年=134
+            local powerCap = 100 + math.floor(math.max(0, (state.year or 1878) - 1878) / 10) * 5
+            -- 战时额外加成
             if state.flags and state.flags.at_war then
-                powerCap = math.max(powerCap, Balance.AI.war_power_cap or 120)
+                powerCap = powerCap + (Balance.AI.war_power_bonus or 20)
             end
             if faction.power < powerCap then
                 local powerGain = 2
@@ -922,6 +1027,13 @@ function TurnEngine.EndTurn(state)
                 if faction.attitude < 10 then faction.attitude = 10 end
             end
 
+            -- C4-2 外交谈判冷却递减
+            local cdKey = "negotiate_cd_" .. (faction.id or faction.name or "?")
+            state._negotiate_cooldowns = state._negotiate_cooldowns or {}
+            if (state._negotiate_cooldowns[cdKey] or 0) > 0 then
+                state._negotiate_cooldowns[cdKey] = state._negotiate_cooldowns[cdKey] - 1
+            end
+
             -- 战时外资撤退
             if faction.type == "foreign_capital" and state.flags and state.flags.at_war then
                 if math.random() > aiConfig.war_flee_threshold then
@@ -933,25 +1045,33 @@ function TurnEngine.EndTurn(state)
                 end
             end
 
-            -- ── AI 主动花费现金（防止现金无意义堆积）──
+            -- ── AI 主动花费现金（预算上限：保留40%现金，按优先级顺序判定）──
             local spend = Balance.AI.spending
             local spendMult = diff.ai_spending_mult or 1.0  -- 高难度时 AI 花费门槛降低
-            -- 1) 雇佣兵：有钱时花钱提升 power
-            if faction.cash >= math.floor((spend.mercenary_cost or 500) / spendMult)
+            local budgetCap = math.floor(faction.cash * 0.6)  -- 本季最多花60%
+            local budgetSpent = 0
+            -- 1) 雇佣兵：power 不足时优先补强（最高优先级）
+            if budgetSpent < budgetCap
+                and faction.cash >= math.floor((spend.mercenary_cost or 500) / spendMult)
                 and faction.cash > (aiConfig.expand_threshold or 600)
                 and faction.power < (powerCap - 10)
                 and math.random() < (spend.mercenary_chance or 0.25) then
-                faction.cash = faction.cash - spend.mercenary_cost
+                local cost = spend.mercenary_cost or 500
+                faction.cash = faction.cash - cost
+                budgetSpent = budgetSpent + cost
                 faction.power = math.min(powerCap, faction.power + (spend.mercenary_power or 5))
                 table.insert(report.ai_changes,
                     string.format("%s 雇佣了私兵（power +%d）", faction.name, spend.mercenary_power or 5))
             end
-            -- 2) 地区压制：态度差时打压玩家控制度
-            if faction.attitude < -30
+            -- 2) 地区压制：态度差时打压玩家控制度（使用专用压制区域选择）
+            if budgetSpent < budgetCap
+                and faction.attitude < -30
                 and faction.cash >= math.floor((spend.suppress_cost or 400) / spendMult)
                 and math.random() < (spend.suppress_chance or 0.20) then
-                faction.cash = faction.cash - spend.suppress_cost
-                local targetRegion = PickAIExpansionRegion(state, faction)
+                local cost = spend.suppress_cost or 400
+                faction.cash = faction.cash - cost
+                budgetSpent = budgetSpent + cost
+                local targetRegion = PickAISuppressRegion(state, faction)
                 if targetRegion then
                     targetRegion.control = math.max(0,
                         (targetRegion.control or 0) + (spend.suppress_control or -3))
@@ -961,33 +1081,27 @@ function TurnEngine.EndTurn(state)
                 end
             end
             -- 3) 经济制裁：外资对玩家施加负面修正器
-            if faction.type == "foreign_capital"
+            if budgetSpent < budgetCap
+                and faction.type == "foreign_capital"
                 and faction.attitude < -40
                 and faction.cash >= math.floor((spend.sanction_cost or 600) / spendMult)
                 and math.random() < (spend.sanction_chance or 0.15) then
-                faction.cash = faction.cash - spend.sanction_cost
+                local cost = spend.sanction_cost or 600
+                faction.cash = faction.cash - cost
+                budgetSpent = budgetSpent + cost
                 GameState.AddModifier(state, "foreign_sanction", "income_mod", -0.10, 3)
                 table.insert(report.ai_changes,
                     string.format("%s 对家族实施了经济制裁（收入 -10%%，持续3季）", faction.name))
             end
-            -- 4) 通胀操纵：外资推高通胀（极端敌对时）
-            if faction.type == "foreign_capital"
-                and faction.attitude < -50
-                and faction.cash >= math.floor((spend.inflate_cost or 800) / spendMult)
-                and math.random() < (spend.inflate_chance or 0.12) then
-                faction.cash = faction.cash - spend.inflate_cost
-                GameState.AddModifier(state, "foreign_inflate",
-                    "inflation_drift", spend.inflate_drift or 0.012, spend.inflate_duration or 4)
-                table.insert(report.ai_changes,
-                    string.format("%s 操纵了货币供应，推高通胀（+%.1f%%/季，持续%d季）",
-                        faction.name, (spend.inflate_drift or 0.012) * 100, spend.inflate_duration or 4))
-            end
-            -- 5) 矿价波动：外资压低金铜矿产品价格
-            if faction.type == "foreign_capital"
+            -- 4) 矿价打压：外资压低金铜矿产品价格（先于通胀）
+            if budgetSpent < budgetCap
+                and faction.type == "foreign_capital"
                 and faction.attitude < -35
                 and faction.cash >= math.floor((spend.mine_price_cost or 700) / spendMult)
                 and math.random() < (spend.mine_price_chance or 0.15) then
-                faction.cash = faction.cash - spend.mine_price_cost
+                local cost = spend.mine_price_cost or 700
+                faction.cash = faction.cash - cost
+                budgetSpent = budgetSpent + cost
                 local priceMod = spend.mine_price_mod or -0.15
                 local priceDur = spend.mine_price_duration or 3
                 GameState.AddModifier(state, "foreign_gold_dump",
@@ -998,24 +1112,57 @@ function TurnEngine.EndTurn(state)
                     string.format("%s 压低了金铜市场价格（%.0f%%，持续%d季）",
                         faction.name, priceMod * 100, priceDur))
             end
+            -- 5) 通胀操控：最激进，最后判定
+            if budgetSpent < budgetCap
+                and faction.type == "foreign_capital"
+                and faction.attitude < -50
+                and faction.cash >= math.floor((spend.inflate_cost or 800) / spendMult)
+                and math.random() < (spend.inflate_chance or 0.12) then
+                local cost = spend.inflate_cost or 800
+                faction.cash = faction.cash - cost
+                budgetSpent = budgetSpent + cost  -- luacheck: ignore
+                GameState.AddModifier(state, "foreign_inflate",
+                    "inflation_drift", spend.inflate_drift or 0.012, spend.inflate_duration or 4)
+                table.insert(report.ai_changes,
+                    string.format("%s 操纵了货币供应，推高通胀（+%.1f%%/季，持续%d季）",
+                        faction.name, (spend.inflate_drift or 0.012) * 100, spend.inflate_duration or 4))
+            end
 
-            -- ── 态度系统：负向触发器（难度越高 AI 敌意增长越快）──
+            -- ── C4-2 三层态度系统：负向触发器（难度越高 AI 敌意增长越快）──
             local aggrMult = diff.ai_aggression_mult or 1.0
-            -- 1) 经济碾压 → 嫉妒
-            if state.cash > faction.cash * 1.5 then
-                faction.attitude = math.max(-100, faction.attitude - math.ceil(3 * aggrMult))
+            local BSt = Balance.AI.structural or {}
+            local BAr = Balance.AI.arrogance or {}
+
+            -- ── 层 1：结构性（随玩家成功自动触发，数值降低）──
+            -- 1a) 经济嫉妒（玩家现金 > AI × 1.5） → -2/季（原 -3）
+            local envyMult = BSt.economic_envy_mult or 1.5
+            local envyDecay = BSt.economic_envy_decay or 2
+            if state.cash > (faction.cash or 0) * envyMult then
+                faction.attitude = math.max(-100, faction.attitude - math.ceil(envyDecay * aggrMult))
             end
-            -- 2) 军事威胁 → 恐惧
-            if state.military.guards > 20 and faction.power < 50 then
-                faction.attitude = math.max(-100, faction.attitude - math.ceil(2 * aggrMult))
+            -- 1b) 军事威胁（卫队 > 20 且 AI power < 50） → -2/季
+            local threatGuards = BSt.military_threat_guards or 20
+            local threatPower  = BSt.military_threat_power or 50
+            local threatDecay  = BSt.military_threat_decay or 2
+            if state.military.guards > threatGuards and faction.power < threatPower then
+                faction.attitude = math.max(-100, faction.attitude - math.ceil(threatDecay * aggrMult))
             end
-            -- 3) 玩家矿山过多 → 领地竞争
-            if #state.mines >= 5 then
-                faction.attitude = math.max(-100, faction.attitude - math.ceil(1 * aggrMult))
+            -- 1c) 势力扩张（矿山 ≥ 5） → -1/季（不变）
+            local minesThreshold = BSt.mines_threshold or 5
+            local minesDecay     = BSt.mines_decay or 1
+            if #state.mines >= minesThreshold then
+                faction.attitude = math.max(-100, faction.attitude - math.ceil(minesDecay * aggrMult))
             end
-            -- 4) AI 势力扩大后自然傲慢
-            if faction.power >= 60 and faction.attitude > -50 then
-                faction.attitude = faction.attitude - math.ceil(1 * aggrMult)
+
+            -- ── 层 2：行为性（一次性惩罚，在占领/制裁发生时由外部调用触发，这里不重复） ──
+            -- （见 Expedition.Occupy → faction 态度 -8；ui_action_modals 制裁 → 态度 -5）
+
+            -- ── 层 3：自傲（AI 自身强大时的傲慢，阈值提升至 80） ──
+            local arrogThreshold = BAr.power_threshold or 80
+            local arrogDecay     = BAr.decay_per_season or 1
+            local arrogFloor     = BAr.attitude_floor or -50
+            if faction.power >= arrogThreshold and faction.attitude > arrogFloor then
+                faction.attitude = faction.attitude - math.ceil(arrogDecay * aggrMult)
             end
 
             -- ── 态度系统：正向触发器（平衡单调下降）──
@@ -1105,6 +1252,9 @@ function TurnEngine.EndTurn(state)
     -- 阶段 6.6: 远征系统结算
     -- 活跃远征推进 → 占领收入/维护 → HP恢复 → 侵略值衰减 → 制裁倒计时
     -- ========================================
+    -- C2 外交路线每季结算（与军事远征独立，不需要幕后执政解锁）
+    Expedition.TickDiplomacy(state)
+
     if Expedition.CanDoExpedition(state) then
         -- 推进活跃远征（造成伤害，HP归零→完成判定）
         local tickReports = Expedition.TickActiveExpeditions(state)
@@ -1146,6 +1296,28 @@ function TurnEngine.EndTurn(state)
             report.venture_tick = ventureTickReports
         end
 
+        -- A3: 将商业危机事件推入事件队列（触发弹窗）
+        local pendingCrises = state.ventures._pending_crisis
+        if pendingCrises and #pendingCrises > 0 then
+            -- 注入 ctx 到事件 options 的 custom 闭包所需路径
+            -- events.lua ApplyOption 会将 event._ctx 作为第二参数传入 effects.custom
+            for _, crisis in ipairs(pendingCrises) do
+                -- 将 _ctx 改写为 options 内部 custom 可读取的格式
+                for _, opt in ipairs(crisis.options or {}) do
+                    if opt.effects and opt.effects.custom then
+                        local originalFn = opt.effects.custom
+                        local capturedCtx = crisis._ctx
+                        opt.effects.custom = function(st, _)
+                            originalFn(st, capturedCtx)
+                        end
+                    end
+                end
+                crisis._ctx = nil
+            end
+            Events.Enqueue(state, pendingCrises)
+            state.ventures._pending_crisis = {}
+        end
+
         -- 商站收入/维护结算 + 紧张度衰减 + 制裁倒计时/触发
         local ventureReport = Venture.SettleTurn(state)
 
@@ -1183,6 +1355,86 @@ function TurnEngine.EndTurn(state)
             table.insert(report.ai_changes, msg)
         end
         for _, msg in ipairs(gpReport.succession_msgs or {}) do
+            table.insert(report.ai_changes, msg)
+        end
+    end
+
+    -- ========================================
+    -- 阶段 6.75: C3 大国博弈 — 消费 _incited_wars / 结算 covert_support
+    -- ========================================
+    do
+        -- 消费到期的煽动战争记录
+        if state._incited_wars then
+            local remaining = {}
+            for _, inc in ipairs(state._incited_wars) do
+                if (state.turn or 0) >= inc.trigger_turn then
+                    -- 找目标地区确认仍在对手主权下
+                    local targetCountry = state.europe and state.europe[inc.target]
+                    local stillValid = targetCountry and targetCountry.sovereign == inc.defender
+                    if stillValid then
+                        -- 通过公开接口执行征服（主权变更 + war_fatigue + covert_bonus）
+                        local conqReport = { conquest_msgs = {} }
+                        GrandPowers.ApplyConquest(state, inc.attacker, inc.target, conqReport)
+                        local aLabel = (state.powers[inc.attacker] and state.powers[inc.attacker].label) or inc.attacker
+                        local tLabel = (targetCountry and targetCountry.label) or inc.target
+                        GameState.AddLog(state, string.format(
+                            "C3煽动战争触发：%s 征服了 %s", aLabel, tLabel))
+                        table.insert(report.ai_changes, string.format("%s（煽动）征服了 %s", aLabel, tLabel))
+                    else
+                        GameState.AddLog(state, string.format(
+                            "C3煽动战争失效：目标 %s 已无效", inc.target))
+                    end
+
+                    -- 30% 概率被双方发现
+                    if math.random() < (Balance.GP and Balance.GP.incite_detected_chance or 0.30) then
+                        local attLoss = Balance.GP and Balance.GP.incite_detected_att_loss or 40
+                        local pA = state.powers[inc.attacker]
+                        local pB = state.powers[inc.defender]
+                        if pA then pA.attitude_to_player = math.max(-100, (pA.attitude_to_player or 0) - attLoss) end
+                        if pB then pB.attitude_to_player = math.max(-100, (pB.attitude_to_player or 0) - attLoss) end
+                        GameState.AddLog(state, string.format(
+                            "煽动战争阴谋败露！%s、%s 好感各 -%d",
+                            (pA and pA.label or inc.attacker),
+                            (pB and pB.label or inc.defender), attLoss))
+                    end
+                else
+                    table.insert(remaining, inc)
+                end
+            end
+            state._incited_wars = remaining
+        end
+
+        -- 结算到期的暗中支援（每季检查：若大国本季完成征服则算"赢"）
+        if state._covert_supports then
+            local gpConquestThisTurn = {}
+            for _, msg in ipairs(report.ai_changes or {}) do
+                -- 简单检测：conquest_msgs 含"征服"字样时匹配攻击方
+                for powId, _ in pairs(state._covert_supports or {}) do
+                    local power = state.powers[powId]
+                    if power and msg:find(power.label or powId) and msg:find("征服") then
+                        gpConquestThisTurn[powId] = true
+                    end
+                end
+            end
+            -- 收集需要结算的 key（避免遍历中修改）
+            local toSettle = {}
+            for powId, rec in pairs(state._covert_supports) do
+                if (state.turn or 0) > (rec.turn or 0) then
+                    table.insert(toSettle, powId)
+                end
+            end
+            for _, powId in ipairs(toSettle) do
+                PlayerActionsGP.SettleCovertSupport(state, powId, gpConquestThisTurn[powId] or false)
+            end
+        end
+    end
+
+    -- ========================================
+    -- 阶段 6.76: C5 文化系统结算
+    -- ========================================
+    do
+        local cultureLogs = Culture.Tick(state)
+        for _, msg in ipairs(cultureLogs) do
             table.insert(report.ai_changes, msg)
         end
     end

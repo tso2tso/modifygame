@@ -3812,7 +3812,500 @@ function EventsData.GetDisasterEventTemplates()
         },
 
 
+        -- ================================================================
+        -- 远征过程事件（A1）：由 expedition.lua 直接推入队列，不走 trigger 检查
+        -- type = "expedition_event"，expedition_id 由推入时注入
+        -- ================================================================
+
+        -- 1. 补给线受袭（持续≥4季触发）
+        {
+            id = "exp_evt_supply_raid",
+            title = "补给线遭到袭击",
+            type = "expedition_event",
+            priority = EventsData.PRIORITY.MAIN,
+            icon = "🚚",
+            trigger = { custom = function() return false end },  -- 由expedition.lua手动推入
+            chance = 1.0,
+            desc = "远征军的补给线遭到地方武装骚扰，物资损耗严重。如不加固，本季及下季伤害将大幅削减。",
+            options = {
+                {
+                    text = "花费120克朗加固补给路线",
+                    desc = "彻底解决问题，远征效率不受影响",
+                    cost = { cash = 120 },
+                    effects = {
+                        custom = function(state, eventData)
+                            local id = eventData and eventData.expedition_id
+                            if id and state.expeditions and state.expeditions.active[id] then
+                                state.expeditions.active[id].supply_penalty = nil
+                            end
+                        end,
+                    },
+                },
+                {
+                    text = "暂时搁置，接受损耗",
+                    desc = "本季及下季伤害-25%",
+                    effects = {
+                        custom = function(state, eventData)
+                            local id = eventData and eventData.expedition_id
+                            if id and state.expeditions and state.expeditions.active[id] then
+                                state.expeditions.active[id].supply_penalty = 2
+                            end
+                        end,
+                    },
+                },
+            },
+        },
+
+        -- 2. 当地游击队
+        {
+            id = "exp_evt_guerrilla",
+            title = "当地游击队活动频繁",
+            type = "expedition_event",
+            priority = EventsData.PRIORITY.MAIN,
+            icon = "🌲",
+            trigger = { custom = function() return false end },
+            chance = 1.0,
+            desc = "目标国境内的游击队趁机袭扰你的驻地，扰乱围攻节奏。若不镇压，目标将获得额外喘息时间。",
+            options = {
+                {
+                    text = "消耗1AP + 50情报镇压游击队",
+                    desc = "完全清除威胁，围攻效率正常",
+                    cost = { ap = 1, intel = 50 },
+                    effects = {
+                        custom = function(state, eventData)
+                            local id = eventData and eventData.expedition_id
+                            if id and state.expeditions and state.expeditions.active[id] then
+                                state.expeditions.active[id].guerrilla_regen = nil
+                            end
+                        end,
+                    },
+                },
+                {
+                    text = "暂时忽视，集中主攻",
+                    desc = "目标HP下2季每季额外恢复2点",
+                    effects = {
+                        custom = function(state, eventData)
+                            local id = eventData and eventData.expedition_id
+                            if id and state.expeditions and state.expeditions.active[id] then
+                                state.expeditions.active[id].guerrilla_regen = 2
+                            end
+                        end,
+                    },
+                },
+            },
+        },
+
+        -- 3. 对方谈判使者（目标HP在30%-50%时触发）
+        {
+            id = "exp_evt_negotiate",
+            title = "对方遣使求和",
+            type = "expedition_event",
+            priority = EventsData.PRIORITY.MAIN,
+            icon = "🕊",
+            trigger = { custom = function() return false end },
+            chance = 1.0,
+            desc = "目标已难以为继，派来使者提出谈判。接受可立即变现，但目标将保留残余实力；拒绝则激怒对方，本季攻势更猛。",
+            options = {
+                {
+                    text = "接受和谈（立即获得stability×40克朗）",
+                    desc = "远征结束，目标保留40%HP，获得现金补偿",
+                    effects = {
+                        custom = function(state, eventData)
+                            local id = eventData and eventData.expedition_id
+                            if not id then return end
+                            local country = state.europe and state.europe[id]
+                            if country then
+                                local bonus = math.floor((country.stability or 3) * 40)
+                                state.cash = (state.cash or 0) + bonus
+                                -- 保留40%HP后结束远征
+                                country.current_hp = math.floor((country.max_hp or 10) * 0.4)
+                                local GameState = require("game_state")
+                                GameState.AddLog(state, string.format(
+                                    "🕊 与%s达成和解，获得%d克朗，远征结束", country.label or id, bonus))
+                            end
+                            if state.expeditions and state.expeditions.active then
+                                local Expedition = require("systems.expedition")
+                                Expedition.WithdrawExpedition(state, id)
+                            end
+                        end,
+                    },
+                },
+                {
+                    text = "拒绝和谈，继续施压",
+                    desc = "本季伤害+15%（激怒加成），远征继续",
+                    effects = {
+                        custom = function(state, eventData)
+                            local id = eventData and eventData.expedition_id
+                            if id and state.expeditions and state.expeditions.active[id] then
+                                state.expeditions.active[id].rage_bonus = 0.15
+                            end
+                        end,
+                    },
+                },
+            },
+        },
+
+        -- 4. 意外矿产发现
+        {
+            id = "exp_evt_mineral",
+            title = "意外发现矿产",
+            type = "expedition_event",
+            priority = EventsData.PRIORITY.MAIN,
+            icon = "⛏",
+            trigger = { custom = function() return false end },
+            chance = 1.0,
+            desc = "侦察队在目标区域发现未开采的矿脉。是立即变现还是投资后期持续获益？",
+            options = {
+                {
+                    text = "立即变现（+200克朗）",
+                    desc = "当场收入200克朗，不影响后续战略",
+                    effects = {
+                        custom = function(state, _)
+                            state.cash = (state.cash or 0) + 200
+                            local GameState = require("game_state")
+                            GameState.AddLog(state, "⛏ 矿产变现，+200克朗")
+                        end,
+                    },
+                },
+                {
+                    text = "投资开发（占领后每季+30克朗）",
+                    desc = "占领后该地区净收入永久+30克朗/季",
+                    effects = {
+                        custom = function(state, eventData)
+                            local id = eventData and eventData.expedition_id
+                            if id and state.expeditions and state.expeditions.active[id] then
+                                state.expeditions.active[id].mineral_bonus = 30
+                            end
+                        end,
+                    },
+                },
+            },
+        },
+
+        -- 5. 大国警告函（侵略度≥4时触发）
+        {
+            id = "exp_evt_gp_warning",
+            title = "收到大国警告函",
+            type = "expedition_event",
+            priority = EventsData.PRIORITY.MAIN,
+            icon = "📜",
+            trigger = { custom = function() return false end },
+            chance = 1.0,
+            desc = "一个大国正式照会，警告你的军事行动威胁地区秩序。公开道歉可缓和关系；无视则危险升级。",
+            options = {
+                {
+                    text = "公开道歉，表示克制",
+                    desc = "侵略度-1，合作度+3，大国态度略有好转",
+                    effects = {
+                        custom = function(state, _)
+                            if state.expeditions then
+                                state.expeditions.aggression_counter = math.max(0,
+                                    (state.expeditions.aggression_counter or 0) - 1)
+                            end
+                            local GameState = require("game_state")
+                            GameState.AddModifier(state, "gp_apology_coop", "cooperation_bonus", 3, 4)
+                            GameState.AddLog(state, "📜 公开道歉，侵略度-1，合作度临时+3")
+                        end,
+                    },
+                },
+                {
+                    text = "无视警告，强硬回应",
+                    desc = "本季侵略度阈值临时-1（更接近触发制裁）",
+                    effects = {
+                        custom = function(state, _)
+                            if state.expeditions then
+                                state.expeditions.gp_warning_aggravated = true
+                            end
+                        end,
+                    },
+                },
+            },
+        },
+
+        -- 6. 友军借道请求（己方有邻接占领国时触发）
+        {
+            id = "exp_evt_ally_passage",
+            title = "友军请求借道",
+            type = "expedition_event",
+            priority = EventsData.PRIORITY.MAIN,
+            icon = "🤝",
+            trigger = { custom = function() return false end },
+            chance = 1.0,
+            desc = "盟友部队申请经由你占领的领土借道，以便对同一目标施压。批准可获得协作加成，拒绝则不影响关系。",
+            options = {
+                {
+                    text = "批准借道",
+                    desc = "合作度+5，目标下季HP恢复受阻（-50%恢复量）",
+                    effects = {
+                        custom = function(state, eventData)
+                            local id = eventData and eventData.expedition_id
+                            local GameState = require("game_state")
+                            GameState.AddModifier(state, "ally_passage_coop", "cooperation_bonus", 5, 3)
+                            if id and state.expeditions and state.expeditions.active[id] then
+                                state.expeditions.active[id].ally_passage_regen_block = 1
+                            end
+                            GameState.AddLog(state, "🤝 批准友军借道，合作度+5")
+                        end,
+                    },
+                },
+                {
+                    text = "拒绝借道",
+                    desc = "无任何影响",
+                    effects = {},
+                },
+            },
+        },
+
+        -- 7. 叛逃情报（远征持续≥6季时触发）
+        {
+            id = "exp_evt_defector",
+            title = "对方将领叛逃",
+            type = "expedition_event",
+            priority = EventsData.PRIORITY.MAIN,
+            icon = "🗝",
+            trigger = { custom = function() return false end },
+            chance = 1.0,
+            desc = "目标军队中有将领愿意出售防线情报。利用情报可显著提升结算成功率，但需要支付费用。",
+            options = {
+                {
+                    text = "花费50情报利用叛逃情报",
+                    desc = "本次远征结算成功率+8%",
+                    cost = { intel = 50 },
+                    effects = {
+                        custom = function(state, eventData)
+                            local id = eventData and eventData.expedition_id
+                            if id and state.expeditions and state.expeditions.active[id] then
+                                state.expeditions.active[id].defector_bonus = 0.08
+                            end
+                        end,
+                    },
+                },
+                {
+                    text = "忽视，维持现状",
+                    desc = "无影响",
+                    effects = {},
+                },
+            },
+        },
+
+        -- ── A3 商业渗透危机事件（type = "venture_crisis_event"，venture_id 在触发时注入）──
+
+        -- A3-1. 本地竞争者崛起（渗透效率 -20%，可花200克朗收购）
+        {
+            id = "venture_crisis_competitor",
+            title = "本地竞争者崛起",
+            type = "venture_crisis_event",
+            priority = EventsData.PRIORITY.MAIN,
+            icon = "🏪",
+            trigger = { custom = function() return false end },
+            chance = 1.0,
+            desc = "一家本地商行迅速崛起，抢占市场份额，本季渗透效率将下降20%。",
+            options = {
+                {
+                    text = "花费200克朗收购（渗透进度+5%）",
+                    desc = "直接收购竞争者，危机解除，渗透进度额外+5%",
+                    cost = { cash = 200 },
+                    effects = {
+                        custom = function(state, ctx)
+                            local Venture = require("systems.venture")
+                            local vid = ctx and ctx.venture_id
+                            if vid then
+                                local record = (state.ventures.active or {})[vid]
+                                if record then
+                                    local country = state.europe[vid]
+                                    local bonus = math.floor((country and country.max_market_barrier or 100) * 0.05)
+                                    country.market_barrier = math.max(0, (country.market_barrier or 0) - bonus)
+                                    record._crisis_efficiency = nil
+                                end
+                            end
+                            local GameState = require("game_state")
+                            GameState.AddLog(state, "🏪 花费200克朗收购本地竞争者，渗透进度+5%")
+                        end,
+                    },
+                },
+                {
+                    text = "暂不处理（本季渗透效率-20%）",
+                    desc = "竞争者存在，本季渗透效率降低",
+                    effects = {
+                        custom = function(state, ctx)
+                            local vid = ctx and ctx.venture_id
+                            if vid then
+                                local record = (state.ventures.active or {})[vid]
+                                if record then
+                                    record._crisis_efficiency = 0.8
+                                end
+                            end
+                            local GameState = require("game_state")
+                            GameState.AddLog(state, "🏪 本地竞争者崛起，本季渗透效率-20%")
+                        end,
+                    },
+                },
+            },
+        },
+
+        -- A3-2. 关税壁垒临时上调（本季投资额×1.3，可花1AP+情报取消）
+        {
+            id = "venture_crisis_tariff",
+            title = "关税壁垒临时上调",
+            type = "venture_crisis_event",
+            priority = EventsData.PRIORITY.MAIN,
+            icon = "📜",
+            trigger = { custom = function() return false end },
+            chance = 1.0,
+            desc = "目标国临时上调关税，本季投资成本将额外增加30%。",
+            options = {
+                {
+                    text = "外交干预（1 AP + 30 情报）",
+                    desc = "通过外交渠道取消关税壁垒上调",
+                    effects = {
+                        custom = function(state, ctx)
+                            local intel = state.intel or 0
+                            if intel < 30 then
+                                local UI = require("urhox-libs/UI")
+                                UI.Toast.Show("情报不足（需要30），外交干预失败", { variant = "error", duration = 2.0 })
+                                -- 情报不足，不扣 AP，改为应用关税飙升
+                                local vid = ctx and ctx.venture_id
+                                if vid then
+                                    local record = (state.ventures.active or {})[vid]
+                                    if record then record._tariff_spike = 1.3 end
+                                end
+                                return
+                            end
+                            local GameStateRef = require("game_state")
+                            GameStateRef.SpendAP(state, 1)
+                            state.intel = intel - 30
+                            local vid = ctx and ctx.venture_id
+                            if vid then
+                                local record = (state.ventures.active or {})[vid]
+                                if record then record._tariff_spike = nil end
+                            end
+                            GameStateRef.AddLog(state, "📜 外交干预成功，关税壁垒未上调")
+                        end,
+                    },
+                },
+                {
+                    text = "接受（本季投资额×1.3）",
+                    desc = "额外承担关税成本",
+                    effects = {
+                        custom = function(state, ctx)
+                            local vid = ctx and ctx.venture_id
+                            if vid then
+                                local record = (state.ventures.active or {})[vid]
+                                if record then record._tariff_spike = 1.3 end
+                            end
+                            local GameState = require("game_state")
+                            GameState.AddLog(state, "📜 关税上调，本季渗透投资额×1.3")
+                        end,
+                    },
+                },
+            },
+        },
+
+        -- A3-3. 内部腐败调查（渗透冷却+2季，可花300克朗疏通）
+        {
+            id = "venture_crisis_corruption",
+            title = "内部腐败调查",
+            type = "venture_crisis_event",
+            priority = EventsData.PRIORITY.MAIN,
+            icon = "🔍",
+            trigger = { custom = function() return false end },
+            chance = 1.0,
+            desc = "渗透网络内部出现腐败调查，若不处理，渗透将被强制冷却2季。",
+            options = {
+                {
+                    text = "花费300克朗疏通关系",
+                    desc = "平息调查，渗透正常推进",
+                    cost = { cash = 300 },
+                    effects = {
+                        custom = function(state, ctx)
+                            local GameState = require("game_state")
+                            GameState.AddLog(state, "🔍 花费300克朗平息腐败调查，渗透正常推进")
+                        end,
+                    },
+                },
+                {
+                    text = "无视调查（渗透冷却2季）",
+                    desc = "调查持续，渗透被迫暂停2季",
+                    effects = {
+                        custom = function(state, ctx)
+                            local vid = ctx and ctx.venture_id
+                            if vid then
+                                local record = (state.ventures.active or {})[vid]
+                                if record then
+                                    record._corruption_cooldown = 2
+                                end
+                            end
+                            local GameState = require("game_state")
+                            GameState.AddLog(state, "🔍 腐败调查爆发，渗透强制冷却2季")
+                        end,
+                    },
+                },
+            },
+        },
+
+        -- 8. 后方骚乱（同时有2+条活跃远征时触发）
+        {
+            id = "exp_evt_rear_unrest",
+            title = "后方出现骚乱",
+            type = "expedition_event",
+            priority = EventsData.PRIORITY.MAIN,
+            icon = "🔥",
+            trigger = { custom = function() return false end },
+            chance = 1.0,
+            desc = "多线作战导致后方人心浮动，骚乱迹象蔓延。及时维稳可避免士气受损。",
+            options = {
+                {
+                    text = "花费150克朗维稳",
+                    desc = "平息骚乱，士气不受影响",
+                    cost = { cash = 150 },
+                    effects = {
+                        custom = function(state, _)
+                            local GameState = require("game_state")
+                            GameState.AddLog(state, "🔥 花费150克朗平息后方骚乱")
+                        end,
+                    },
+                },
+                {
+                    text = "暂时搁置",
+                    desc = "守卫士气-5，持续2季",
+                    effects = {
+                        custom = function(state, _)
+                            local GameState = require("game_state")
+                            GameState.AddModifier(state, "rear_unrest_morale", "guard_morale", -5, 2)
+                            GameState.AddLog(state, "🔥 后方骚乱无人处置，守卫士气-5持续2季")
+                        end,
+                    },
+                },
+            },
+        },
+
     }
+end
+
+--- 获取全部远征过程事件（供 expedition.lua 直接使用，不走自动触发）
+---@return table[]
+function EventsData.GetExpeditionEvents()
+    local all = EventsData.GetDisasterEventTemplates()
+    local result = {}
+    for _, ev in ipairs(all) do
+        if ev.type == "expedition_event" then
+            table.insert(result, ev)
+        end
+    end
+    return result
+end
+
+--- 获取全部商业渗透危机事件（供 venture.lua 抽检使用）
+---@return table[]
+function EventsData.GetVentureCrisisEvents()
+    local all = EventsData.GetDisasterEventTemplates()
+    local result = {}
+    for _, ev in ipairs(all) do
+        if ev.type == "venture_crisis_event" then
+            table.insert(result, ev)
+        end
+    end
+    return result
 end
 
 return EventsData

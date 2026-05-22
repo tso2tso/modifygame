@@ -140,6 +140,7 @@ function GameState.CreateNew()
         victory = {
             economic = 0,
             military = 0,
+            culture  = 0,       -- C5: 文化胜利累积分
             claimed = nil,
             claimed_year = nil,
             claimed_quarter = nil,
@@ -252,7 +253,20 @@ function GameState.CreateNew()
                 total_loot = 0,
                 countries_conquered = 0,
             },
+            -- C2 外交路线
+            diplomacy_active = {},     -- 外交记录 { [country_id] = diplomacy_record }
+            -- diplomacy_record = {
+            --   country_id        = string,
+            --   label             = string,
+            --   started_turn      = number,
+            --   influence_progress = number,  -- 当前影响力（0 → pool）
+            --   influence_pool    = number,   -- 满值
+            --   treaty_type       = string|nil, -- nil/trade_concession/protection/military_alliance/vassal/broken
+            --   treaty_turn       = number,   -- 签约回合
+            --   fail_penalty      = number,   -- 下次谈判难度加成（0.0~1.0）
+            -- }
         },
+        diplomatic_influence = 30,     -- 全局外交影响力资源（初始 30）
 
         -- ============================
         -- 商业远征系统（商业大亨解锁后激活）
@@ -314,6 +328,7 @@ function GameState.CreateNew()
                 attitude = -5,   -- 对玩家态度 -100~100（初始微妙敌意）
                 power = 38,      -- 势力值（起步更强）
                 victory = { economic = 0, military = 0 },
+                culture_score = 0,
                 battle_wins_unclaimed = 0,
                 recruit_blocked = 0,
                 attack_cooldown = 0,
@@ -328,6 +343,7 @@ function GameState.CreateNew()
                 attitude = 5,    -- 外资初始中立偏友好
                 power = 45,      -- 资本集团势力更强
                 victory = { economic = 0, military = 0 },
+                culture_score = 0,
                 battle_wins_unclaimed = 0,
                 recruit_blocked = 0,
                 attack_cooldown = 0,
@@ -441,6 +457,22 @@ function GameState.CreateNew()
         },
         titles_unlocked = {},  -- { [title_id] = unlocked_turn }
         titles_new      = {},  -- 本回合新解锁（回合末填充，展示后清空）
+
+        -- ============================
+        -- C5: 文化系统
+        -- ============================
+        culture = {
+            ci            = 0,      -- 当前文化影响力（Cultural Influence）
+            score         = 0,      -- culture_score 累积分（用于胜利条件）
+            region_cp     = {},     -- { [region_id] = cp_value } 各地区文化点
+            cp_level_seen = {},     -- { [region_id] = highest_level } 已触发好感的等级
+            works         = {},     -- 已创建作品列表（theater_troupe / film / national_epic）
+            sports_cooldown = 0,    -- 体育赛事冷却剩余季数
+            exhibition_done = false,-- 世界博览会是否已举办
+            exhibition_progress = 0,-- 世界博览会筹备进度（0-3 季）
+            missions      = {},     -- 进行中的文化使团列表
+            mission_paused = {},    -- { [target_id] = turns_paused } CI 不足时暂停
+        },
     }
 
     -- 起始资源受难度影响
@@ -618,6 +650,12 @@ function GameState.GetVictoryStanding(state)
     local milLead = player.military - bestAI.military.score
     local domLead = player.dominance - bestAI.dominance.score
 
+    -- C5: 文化胜利 - 计算最强 AI culture_score
+    local strongestAICultureScore = 0
+    for _, faction in ipairs(state.ai_factions or {}) do
+        strongestAICultureScore = math.max(strongestAICultureScore, faction.culture_score or 0)
+    end
+
     local claimable = nil
     local minClaimYear = relative.min_claim_year or 1945
     if not (state.victory and state.victory.claimed) and state.year >= minClaimYear then
@@ -632,6 +670,41 @@ function GameState.GetVictoryStanding(state)
         elseif domLead >= (relative.dominance_margin or 300)
             and ((not relative.dominance_requires_positive_track) or ecoLead > 0 or milLead > 0) then
             claimable = { type = "dominance", lead = domLead, margin = relative.dominance_margin or 300 }
+        elseif Balance.CULTURE and state.year >= (Balance.CULTURE.victory_year or 1938) then
+            -- C5 文化胜利判断
+            local BC = Balance.CULTURE
+            local cult = state.culture or {}
+            local playerCultScore = cult.score or 0
+            local cultScoreLead = playerCultScore - strongestAICultureScore
+            -- 检查科技前置
+            local techs = (state.tech and state.tech.researched) or {}
+            local hasCulturalHegemony = techs["d8_cultural_hegemony"]
+            local hasCulturalRenaissance = techs["d11_cultural_renaissance"]
+            -- 统计 CP ≥ 70 / ≥ 90 的地区数
+            local identityCount = 0
+            local assimCount = 0
+            local regionCp = cult.region_cp or {}
+            for _, cp in pairs(regionCp) do
+                if cp >= (BC.cp_assimilation or 90) then
+                    assimCount = assimCount + 1
+                    identityCount = identityCount + 1
+                elseif cp >= (BC.cp_identity or 70) then
+                    identityCount = identityCount + 1
+                end
+            end
+            local wayA = identityCount >= (BC.victory_cp_identity or 3)
+            local wayB = assimCount >= (BC.victory_cp_assimilation or 2)
+                     and (cult.ci or 0) >= (BC.victory_ci_assimilation or 150)
+            if hasCulturalHegemony and hasCulturalRenaissance
+                and (wayA or wayB)
+                and cultScoreLead >= (BC.victory_score_lead or 500) then
+                claimable = {
+                    type = "culture",
+                    lead = cultScoreLead,
+                    margin = BC.victory_score_lead or 500,
+                    way = wayA and "A" or "B",
+                }
+            end
         end
     end
 
@@ -644,6 +717,7 @@ function GameState.GetVictoryStanding(state)
             dominance = domLead,
         },
         claimable = claimable,
+        culture_score_lead = (state.culture and state.culture.score or 0) - strongestAICultureScore,
     }
 end
 
@@ -954,6 +1028,12 @@ function GameState.GetEndingInfo(state)
         ending.variant = "success"
         ending.icon = "★"
         ending.description = "家族在财富、武装与地区影响上全面压过所有竞争势力。"
+    elseif victoryType == "culture" then
+        ending.title = "文化胜利：巴尔干文明灯塔"
+        ending.resultLabel = "胜利"
+        ending.variant = "success"
+        ending.icon = "🎭"
+        ending.description = "以文化作品、使团与文明辐射，科瓦奇家族将萨拉热窝打造成整个巴尔干的精神中心。"
     elseif victoryType == "world_domination" then
         ending.title = "终极胜利：全面统治"
         ending.resultLabel = "至高胜利"
@@ -1632,6 +1712,36 @@ function GameState.GetModifierValue(state, target)
         end
     end
     return total
+end
+
+--- 设置或更新单条修正器（upsert，防止每季累积重复条目）
+---@param state table
+---@param id string
+---@param target string
+---@param value number
+function GameState.SetModifier(state, id, target, value)
+    state.modifiers = state.modifiers or {}
+    for i, m in ipairs(state.modifiers) do
+        if m.id == id then
+            state.modifiers[i].target = target
+            state.modifiers[i].value = value
+            state.modifiers[i].remaining = 0
+            return
+        end
+    end
+    table.insert(state.modifiers, { id = id, target = target, value = value, remaining = 0 })
+end
+
+--- 移除指定 id 的修正器
+---@param state table
+---@param id string
+function GameState.RemoveModifier(state, id)
+    if not state.modifiers then return end
+    for i = #state.modifiers, 1, -1 do
+        if state.modifiers[i].id == id then
+            table.remove(state.modifiers, i)
+        end
+    end
 end
 
 --- 当前通胀乘数

@@ -26,6 +26,8 @@ local FactionsPanel = require("ui.ui_factions")
 local ReportPanel = require("ui.ui_report")
 local VenturePanel = require("ui.ui_venture")
 local Venture = require("systems.venture")
+local CulturePanel = require("ui.ui_culture")
+local Culture      = require("systems.culture")
 local BV = Balance.VENTURE
 
 -- 构建国家ID→中文名映射表
@@ -102,6 +104,7 @@ local SUB_TABS = {
     { id = "report",     label = "报告" },
     { id = "expedition", label = "远征" },
     { id = "venture",    label = "商路" },
+    { id = "culture",    label = "文化" },
 }
 
 --- 构建当前可见的子标签列表（远征始终显示，未解锁时标记 locked）
@@ -340,6 +343,9 @@ function WorldPage._SwitchSubTab(state, tabId)
                 }
             ))
         end
+    elseif tabId == "culture" then
+        local panel = CulturePanel.Build(state, callbacksRef_)
+        tabContentPanel_:AddChild(panel)
     end
 end
 
@@ -2089,6 +2095,26 @@ function WorldPage._CreateNodeDrawer(state, region, tile)
                         WorldPage._StarRating(region.development, 5), C.accent_gold),
                     WorldPage._InfoRow("文化价值",
                         tostring(region.culture), C.text_primary),
+                    (function()
+                        -- 显示该地区的文化影响点（CP），始终显示
+                        if not (state and state.culture) then return nil end
+                        local rid = tile and tile.id or region.id
+                        if not rid then return nil end
+                        local cp    = Culture.GetRegionCP(state, rid)
+                        local level = Culture.GetCPLevelName(cp)
+                        local cpColors = {
+                            ["文化同化"] = { 255, 165, 30, 255 },
+                            ["文化认同"] = { 80,  210, 100, 255 },
+                            ["文化倾慕"] = { 100, 160, 255, 255 },
+                            ["文化好奇"] = { 220, 200, 80,  255 },
+                        }
+                        local col = cp > 0 and (cpColors[level] or C.text_secondary)
+                                           or { 120, 120, 140, 180 }
+                        local valStr = cp > 0
+                            and string.format("%d  (%s)", cp, level)
+                            or  "0  (无影响)"
+                        return WorldPage._InfoRow("文化影响（CP）", valStr, col)
+                    end)() or nil,
                 },
             },
 

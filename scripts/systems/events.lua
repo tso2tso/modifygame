@@ -716,8 +716,40 @@ function Events.ApplyOption(state, event, optionIndex)
         end
     end
 
+    -- 8.85 选项费用扣除（远征过程事件使用 cost = { cash, ap, intel }）
+    if option.cost then
+        if option.cost.cash then
+            state.cash = math.max(0, (state.cash or 0) - option.cost.cash)
+        end
+        if option.cost.ap then
+            local GameStateRef = require("game_state")
+            GameStateRef.SpendAP(state, option.cost.ap)
+        end
+        if option.cost.intel then
+            state.intel = math.max(0, (state.intel or 0) - option.cost.intel)
+        end
+    end
+
+    -- 8.9 自定义效果回调（远征过程事件等使用）
+    if effects.custom then
+        -- 传入 event 作为 eventData，供回调读取 expedition_id 等字段
+        effects.custom(state, event)
+    end
+
+    -- 8.95 远征事件：应用选项后清除 pending_event 标记，允许下次触发
+    if event.type == "expedition_event" and event.expedition_id then
+        local expId = event.expedition_id
+        if state.expeditions and state.expeditions.active
+            and state.expeditions.active[expId] then
+            state.expeditions.active[expId].pending_event = nil
+        end
+    end
+
     -- 9. 标记事件已触发
-    state.events_fired[event.id] = true
+    -- 注意：expedition_event 不写入 events_fired（否则同类事件只触发一次）
+    if event.type ~= "expedition_event" then
+        state.events_fired[event.id] = true
+    end
 
     -- 10. 设置冷却（随机事件）
     if event.trigger and event.trigger.cooldown then

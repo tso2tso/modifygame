@@ -262,13 +262,19 @@ Balance.AI = {
         cash_cap         = 12000, -- 现金上限（外资更富裕但也有上限）
         power_decay_rate = 0.015, -- 每季 power 内耗衰减 1.5%（防雪球）
     },
-    -- 时代递增：AI 上限随年代提升，避免 1912 年后完全静态
+    -- 时代递增：AI 现金上限随年代提升（公式：base × era_mul × diff_mul）
+    -- power_cap 改用公式：100 + floor((year-1878)/10)*5，此处仅记录现金乘数
     era_scaling = {
-        { year = 1925, cash_cap_mul = 1.3, power_cap = 110 },  -- 一战后扩张
-        { year = 1935, cash_cap_mul = 1.6, power_cap = 120 },  -- 二战前军备竞赛
+        { year = 1878, cash_cap_mul = 1.0 },  -- 第一章：基准
+        { year = 1904, cash_cap_mul = 1.3 },  -- 第二章：工业扩张
+        { year = 1914, cash_cap_mul = 1.6 },  -- 战时：军事经济
+        { year = 1919, cash_cap_mul = 2.0 },  -- 第三章：战后重建
+        { year = 1935, cash_cap_mul = 2.6 },  -- 第四章前夕：军备竞赛
+        { year = 1941, cash_cap_mul = 3.2 },  -- 战时高峰：总动员
+        { year = 1946, cash_cap_mul = 2.8 },  -- 战后：重建期略降
     },
-    -- 战时 power 临时上限提升
-    war_power_cap = 120,   -- 战时 AI power 上限可达 120（和平时仍为 100）
+    -- 战时 power 临时上限额外加成（公式基础值 +20）
+    war_power_bonus = 20,
     -- AI 主动花费行为（每季检查一次）
     spending = {
         -- 雇佣兵：AI 花钱提升 power
@@ -299,7 +305,34 @@ Balance.AI = {
         player_few_mines    = 2,     -- 玩家矿山少于此数 → 态度 +1（领地竞争消退）
         low_power_sympathy  = 30,    -- AI power 低于此值 → 态度 +1（弱势求和倾向）
         natural_recovery    = 1,     -- 每季自然回暖 +1（人心向善基线）
-        attitude_cap        = 60,    -- 正向态度上限（不会无限好感）
+        attitude_cap        = 80,    -- C4-2: 正向态度上限提升至80（给外交操作留空间）
+    },
+    -- C4-2 外交谈判行动参数
+    negotiate = {
+        ap_cost       = 1,    -- 消耗 AP
+        intel_cost    = 20,   -- 消耗情报
+        attitude_gain = 20,   -- 一次性好感 +20
+        cooldown      = 8,    -- 每 8 季冷却
+    },
+    -- C4-2 行为性敌意触发参数（一次性）
+    behavior_penalty = {
+        occupy_territory = -8,   -- 占领 AI 势力范围内国家
+        trigger_sanction = -5,   -- 玩家主动发动制裁/操控
+    },
+    -- C4-2 三层敌意参数调整
+    structural = {
+        economic_envy_mult      = 1.5, -- 玩家现金超过 AI 几倍时触发嫉妒
+        economic_envy_decay     = 2,   -- 嫉妒每季态度衰减（原3，降低）
+        mines_threshold         = 5,   -- 矿山 >= 此数触发领地竞争
+        mines_decay             = 1,   -- 矿山竞争每季衰减
+        military_threat_guards  = 20,  -- 卫队 > 此数触发军事威胁
+        military_threat_power   = 50,  -- AI power < 此数才受威胁
+        military_threat_decay   = 2,   -- 军事威胁每季衰减
+    },
+    arrogance = {
+        power_threshold = 80,  -- C4-2: 傲慢触发阈值提升至80（原60）
+        decay_per_season = 1,  -- 傲慢每季衰减
+        attitude_floor  = -50, -- 傲慢不会推低超过此值
     },
     -- AI 势力瘫痪机制（power + cash 过低时触发）
     collapse = {
@@ -640,6 +673,59 @@ Balance.EXPEDITION = {
     occupy_maintenance_minor = 120,  -- 小国维护费
     occupy_maintenance_major = 200,  -- 大国维护费
 
+    -- A2: 占领后稳定度
+    stability_init         = 40,     -- 初始稳定度（不稳定，需 2-3 季才到50）
+    stability_recovery     = 8,      -- 每季自然恢复
+    stability_threshold    = 50,     -- 低于此值收入打折
+    policy_lock_duration   = 4,      -- 策略锁定时长（季）
+
+    -- A2: 四种发展策略基础配置
+    -- 策略 id: "tax"(直接征税) | "industrial"(工业开发) | "puppet"(扶植傀儡) | "culture"(文化同化)
+    policies = {
+        tax = {
+            name          = "直接征税",
+            upfront_cost  = 0,
+            delay_seasons = 0,
+            income_mult   = 1.0,     -- 标准收入
+            aggr_decay_mult = 1.0,   -- 侵略度衰减倍数
+            control_bonus   = 0,     -- 每季全局控制度加成
+            stab_mult       = 1.0,   -- 稳定度回复速度倍数
+            charisma_req    = 0,     -- 所需在岗成员魅力（0=无要求）
+        },
+        industrial = {
+            name          = "工业开发",
+            upfront_cost  = 300,
+            delay_seasons = 3,
+            income_mult   = 1.0,     -- 生效后收入不变（直接提升 base）
+            income_bonus_minor = 50, -- 小国额外收入（基础200→250）
+            income_bonus_major = 60, -- 大国额外收入（基础350→410）
+            aggr_decay_mult = 1.0,
+            control_bonus   = 0,
+            stab_mult       = 1.5,   -- 稳定度回复 ×1.5
+            charisma_req    = 0,
+        },
+        puppet = {
+            name          = "扶植傀儡",
+            upfront_cost  = 100,
+            delay_seasons = 2,
+            income_mult   = 0.5,     -- 收入减半
+            aggr_decay_mult = 1.5,   -- 侵略度衰减速度 ×1.5
+            control_bonus   = 0,
+            stab_mult       = 1.0,
+            charisma_req    = 0,
+        },
+        culture = {
+            name          = "文化同化",
+            upfront_cost  = 200,
+            delay_seasons = 4,
+            income_mult   = 1.0,
+            aggr_decay_mult = 1.0,
+            control_bonus   = 2,     -- 每季全局控制度 +2
+            stab_mult       = 1.0,
+            charisma_req    = 3,     -- 需要魅力 ≥ 3 的成员在岗
+        },
+    },
+
     -- 侵略制裁
     aggression_per_expedition = 1,   -- 每次发起远征增加侵略度
     aggression_per_occupy  = 2,      -- 自行占领增加侵略度
@@ -659,6 +745,38 @@ Balance.EXPEDITION = {
 
     -- 前进基地加成
     forward_base_attack_bonus = 0.20,  -- 邻接已占领国家时攻击力+20%
+
+    -- 远征过程随机事件（A1）
+    event_trigger_chance  = 0.25,  -- 每季触发概率 25%
+    event_cooldown        = 3,     -- 同一远征触发后冷却季数（防堆叠）
+    event_supply_min_turns = 4,    -- "补给线受袭"最少持续季数
+    event_defector_min_turns = 6,  -- "叛逃情报"最少持续季数
+    event_negotiate_hp_lo = 0.30,  -- "谈判使者"目标HP比例下限
+    event_negotiate_hp_hi = 0.50,  -- "谈判使者"目标HP比例上限
+
+    -- C1 钳形攻势
+    pincer_defense_reduce = 0.15,  -- 钳形攻势下目标防御力降低 15%
+    pincer_success_bonus  = 0.05,  -- 钳形攻势成功率各 +5%
+    pincer_fail_penalty   = 0.20,  -- 一侧失败后另一侧本季伤害 -20%
+    pincer_ap_extra       = 1,     -- 发动钳形攻势额外 AP 消耗
+
+    -- C2 外交路线
+    diplomacy_ap_cost            = 1,    -- 发起外交施压 AP 消耗
+    diplomacy_influence_cost     = 20,   -- 发起外交施压消耗全局 diplomatic_influence
+    diplomacy_influence_pool_mult = 15,  -- 影响力池 = target.stability × 此值
+    diplomacy_charisma_req       = 3,    -- 发起所需外交官最低魅力
+    diplomacy_charisma_req_vassal = 4,   -- 臣服协议所需魅力
+    diplomacy_stability_max      = 8,    -- 目标稳定度上限（超过则不可渗透）
+    diplomacy_vassal_influence_mult = 1.5, -- 臣服协议需要 1.5 倍影响力池
+    diplomacy_protection_income  = 50,   -- 保护协议每季收入
+    diplomacy_vassal_income      = 60,   -- 臣服关系每季收入
+    diplomacy_trade_bonus        = 0.20, -- 贸易特许利润加成
+    diplomacy_revolt_chance      = 0.05, -- 臣服关系每季反叛概率
+    diplomacy_revolt_cost        = 200,  -- 镇压反叛花费克朗
+    diplomacy_influence_init     = 30,   -- 游戏初始全局 diplomatic_influence
+    diplomacy_influence_per_turn = 5,    -- 每季自然积累 diplomatic_influence
+    diplomacy_military_bonus     = 0.50, -- 军事征服后外交渗透速度加成
+    diplomacy_failed_penalty     = 0.20, -- 下次谈判难度增加（臣服反叛接受后）
 }
 
 -- ============================================================================
@@ -831,7 +949,11 @@ Balance.VENTURE = {
 Balance.COMBAT = {
     ai_attack_threshold = -20,   -- AI attitude 低于此值才可能进攻（降低门槛）
     ai_attack_power_req = 40,    -- 且 AI power 达到阈值（降低门槛）
-    ai_attack_chance    = 0.35,  -- 每季 35% 概率主动进攻（提高概率）
+    ai_attack_chance    = 0.35,  -- 每季基础 35% 概率主动进攻
+    ai_attack_chance_cap = 0.75, -- 年代加成后的概率上限（75%）
+    ai_attack_year_scale = 100,  -- 年代加成分母（(year-1910)/100，1935年+0.25）
+    ai_attack_year_base  = 1910, -- 年代加成起始年
+    ai_attack_cooldown   = 2,    -- 触发攻击后冷却季数（防止连续进攻）
     player_attack_ap    = 2,     -- 主动突袭 AI 消耗 AP
     player_attack_cash  = 180,   -- 主动突袭的情报/补给准备费
     win_morale          = 10,
@@ -1224,6 +1346,106 @@ Balance.AI_COUNTERPARTY = {
     counter_cost_ratio  = 0.05,     -- 反制消耗外资现金比例
     -- 与公信力联动: 实际概率 = base × cashScale × (2.0 - credMult)
     -- cred=100 → ×1.0（不加成），cred=0 → ×1.5（AI更容易识破）
+}
+
+-- ============================================================================
+-- C3: 大国博弈（暗中支援 + 煽动战争）
+-- ============================================================================
+Balance.GP = {
+    covert_support_ap          = 1,     -- 暗中支援消耗 AP
+    covert_support_intel_ratio = 0.5,   -- 暗中支援情报消耗 = stability / 2
+    covert_military_bonus      = 0.15,  -- 暗中支援战力 +15%
+    covert_win_attitude        = 20,    -- 支援方赢：玩家好感 +20
+    covert_enemy_loss          = 30,    -- 支援方赢：对立方好感 -30
+    covert_detected_chance     = 0.20,  -- 被发现概率
+    covert_detected_att_loss   = 50,    -- 被发现：被暗算方好感 -50
+    covert_detected_collab     = -10,   -- 被发现：合作度 -10
+    covert_detected_aggress    = 2,     -- 被发现：侵略度 +2
+
+    incite_war_ap              = 3,     -- 煽动战争消耗 AP
+    incite_war_intel_cost      = 200,   -- 煽动战争消耗情报
+    incite_success_rate        = 0.60,  -- 煽动成功率
+    incite_trigger_turns       = 2,     -- 煽动后 N 季触发
+    incite_detected_chance     = 0.30,  -- 被双方发现概率
+    incite_detected_att_loss   = 40,    -- 被发现：双方好感各 -40
+}
+
+-- ============================================================================
+-- C5: 文化胜利路线
+-- ============================================================================
+Balance.CULTURE = {
+    -- CI（文化影响力）
+    ci_init              = 0,       -- 初始 CI
+    ci_decay_per_turn    = 2,       -- 每季 CI 自然衰减
+    ci_home_bonus        = 2,       -- 首都 region.culture 字段每 20 点 → +2 CI/季
+    ci_tech_per_item     = 1,       -- 每项已研发 D 线科技 +1 CI/季
+    ci_university        = 3,       -- d6a_university 每季 +3 CI
+    ci_epic_bonus        = 2,       -- 每部民族史诗 +2 CI/季
+    -- CP（文化点）每季衰减
+    cp_decay_foreign     = 1,       -- 外国地区每季 -1 CP
+    -- CP 等级阈值
+    cp_curious           = 30,      -- 文化好奇
+    cp_admire            = 50,      -- 文化倾慕
+    cp_identity          = 70,      -- 文化认同（+1 CI/季 反哺）
+    cp_assimilation      = 90,      -- 文化同化（计入胜利）
+    -- 战争惩罚
+    cp_war_penalty       = 15,      -- 对某地区发动军事远征 → CP -15
+    -- 一次性好感加成（到达等级时触发）
+    att_curious          = 5,
+    att_admire           = 10,
+    att_identity         = 15,
+    -- 剧团
+    troupe_cost          = 200,     -- 创作成本（克朗）
+    troupe_move_ap       = 1,       -- 迁移消耗 AP
+    troupe_global_max    = 8,       -- 全局总上限
+    troupe_cp            = {5, 3, 1},  -- 第 1/2/3 个剧团 CP/季
+    -- 电影
+    film_cost            = 400,     -- 创作成本
+    film_prod_turns      = 2,       -- 生产期（季）
+    film_max             = 3,       -- 最多 3 部（三主题：historical/national/industrial）
+    film_domestic_cp     = 3,       -- 国内公映：己方控制区每地区 +3 CP
+    film_intl_cp         = 8,       -- 国际发行：目标国地区 +8 CP
+    film_festival_att    = 15,      -- 节庆展映：目标 AI 好感 +15
+    -- 民族史诗
+    epic_cost            = 300,     -- 创作成本（克朗）
+    epic_rp_cost         = 10,      -- 研发点消耗
+    epic_max             = 3,       -- 最多 3 部（三主题：national/religious/historical）
+    epic_own_cp          = 2,       -- 每季己方控制区 +2 CP
+    epic_neighbor_cp     = 1,       -- 每季邻近未占领地区 +1 CP
+    -- 体育赛事
+    sports_cost          = 250,     -- 举办成本
+    sports_cooldown      = 4,       -- 冷却季数
+    sports_host_cp       = 20,      -- 举办地 CP
+    sports_neighbor_cp   = 8,       -- 邻近地区 CP
+    sports_invite_att    = 10,      -- 被邀请并参与的 AI 好感 +10
+    sports_reject_att    = -5,      -- 被拒绝后外交紧张 -5
+    sports_reject_chance = 0.30,    -- 好感 <10 时 30% 公开拒绝
+    -- 世界博览会
+    exhibition_cost      = 800,     -- 创作成本
+    exhibition_ap        = 2,       -- AP 消耗
+    exhibition_turns     = 3,       -- 筹备期
+    exhibition_min_epics = 2,       -- 需已出版史诗数量
+    exhibition_base_cp   = 15,      -- 基础全局 CP
+    exhibition_max_cp    = 40,      -- 最大全局 CP
+    -- 文化使团
+    mission_ci_launch    = 80,      -- 发起消耗 CI
+    mission_ci_min       = 60,      -- 发起时最低 CI 储量
+    mission_ci_maintain  = 10,      -- 每季维持 CI
+    mission_base_cp      = 12,      -- 每季基础 CP
+    mission_max_count    = 2,       -- 最大并发数
+    mission_max_turns    = 6,       -- 最长持续季数
+    mission_event_chance = 0.20,    -- 每季事件触发概率
+    mission_ap           = 1,       -- 发起 AP
+    -- 胜利条件
+    victory_year         = 1938,    -- 最早可胜利年份
+    victory_score_lead   = 500,     -- culture_score 领先最强 AI 的分差
+    victory_cp_identity  = 3,       -- 方式 A：3 个地区 CP ≥ 70
+    victory_cp_assimilation = 2,    -- 方式 B：2 个地区 CP ≥ 90
+    victory_ci_assimilation = 150,  -- 方式 B：同时 CI ≥ 150
+    -- culture_score 每季积累
+    score_per_ci         = 10,      -- CI / 10 → score
+    score_identity_bonus = 3,       -- CP ≥ 70 每地区 +3
+    score_admire_bonus   = 1,       -- CP ≥ 50 每地区 +1
 }
 
 return Balance

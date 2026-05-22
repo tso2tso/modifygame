@@ -9,6 +9,7 @@ local Equipment = require("systems.equipment")
 local EuropeData = require("data.europe_data")
 local Combat = require("systems.combat")
 local TradeRoutesData = require("data.trade_routes_data")
+local EventsData = require("data.events_data")
 
 local BE = Balance.EXPEDITION
 
@@ -168,6 +169,110 @@ function Expedition.GetForwardBaseBonus(state, targetCountryId)
 end
 
 -- ============================================================================
+-- C1 钳形攻势辅助函数
+-- ============================================================================
+
+--- 发动新远征后检测是否形成钳形攻势（目标互相邻接）
+--- 若成立，互相写入 pincer_partner，同时从双方扣除额外 AP
+---@param state table
+---@param newExpId string  刚发动的远征目标国家 ID
+local function check_pincer(state, newExpId)
+    local newExp = (state.expeditions.active or {})[newExpId]
+    if not newExp then return end
+
+    local currentTurn = state.turn_count or 0
+
+    for existId, existExp in pairs(state.expeditions.active or {}) do
+        if existId == newExpId then goto continue_pincer end
+        -- 已有钳形伙伴则跳过
+        if existExp.pincer_partner then goto continue_pincer end
+        -- 时机容忍：两条远征发动间隔 ≤ 1 季
+        local turnDiff = math.abs((newExp.started_turn or 0) - (existExp.started_turn or 0))
+        if turnDiff > 1 then goto continue_pincer end
+        -- 相邻检测
+        if EuropeData.AreAdjacent(state.europe, newExpId, existId) then
+            -- 形成钳形！额外消耗 1 AP
+            local apExtra = BE.pincer_ap_extra or 1
+            local available = (state.ap.current or 0) + (state.ap.temp or 0)
+            if available >= apExtra then
+                GameState.SpendAP(state, apExtra)
+            end
+            -- 互相绑定
+            newExp.pincer_partner = existId
+            existExp.pincer_partner = newExpId
+            -- 日志
+            local a = state.europe[newExpId]
+            local b = state.europe[existId]
+            GameState.AddLog(state, string.format(
+                "⚔⚔ 钳形攻势激活！%s ↔ %s（防御各-15%%，成功率各+5%%）",
+                a and a.label or newExpId,
+                b and b.label or existId))
+            return
+        end
+        ::continue_pincer::
+    end
+end
+
+--- 检测指定两个目标是否可以形成钳形攻势（用于 UI 提示，不消耗 AP）
+---@param state table
+---@param idA string
+---@param idB string
+---@return boolean
+function Expedition.CanFormPincer(state, idA, idB)
+    if not EuropeData.AreAdjacent(state.europe, idA, idB) then return false end
+    local activeA = (state.expeditions.active or {})[idA]
+    local activeB = (state.expeditions.active or {})[idB]
+    -- 一个正在进行、一个是有效目标，或两个都是有效目标
+    return true
+end
+
+--- 获取所有可能的钳形攻势组合列表（UI 战略态势提示用）
+---@param state table
+---@return table[]  每项 {a_id, a_label, b_id, b_label, is_active}
+function Expedition.GetPincerCombinations(state)
+    local result = {}
+    local targets = Expedition.GetValidTargets(state)
+    local activeIds = {}
+    for id in pairs(state.expeditions.active or {}) do
+        activeIds[id] = true
+    end
+
+    -- 合并活跃远征和有效目标
+    local pool = {}
+    for _, t in ipairs(targets) do
+        pool[t.country_id] = t.label or t.country_id
+    end
+    for id, rec in pairs(state.expeditions.active or {}) do
+        pool[id] = rec.label or id
+    end
+
+    local seen = {}
+    for idA, labelA in pairs(pool) do
+        for idB, labelB in pairs(pool) do
+            if idA >= idB then goto next_combo end
+            local key = idA .. "|" .. idB
+            if seen[key] then goto next_combo end
+            seen[key] = true
+            if EuropeData.AreAdjacent(state.europe, idA, idB) then
+                local activeA = activeIds[idA]
+                local activeB = activeIds[idB]
+                table.insert(result, {
+                    a_id    = idA,
+                    a_label = labelA,
+                    b_id    = idB,
+                    b_label = labelB,
+                    is_active = activeA and activeB,  -- 两侧都已激活远征
+                    a_active  = activeA,
+                    b_active  = activeB,
+                })
+            end
+            ::next_combo::
+        end
+    end
+    return result
+end
+
+-- ============================================================================
 -- 兵力计算
 -- ============================================================================
 
@@ -230,6 +335,11 @@ function Expedition.CalcTurnDamage(state, record)
     local defDebuff = GameState.GetModifierValue(state, "intimidation_defense_debuff")
     defenderBase = defenderBase * (1 - defDebuff)
 
+    -- C1 钳形攻势：目标防御 -15%（双侧均有有效钳形伙伴时生效）
+    if record.pincer_partner and (state.expeditions.active or {})[record.pincer_partner] then
+        defenderBase = defenderBase * (1 - (BE.pincer_defense_reduce or 0.15))
+    end
+
     local powerRatio = attackerPower / math.max(1, defenderBase)
     local scaledDamage = BE.expedition_base_damage_per_turn
         * (powerRatio ^ BE.expedition_power_scaling)
@@ -249,6 +359,12 @@ function Expedition.CalcTurnDamage(state, record)
     local supplyBoost = GameState.GetModifierValue(state, "expedition_supply_boost")
     if supplyBoost > 0 then
         totalBonus = totalBonus + supplyBoost
+    end
+
+    -- A4 军务主管专精：strategy 属性每点 +2% 远征伤害（上限 20%）
+    local specExpedDmg = GameState.GetModifierValue(state, "spec_expedition_dmg")
+    if specExpedDmg > 0 then
+        totalBonus = totalBonus + specExpedDmg
     end
 
     -- 外交→远征耦合：与敌对大国控制区作战伤害+10%
@@ -304,6 +420,24 @@ function Expedition.CalcTurnDamage(state, record)
 
     scaledDamage = scaledDamage / diffMod
 
+    -- A1 事件效果：补给线受袭（-25% 伤害）
+    if record.supply_penalty and record.supply_penalty > 0 then
+        scaledDamage = scaledDamage * 0.75
+    end
+
+    -- A1 事件效果：拒绝谈判激怒奖励（rage_bonus，一次性）
+    if record.rage_bonus and record.rage_bonus > 0 then
+        scaledDamage = scaledDamage * (1 + record.rage_bonus)
+    end
+
+    -- A1 事件效果：叛逃情报成功率加成（defector_bonus 已用于 CalcSuccessRate，不影响伤害）
+
+    -- C1 钳形攻势失败惩罚：伙伴失败后本季伤害 ×0.80（持续 1 季，用后清除）
+    if record.pincer_failed_penalty then
+        scaledDamage = scaledDamage * record.pincer_failed_penalty
+        record.pincer_failed_penalty = nil  -- 消耗一次性惩罚
+    end
+
     return math.max(1, math.floor(scaledDamage))
 end
 
@@ -358,6 +492,17 @@ function Expedition.CalcSuccessRate(state, record)
 
     local rate = BE.expedition_success_base
         + powerAdvantage * BE.expedition_success_power_weight
+
+    -- A1 事件效果：叛逃情报（+8% 成功率）
+    if record.defector_bonus and record.defector_bonus > 0 then
+        rate = rate + record.defector_bonus
+    end
+
+    -- C1 钳形攻势：伙伴仍活跃时成功率 +5%
+    if record.pincer_partner and (state.expeditions.active or {})[record.pincer_partner] then
+        rate = rate + (BE.pincer_success_bonus or 0.05)
+    end
+
     return math.max(BE.expedition_success_floor,
         math.min(BE.expedition_success_cap, rate))
 end
@@ -539,7 +684,8 @@ function Expedition.LaunchExpedition(state, countryId, squadIds)
         end
     end
 
-    -- 创建远征记录
+    -- 创建远征记录（garrison_init：发起远征时目标国 HP，用于事件触发比例计算）
+    EnsureHPInit(state)
     state.expeditions.active = state.expeditions.active or {}
     state.expeditions.active[countryId] = {
         country_id = countryId,
@@ -548,6 +694,7 @@ function Expedition.LaunchExpedition(state, countryId, squadIds)
         deployed_squads = squadIds,
         total_damage_dealt = 0,
         turns_elapsed = 0,
+        garrison_init = country.current_hp or country.max_hp,
     }
 
     -- 侵略度
@@ -560,6 +707,9 @@ function Expedition.LaunchExpedition(state, countryId, squadIds)
         (state.expeditions.history.expeditions_launched or 0) + 1
     state.stats = state.stats or {}
     state.stats.attacks_initiated = (state.stats.attacks_initiated or 0) + 1
+
+    -- C1 钳形攻势检测
+    check_pincer(state, countryId)
 
     local msg = string.format(
         "⚔ 对%s发起远征！部署 %d 名士兵，花费 %d 克朗",
@@ -710,6 +860,85 @@ function Expedition.Withdraw(state, countryId, squadIds)
 end
 
 -- ============================================================================
+-- A1：远征过程事件候选池构建
+-- ============================================================================
+
+--- 构建当前可触发的远征事件候选列表
+---@param state table
+---@param countryId string
+---@param record table  活跃远征记录
+---@return table[]  candidates
+local function BuildExpeditionEventCandidates(state, countryId, record)
+    local country = state.europe[countryId]
+    local allEvents = EventsData.GetExpeditionEvents()
+    local candidates = {}
+
+    -- 计算活跃远征数（用于 rear_unrest 判断）
+    local activeCount = 0
+    for _ in pairs(state.expeditions.active or {}) do activeCount = activeCount + 1 end
+
+    -- 目标 HP 比例（用于 negotiate 判断）
+    -- 分母用 garrison_init（发起远征时的 HP），比用 max_hp 更准确反映本次战役进度
+    local hpRatio = 1.0
+    local garrisonBase = record.garrison_init
+        or (country and (country.current_hp or country.max_hp))
+        or 1
+    if country and garrisonBase > 0 then
+        hpRatio = (country.current_hp or garrisonBase) / garrisonBase
+    end
+
+    -- 已有此 ID 事件在队列中，跳过（防重复）
+    local queuedIds = {}
+    for _, ev in ipairs(state.event_queue or {}) do
+        queuedIds[ev.id] = true
+    end
+
+    for _, ev in ipairs(allEvents) do
+        if queuedIds[ev.id] then goto continue_cand end
+
+        -- 各事件的触发条件
+        if ev.id == "exp_evt_supply_raid" then
+            if (record.turns_elapsed or 0) < (BE.event_supply_min_turns or 4) then
+                goto continue_cand
+            end
+
+        elseif ev.id == "exp_evt_negotiate" then
+            local lo = BE.event_negotiate_hp_lo or 0.30
+            local hi = BE.event_negotiate_hp_hi or 0.50
+            if hpRatio < lo or hpRatio > hi then goto continue_cand end
+
+        elseif ev.id == "exp_evt_gp_warning" then
+            if (state.expeditions.aggression_counter or 0) < 4 then
+                goto continue_cand
+            end
+
+        elseif ev.id == "exp_evt_ally_passage" then
+            -- 要求玩家至少有一个占领国邻接目标
+            local hasAdj = false
+            for _, occ in ipairs(state.expeditions.occupied_countries or {}) do
+                if EuropeData.AreAdjacent(state.europe, occ.country_id, countryId) then
+                    hasAdj = true; break
+                end
+            end
+            if not hasAdj then goto continue_cand end
+
+        elseif ev.id == "exp_evt_defector" then
+            if (record.turns_elapsed or 0) < (BE.event_defector_min_turns or 6) then
+                goto continue_cand
+            end
+
+        elseif ev.id == "exp_evt_rear_unrest" then
+            if activeCount < 2 then goto continue_cand end
+        end
+
+        table.insert(candidates, ev)
+        ::continue_cand::
+    end
+
+    return candidates
+end
+
+-- ============================================================================
 -- 回合推进：活跃远征造成伤害
 -- ============================================================================
 
@@ -737,6 +966,28 @@ function Expedition.TickActiveExpeditions(state)
         if country.political_hp and country.tier == "major" then
             local polDamage = math.floor(damage * 0.5)
             country.political_hp = math.max(0, country.political_hp - polDamage)
+        end
+
+        -- A1 事件效果：游击队额外HP恢复（每季 +8 HP 给目标）
+        if record.guerrilla_regen and record.guerrilla_regen > 0 then
+            country.current_hp = math.min(country.max_hp,
+                (country.current_hp or 0) + 8)
+        end
+
+        -- A1 事件效果：友军借道阻断目标HP恢复（本季跳过自然恢复已在 TickCountryHP 中处理）
+
+        -- A1 事件计时器递减
+        if record.supply_penalty and record.supply_penalty > 0 then
+            record.supply_penalty = record.supply_penalty - 1
+        end
+        if record.guerrilla_regen and record.guerrilla_regen > 0 then
+            record.guerrilla_regen = record.guerrilla_regen - 1
+        end
+        if record.rage_bonus then
+            record.rage_bonus = nil  -- 一次性效果，用后清除
+        end
+        if record.ally_passage_regen_block and record.ally_passage_regen_block > 0 then
+            record.ally_passage_regen_block = record.ally_passage_regen_block - 1
         end
 
         -- 编队战后耐久衰减（每回合）— 传入完整编队ID表
@@ -770,6 +1021,40 @@ function Expedition.TickActiveExpeditions(state)
     -- 处理HP归零的远征 → 进入完成判定
     for _, cid in ipairs(completedIds) do
         Expedition.CompleteExpedition(state, cid)
+    end
+
+    -- ── A1：远征过程事件触发 ──
+    -- 在 completedIds 处理完之后，对仍活跃的远征做一次事件抽检
+    local Events = require("systems.events")
+    for countryId, record in pairs(state.expeditions.active or {}) do
+        -- 冷却递减
+        record.event_cooldown = math.max(0, (record.event_cooldown or 0) - 1)
+
+        -- 已有挂起事件 或 冷却中 → 跳过
+        if record.pending_event then goto skip_event end
+        if (record.event_cooldown or 0) > 0 then goto skip_event end
+
+        -- 概率抽取
+        if math.random() < (BE.event_trigger_chance or 0.25) then
+            local candidates = BuildExpeditionEventCandidates(state, countryId, record)
+            if #candidates > 0 then
+                -- 随机选一条，克隆并注入 expedition_id
+                local picked = candidates[math.random(#candidates)]
+                local evt = {}
+                for k, v in pairs(picked) do evt[k] = v end
+                evt.expedition_id = countryId  -- 供选项回调读取
+
+                record.pending_event = evt.id
+                record.event_cooldown = BE.event_cooldown or 3
+                Events.Enqueue(state, { evt })
+
+                local country = state.europe[countryId]
+                GameState.AddLog(state, string.format(
+                    "[远征事件] %s → %s", country and country.label or countryId, evt.title))
+            end
+        end
+
+        ::skip_event::
     end
 
     return reports
@@ -829,6 +1114,13 @@ function Expedition.CompleteExpedition(state, countryId)
             country.label, loot, losses,
             record.turns_elapsed, math.floor(successRate * 100))
         GameState.AddLog(state, msg)
+
+        -- C1 钳形攻势：己方胜利，解除伙伴钳形绑定（伙伴继续获益 forward_base_bonus）
+        if record.pincer_partner then
+            local partner = (state.expeditions.active or {})[record.pincer_partner]
+            if partner then partner.pincer_partner = nil end
+            record.pincer_partner = nil
+        end
     else
         -- 失败：更大损失 + 目标HP恢复
         local losses = Expedition.CalcLosses(state, record, true)
@@ -850,10 +1142,28 @@ function Expedition.CompleteExpedition(state, countryId)
             record.turns_elapsed, math.floor(successRate * 100),
             math.floor(BE.expedition_fail_hp_restore * 100))
         GameState.AddLog(state, msg)
+
+        -- C1 钳形攻势：己方失败，通知伙伴远征受挫（本季伤害 -20%）
+        if record.pincer_partner then
+            local partner = (state.expeditions.active or {})[record.pincer_partner]
+            if partner then
+                partner.pincer_failed_penalty = 1.0 - (BE.pincer_fail_penalty or 0.20)
+                partner.pincer_partner = nil  -- 解除绑定
+                local partnerCountry = state.europe[record.pincer_partner]
+                GameState.AddLog(state, string.format(
+                    "😟 钳形伙伴远征%s失败，%s士气受挫（本季伤害-20%%）",
+                    country.label,
+                    partnerCountry and partnerCountry.label or record.pincer_partner))
+            end
+            record.pincer_partner = nil
+        end
     end
 
     -- 释放部队回本土
     Expedition._ReleaseForces(state, record)
+
+    -- 清除远征事件挂起标记
+    record.pending_event = nil
 
     -- 移除活跃远征记录
     state.expeditions.active[countryId] = nil
@@ -971,6 +1281,11 @@ function Expedition.OccupySelf(state, countryId)
         income_per_turn = income,
         maintenance = maintenance,
         since_turn = state.turn_count or 0,
+        -- A2 稳定度与发展策略
+        stability_control    = BE.stability_init or 40,
+        development_policy   = "tax",
+        policy_lock_turn     = 0,
+        policy_delay_remaining = 0,
     })
 
     -- 清除HP
@@ -985,6 +1300,14 @@ function Expedition.OccupySelf(state, countryId)
     -- 侵略度 +2
     state.expeditions.aggression_counter = (state.expeditions.aggression_counter or 0)
         + BE.aggression_per_occupy
+
+    -- C4-2 行为性敌意：占领领土 → 所有 AI 势力态度 -8（一次性）
+    local occupyPenalty = Balance.AI.behavior_penalty and Balance.AI.behavior_penalty.occupy_territory or -8
+    for _, f in ipairs(state.ai_factions or {}) do
+        if not f.defeated and not f.collapsed then
+            f.attitude = math.max(-100, (f.attitude or 0) + occupyPenalty)
+        end
+    end
 
     -- 统计
     state.expeditions.history.countries_conquered =
@@ -1228,9 +1551,53 @@ function Expedition.SettleTurn(state)
         local actualMaint = math.floor(occ.maintenance * (1 - maintDiscount))
         local inflation = GameState.GetInflationFactor(state)
         local inflatedIncome = math.floor(occ.income_per_turn * inflation)
+
+        -- A2: 策略效果 & 稳定度结算
+        local BP = BE.policies or {}
+        local policyId = occ.development_policy or "tax"
+        local polCfg = BP[policyId] or BP.tax or {}
+
+        -- 策略延迟倒计时
+        if (occ.policy_delay_remaining or 0) > 0 then
+            occ.policy_delay_remaining = occ.policy_delay_remaining - 1
+        end
+        local policyActive = (occ.policy_delay_remaining or 0) <= 0
+
+        -- 稳定度自然回复（每季 +recovery×stab_mult）
+        local stabRecovery = BE.stability_recovery or 8
+        local stabMult = policyActive and (polCfg.stab_mult or 1.0) or 1.0
+        occ.stability_control = math.min(100,
+            (occ.stability_control or 40) + math.floor(stabRecovery * stabMult))
+
+        -- 收入按稳定度打折（低于阈值则按比例削减）
+        local stabThreshold = BE.stability_threshold or 50
+        local stabRatio = math.min(1.0, (occ.stability_control or 40) / stabThreshold)
+        local incomeMult = policyActive and (polCfg.income_mult or 1.0) or 1.0
+        -- 工业开发：额外奖励收入
+        local incomeBonus = 0
+        if policyActive and polCfg.income_bonus_minor then
+            local isMajorOcc = (state.europe[occ.country_id] or {}).tier == "major"
+            incomeBonus = isMajorOcc and (polCfg.income_bonus_major or 0) or polCfg.income_bonus_minor
+        end
+        local finalIncome = math.floor((inflatedIncome * incomeMult + incomeBonus) * stabRatio)
+
+        -- 傀儡策略：加速侵略衰减（在 SettleTurn 末尾处理）
+        if policyActive and polCfg.aggr_decay_mult and polCfg.aggr_decay_mult > 1.0 then
+            occ._puppet_decay_mult = polCfg.aggr_decay_mult
+        else
+            occ._puppet_decay_mult = nil
+        end
+
+        -- 文化同化：每季加全局控制度
+        if policyActive and (polCfg.control_bonus or 0) > 0 then
+            for _, r in ipairs(state.regions or {}) do
+                r.control = math.min(100, (r.control or 0) + polCfg.control_bonus)
+            end
+        end
+
         if state.cash >= actualMaint then
-            state.cash = state.cash + inflatedIncome - actualMaint
-            report.income = report.income + inflatedIncome
+            state.cash = state.cash + finalIncome - actualMaint
+            report.income = report.income + finalIncome
             report.maintenance = report.maintenance + actualMaint
             table.insert(kept, occ)
         else
@@ -1250,9 +1617,19 @@ function Expedition.SettleTurn(state)
 
     report.net = report.income - report.maintenance
 
-    -- 侵略衰减
+    -- 侵略衰减（基础 + A4 外交官专精 + A2 傀儡策略加成）
+    local specAggrDecay = GameState.GetModifierValue(state, "spec_aggression_decay")
+    local totalDecay = BE.aggression_decay + specAggrDecay
+    -- A2：傀儡策略加速衰减（取所有占领地中最高的 aggr_decay_mult）
+    local maxPuppetMult = 1.0
+    for _, occ in ipairs(state.expeditions.occupied_countries or {}) do
+        if (occ._puppet_decay_mult or 1.0) > maxPuppetMult then
+            maxPuppetMult = occ._puppet_decay_mult
+        end
+    end
+    totalDecay = totalDecay * maxPuppetMult
     state.expeditions.aggression_counter = math.max(0,
-        (state.expeditions.aggression_counter or 0) - BE.aggression_decay)
+        (state.expeditions.aggression_counter or 0) - totalDecay)
     report.aggression = state.expeditions.aggression_counter
 
     return report
@@ -1261,6 +1638,69 @@ end
 -- ============================================================================
 -- 查询/汇总 API（供UI使用）
 -- ============================================================================
+
+-- ============================================================================
+-- A2: 发展策略设置
+-- ============================================================================
+
+--- 为已占领国家设置发展策略
+---@param state table
+---@param countryId string
+---@param policyId string  "tax"|"industrial"|"puppet"|"culture"
+---@return boolean ok
+---@return string msg
+function Expedition.SetPolicy(state, countryId, policyId)
+    local BP = BE.policies or {}
+    local polCfg = BP[policyId]
+    if not polCfg then return false, "未知策略: " .. tostring(policyId) end
+
+    -- 找到占领记录
+    local occ = nil
+    for _, o in ipairs(state.expeditions.occupied_countries or {}) do
+        if o.country_id == countryId then occ = o; break end
+    end
+    if not occ then return false, "该国家未被占领" end
+
+    -- 检查锁定期
+    local currentTurn = state.turn_count or 0
+    if (occ.policy_lock_turn or 0) > currentTurn then
+        local remaining = occ.policy_lock_turn - currentTurn
+        return false, string.format("策略锁定中（还需 %d 季）", remaining)
+    end
+
+    -- 检查文化同化的魅力需求
+    if policyId == "culture" then
+        local leader = GameState.GetMemberAtPosition(state, "diplomat")
+        local charisma = leader and (leader.charisma or 0) or 0
+        local req = polCfg.charisma_req or 3
+        if charisma < req then
+            return false, string.format("文化同化需要外交官魅力≥%d（当前%d）", req, charisma)
+        end
+    end
+
+    -- 检查前置费用
+    local upfrontCost = polCfg.upfront_cost or 0
+    if upfrontCost > 0 and state.cash < upfrontCost then
+        return false, string.format("资金不足（需要 %d 克朗）", upfrontCost)
+    end
+    if upfrontCost > 0 then
+        state.cash = state.cash - upfrontCost
+    end
+
+    -- 设置策略
+    local lockDuration = BE.policy_lock_duration or 4
+    occ.development_policy = policyId
+    occ.policy_lock_turn = currentTurn + lockDuration
+    occ.policy_delay_remaining = polCfg.delay_seasons or 0
+
+    local msg = string.format(
+        "🏛 %s 已切换为「%s」（锁定 %d 季%s）",
+        occ.label or countryId, polCfg.name or policyId, lockDuration,
+        (polCfg.delay_seasons or 0) > 0
+            and string.format("，%d 季后生效", polCfg.delay_seasons) or "")
+    GameState.AddLog(state, msg)
+    return true, msg
+end
 
 --- 获取远征系统摘要
 ---@param state table
@@ -1301,6 +1741,416 @@ function Expedition.CheckSanction(state)
         return true, "economic_sanction"
     end
     return false, nil
+end
+
+-- ============================================================================
+-- C2 外交路线（非战争扩张）
+-- ============================================================================
+
+--- 计算目标国家在指定国家的贸易路线数量
+---@param state table
+---@param countryId string
+---@return number
+local function CountTradeRoutesToCountry(state, countryId)
+    local count = 0
+    for _, route in ipairs((state.trade and state.trade.routes) or {}) do
+        if route.buyer_power_id == countryId and route.active then
+            count = count + 1
+        end
+    end
+    return count
+end
+
+--- 获取可发起外交施压的目标列表
+---@param state table
+---@return table[]  每项 { country_id, label, stability, charisma_ok, routes, pool }
+function Expedition.GetDiplomacyTargets(state)
+    local results = {}
+    local leader = GameState.GetMemberAtPosition(state, "diplomat")
+    local charisma = leader and (leader.charisma or 0) or 0
+    local reqCharisma = BE.diplomacy_charisma_req or 3
+    local maxStab = BE.diplomacy_stability_max or 8
+
+    for countryId, country in pairs(state.europe or {}) do
+        -- 排除已占领、已在远征、已在外交中的
+        local isOccupied = false
+        for _, occ in ipairs(state.expeditions.occupied_countries or {}) do
+            if occ.country_id == countryId then isOccupied = true; break end
+        end
+        if isOccupied then goto skip_dip end
+        if (state.expeditions.active or {})[countryId] then goto skip_dip end
+        if (state.expeditions.diplomacy_active or {})[countryId] then goto skip_dip end
+
+        -- 稳定度检查
+        local stab = country.stability or 10
+        if stab > maxStab then goto skip_dip end
+
+        -- 至少有一条贸易路线
+        local routes = CountTradeRoutesToCountry(state, countryId)
+        if routes <= 0 then goto skip_dip end
+
+        table.insert(results, {
+            country_id   = countryId,
+            label        = country.label or countryId,
+            stability    = stab,
+            charisma_ok  = charisma >= reqCharisma,
+            charisma     = charisma,
+            routes       = routes,
+            pool         = math.floor(stab * (BE.diplomacy_influence_pool_mult or 15)),
+        })
+        ::skip_dip::
+    end
+
+    table.sort(results, function(a, b) return a.stability < b.stability end)
+    return results
+end
+
+--- 发起外交施压
+---@param state table
+---@param countryId string
+---@return boolean ok
+---@return string msg
+function Expedition.LaunchDiplomacy(state, countryId)
+    local country = state.europe[countryId]
+    if not country then return false, "目标国家不存在" end
+
+    -- 前置检查
+    local leader = GameState.GetMemberAtPosition(state, "diplomat")
+    local charisma = leader and (leader.charisma or 0) or 0
+    local reqCharisma = BE.diplomacy_charisma_req or 3
+    if charisma < reqCharisma then
+        return false, string.format("需要外交官魅力≥%d（当前%d）", reqCharisma, charisma)
+    end
+
+    local stab = country.stability or 10
+    if stab > (BE.diplomacy_stability_max or 8) then
+        return false, string.format("%s稳定度过高（%d），无法外交渗透", country.label, stab)
+    end
+
+    local routes = CountTradeRoutesToCountry(state, countryId)
+    if routes <= 0 then
+        return false, string.format("需要先开通对%s的贸易路线", country.label)
+    end
+
+    if (state.expeditions.active or {})[countryId] then
+        return false, "正在对该国进行军事远征，无法同时外交施压"
+    end
+    if (state.expeditions.diplomacy_active or {})[countryId] then
+        return false, "已在对该国进行外交施压"
+    end
+
+    -- 消耗检查
+    local apCost = BE.diplomacy_ap_cost or 1
+    local infCost = BE.diplomacy_influence_cost or 20
+    local availAP = (state.ap.current or 0) + (state.ap.temp or 0)
+    if availAP < apCost then
+        return false, string.format("行动点不足（需要 %d AP）", apCost)
+    end
+    state.diplomatic_influence = state.diplomatic_influence or 0
+    if state.diplomatic_influence < infCost then
+        return false, string.format("外交影响力不足（需要 %d，当前 %d）",
+            infCost, state.diplomatic_influence)
+    end
+
+    -- 消耗资源
+    GameState.SpendAP(state, apCost)
+    state.diplomatic_influence = state.diplomatic_influence - infCost
+
+    -- 初始化记录
+    local pool = math.floor(stab * (BE.diplomacy_influence_pool_mult or 15))
+    state.expeditions.diplomacy_active = state.expeditions.diplomacy_active or {}
+    state.expeditions.diplomacy_active[countryId] = {
+        country_id         = countryId,
+        label              = country.label,
+        started_turn       = state.turn_count or 0,
+        influence_progress = 0,
+        influence_pool     = pool,
+        treaty_type        = nil,
+        treaty_turn        = 0,
+        fail_penalty       = 0,
+    }
+
+    local msg = string.format("🤝 对%s发起外交施压（需积累 %d 点影响力）", country.label, pool)
+    GameState.AddLog(state, msg)
+    return true, msg
+end
+
+--- 计算每季影响力增量
+---@param state table
+---@param rec table  外交记录
+---@return number delta
+local function CalcDiplomacyDelta(state, rec)
+    local leader = GameState.GetMemberAtPosition(state, "diplomat")
+    local charisma = leader and (leader.charisma or 0) or 0
+    local routes = CountTradeRoutesToCountry(state, rec.country_id)
+    local country = state.europe[rec.country_id]
+    local stab = country and country.stability or 5
+    local delta = charisma * 3 + routes * 2 - stab * 1.5
+
+    -- 军事征服后加速 +50%
+    local alreadyConquered = false
+    for _, occ in ipairs(state.expeditions.occupied_countries or {}) do
+        if occ.country_id == rec.country_id then alreadyConquered = true; break end
+    end
+    if alreadyConquered then
+        delta = delta * (1 + (BE.diplomacy_military_bonus or 0.50))
+    end
+
+    return math.max(1, math.floor(delta))
+end
+
+--- 每季外交结算（TickDiplomacy）
+---@param state table
+function Expedition.TickDiplomacy(state)
+    state.expeditions.diplomacy_active = state.expeditions.diplomacy_active or {}
+    local Events = require("systems.events")
+    local toRemove = {}
+
+    for countryId, rec in pairs(state.expeditions.diplomacy_active) do
+        local country = state.europe[countryId]
+        if not country then
+            table.insert(toRemove, countryId); goto continue_dip
+        end
+
+        -- 协议已破裂 → 清除记录
+        if rec.treaty_type == "broken" then
+            table.insert(toRemove, countryId)
+            GameState.AddLog(state, string.format("❌ 与%s的外交关系已终止", rec.label))
+            goto continue_dip
+        end
+
+        -- 协议进行中结算
+        if rec.treaty_type then
+            if rec.treaty_type == "protection" then
+                state.cash = (state.cash or 0) + (BE.diplomacy_protection_income or 50)
+            elseif rec.treaty_type == "vassal" then
+                state.cash = (state.cash or 0) + (BE.diplomacy_vassal_income or 60)
+                -- 5% 反叛检查
+                if math.random() < (BE.diplomacy_revolt_chance or 0.05) then
+                    Events.Enqueue(state, {{
+                        id = "diplomacy_vassal_revolt_" .. countryId,
+                        title = string.format("%s臣服反叛", rec.label),
+                        description = string.format(
+                            "%s的臣服关系出现动荡，当地势力要求恢复自主权。",
+                            rec.label),
+                        options = {
+                            {
+                                text = string.format("强力镇压（花费 %d 克朗）",
+                                    BE.diplomacy_revolt_cost or 200),
+                                effects = {
+                                    custom = function(st, _)
+                                        local cost = BE.diplomacy_revolt_cost or 200
+                                        if (st.cash or 0) >= cost then
+                                            st.cash = st.cash - cost
+                                            GameState.AddLog(st, string.format(
+                                                "🗡 镇压%s叛乱，花费 %d 克朗", rec.label, cost))
+                                        else
+                                            -- 现金不足，自动退回保护协议
+                                            local dipRec = st.expeditions.diplomacy_active[countryId]
+                                            if dipRec then
+                                                dipRec.treaty_type = "protection"
+                                                dipRec.fail_penalty = (dipRec.fail_penalty or 0) + (BE.diplomacy_failed_penalty or 0.20)
+                                            end
+                                            GameState.AddLog(st, string.format(
+                                                "⚠ 现金不足，%s退回保护协议状态", rec.label))
+                                        end
+                                    end,
+                                },
+                            },
+                            {
+                                text = "接受反叛（退回保护协议）",
+                                effects = {
+                                    custom = function(st, _)
+                                        local dipRec = st.expeditions.diplomacy_active[countryId]
+                                        if dipRec then
+                                            dipRec.treaty_type = "protection"
+                                            dipRec.fail_penalty = (dipRec.fail_penalty or 0) + (BE.diplomacy_failed_penalty or 0.20)
+                                        end
+                                        GameState.AddLog(st, string.format(
+                                            "🏳 接受%s反叛，退回保护协议，下次谈判难度+20%%", rec.label))
+                                    end,
+                                },
+                            },
+                        },
+                    }})
+                end
+            elseif rec.treaty_type == "trade_concession" then
+                -- 写入贸易加成 modifier（每季刷新）
+                state.modifiers = state.modifiers or {}
+                state.modifiers["diplomacy_trade_bonus_" .. countryId] = {
+                    type = "trade_route_income_mult",
+                    value = BE.diplomacy_trade_bonus or 0.20,
+                    country_id = countryId,
+                    source = "diplomacy_trade_concession",
+                }
+            elseif rec.treaty_type == "military_alliance" then
+                -- 守备加成写入临时 modifier（每季刷新）
+                state.modifiers = state.modifiers or {}
+                state.modifiers["diplomacy_alliance_" .. countryId] = {
+                    type = "guard_bonus",
+                    value = 1,
+                    country_id = countryId,
+                    source = "diplomacy_military_alliance",
+                }
+            end
+            goto continue_dip
+        end
+
+        -- 渗透推进阶段
+        local delta = CalcDiplomacyDelta(state, rec)
+        rec.influence_progress = math.min(rec.influence_pool,
+            (rec.influence_progress or 0) + delta)
+
+        -- 检查是否到达谈判阈值
+        if rec.influence_progress >= rec.influence_pool then
+            Expedition.ResolveDiplomacy(state, countryId)
+        end
+
+        ::continue_dip::
+    end
+
+    for _, id in ipairs(toRemove) do
+        -- 清除协议 modifier
+        if state.modifiers then
+            state.modifiers["diplomacy_trade_bonus_" .. id] = nil
+            state.modifiers["diplomacy_alliance_" .. id] = nil
+        end
+        state.expeditions.diplomacy_active[id] = nil
+    end
+
+    -- 全局 diplomatic_influence 自然积累
+    state.diplomatic_influence = (state.diplomatic_influence or 0)
+        + (BE.diplomacy_influence_per_turn or 5)
+end
+
+--- 影响力满时触发谈判窗口（推入事件队列）
+---@param state table
+---@param countryId string
+function Expedition.ResolveDiplomacy(state, countryId)
+    local rec = (state.expeditions.diplomacy_active or {})[countryId]
+    if not rec then return end
+    local country = state.europe[countryId]
+    if not country then return end
+
+    local leader = GameState.GetMemberAtPosition(state, "diplomat")
+    local charisma = leader and (leader.charisma or 0) or 0
+    local failPenalty = rec.fail_penalty or 0
+
+    -- 构建可用协议选项（魅力过滤）
+    local options = {}
+
+    -- 贸易特许（始终可用，有贸易路线）
+    local routes = CountTradeRoutesToCountry(state, countryId)
+    if routes > 0 then
+        table.insert(options, {
+            text = string.format("贸易特许（该国所有贸易路线利润+20%%）"),
+            effects = {
+                custom = function(st, _)
+                    local dr = st.expeditions.diplomacy_active[countryId]
+                    if dr then
+                        dr.treaty_type = "trade_concession"
+                        dr.treaty_turn = st.turn_count or 0
+                    end
+                    GameState.AddLog(st, string.format("📜 与%s签订贸易特许协议", rec.label))
+                end,
+            },
+        })
+    end
+
+    -- 保护协议（始终可用）
+    table.insert(options, {
+        text = string.format("保护协议（每季 +%d 克朗，主权不变）",
+            BE.diplomacy_protection_income or 50),
+        effects = {
+            custom = function(st, _)
+                local dr = st.expeditions.diplomacy_active[countryId]
+                if dr then
+                    dr.treaty_type = "protection"
+                    dr.treaty_turn = st.turn_count or 0
+                end
+                GameState.AddLog(st, string.format("🛡 与%s签订保护协议", rec.label))
+            end,
+        },
+    })
+
+    -- 军事同盟（魅力 ≥ 4）
+    if charisma >= (BE.diplomacy_charisma_req_vassal or 4) then
+        table.insert(options, {
+            text = "军事同盟（守备+1等效编队，好感+10）",
+            effects = {
+                custom = function(st, _)
+                    local dr = st.expeditions.diplomacy_active[countryId]
+                    if dr then
+                        dr.treaty_type = "military_alliance"
+                        dr.treaty_turn = st.turn_count or 0
+                    end
+                    -- 好感 +10
+                    if st.powers and st.powers[countryId] then
+                        st.powers[countryId].attitude_to_player =
+                            math.min(100, (st.powers[countryId].attitude_to_player or 0) + 10)
+                    end
+                    state.expeditions.aggression_counter =
+                        (state.expeditions.aggression_counter or 0) + 1
+                    GameState.AddLog(st, string.format("⚔ 与%s缔结军事同盟", rec.label))
+                end,
+            },
+        })
+    end
+
+    -- 臣服关系（魅力 ≥ 4，需 1.5× 影响力池）
+    local vassalPool = math.floor(rec.influence_pool * (BE.diplomacy_vassal_influence_mult or 1.5))
+    if charisma >= (BE.diplomacy_charisma_req_vassal or 4)
+        and rec.influence_progress >= vassalPool * (1 - failPenalty) then
+        table.insert(options, {
+            text = string.format("臣服关系（每季 +%d 克朗，侵略度+1，可能反叛）",
+                BE.diplomacy_vassal_income or 60),
+            effects = {
+                custom = function(st, _)
+                    local dr = st.expeditions.diplomacy_active[countryId]
+                    if dr then
+                        dr.treaty_type = "vassal"
+                        dr.treaty_turn = st.turn_count or 0
+                    end
+                    st.expeditions.aggression_counter =
+                        (st.expeditions.aggression_counter or 0) + 1
+                    GameState.AddLog(st, string.format(
+                        "👑 %s臣服！每季 +%d 克朗（注意反叛风险）",
+                        rec.label, BE.diplomacy_vassal_income or 60))
+                end,
+            },
+        })
+    end
+
+    -- 推入事件队列
+    local Events = require("systems.events")
+    Events.Enqueue(state, {{
+        id = "diplomacy_negotiate_" .. countryId,
+        title = string.format("外交谈判：%s", rec.label),
+        description = string.format(
+            "长期外交施压已奏效，%s愿意就双边关系进行谈判。请选择协议类型：",
+            rec.label),
+        options = options,
+    }})
+
+    GameState.AddLog(state, string.format(
+        "🤝 外交施压奏效！%s已进入谈判窗口", rec.label))
+end
+
+--- 取消外交施压（清除记录和协议 modifier）
+---@param state table
+---@param countryId string
+---@return boolean ok
+---@return string msg
+function Expedition.CancelDiplomacy(state, countryId)
+    local rec = (state.expeditions.diplomacy_active or {})[countryId]
+    if not rec then return false, "无该国外交记录" end
+    -- 清除 modifier
+    if state.modifiers then
+        state.modifiers["diplomacy_trade_bonus_" .. countryId] = nil
+        state.modifiers["diplomacy_alliance_" .. countryId] = nil
+    end
+    state.expeditions.diplomacy_active[countryId] = nil
+    return true, string.format("已撤回对%s的外交施压", rec.label)
 end
 
 return Expedition

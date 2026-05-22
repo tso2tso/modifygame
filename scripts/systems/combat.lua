@@ -396,17 +396,25 @@ end
 ---@return string[] messages
 function Combat.ResolveAIActions(state)
     local messages = {}
+    -- 年代攻击加成：(year - base) / scale，1910年+0，1935年+0.25，1960年+0.5
+    local yearBase  = BC.ai_attack_year_base  or 1910
+    local yearScale = BC.ai_attack_year_scale or 100
+    local yearBonus = math.max(0, ((state.year or yearBase) - yearBase) / yearScale)
     for _, faction in ipairs(state.ai_factions) do
         -- 已击败或瘫痪状态的势力不会主动进攻
         if faction.defeated then goto continue_ai end
         if faction.collapsed then goto continue_ai end
+        -- 攻击冷却：触发攻击后若干季内不再进攻
+        if faction.attack_cooldown and faction.attack_cooldown > 0 then goto continue_ai end
         if not faction.pact_remaining or faction.pact_remaining <= 0 then
             local aiConfig = Balance.AI[faction.type] or {}
-            local chance = BC.ai_attack_chance * (1 + (aiConfig.aggression or 0))
+            local chance = (BC.ai_attack_chance + yearBonus) * (1 + (aiConfig.aggression or 0))
             -- 声誉系统：声誉差时 AI 更积极进攻
             local repTier = GameState.GetReputationTier(state)
             local repAttackBonus = BR.ai_attack_bonus[repTier] or 0
             chance = chance + repAttackBonus
+            -- 年代上限：防止概率无限叠加
+            chance = math.min(BC.ai_attack_chance_cap or 0.75, chance)
             -- 声誉 < -30 时降低攻击阈值（更容易触发）
             local effectiveThreshold = BC.ai_attack_threshold
             if (state.reputation or 0) < BR.thresholds.notorious then
@@ -414,10 +422,12 @@ function Combat.ResolveAIActions(state)
             end
             if faction.attitude <= effectiveThreshold
                 and faction.power >= BC.ai_attack_power_req
-                and math.random() < math.min(0.85, chance) then
+                and math.random() < chance then
                 local result = Combat.Resolve(state, faction, true)
                 local log = Combat.ApplyResult(state, faction, result)
                 table.insert(messages, log)
+                -- 设置攻击冷却，防止同一势力连续进攻
+                faction.attack_cooldown = BC.ai_attack_cooldown or 2
             end
         end
         ::continue_ai::

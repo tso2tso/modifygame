@@ -650,13 +650,62 @@ function Venture.TickActiveVentures(state)
             end
         end
 
+        -- A3: 腐败调查冷却倒计时（强制暂停）
+        if (record._corruption_cooldown or 0) > 0 then
+            record._corruption_cooldown = record._corruption_cooldown - 1
+            GameState.AddLog(state, string.format(
+                "🔍 %s渗透因腐败调查冷却，还需 %d 季（本季跳过）",
+                country.label, record._corruption_cooldown))
+            goto continue_tick
+        end
+
+        -- A3: 关税壁垒飙升 → 投资费用×1.3（一次性，触发后自动清除）
+        if record._tariff_spike and record._tariff_spike > 1.0 then
+            local spikeExtra = math.floor(turnCost * (record._tariff_spike - 1.0))
+            if state.cash >= turnCost + spikeExtra then
+                turnCost = turnCost + spikeExtra
+            end
+            record._tariff_spike = nil  -- 消耗一次后清除
+        end
+
         -- 扣除投资费用
         state.cash = state.cash - turnCost
         record.total_invested = (record.total_invested or 0) + turnCost
         record.turns_active = (record.turns_active or 0) + 1
 
-        -- 计算渗透值
-        local penetration = Venture.CalcPenetration(state, record)
+        -- A3: 危机事件抽检（20% 概率，每条活跃渗透独立）
+        -- _crisis_efficiency 由上季危机A"暂不处理"设置，本季消耗后清除
+        local crisisEffMod = record._crisis_efficiency or 1.0
+        record._crisis_efficiency = nil  -- 消耗一次后清除
+
+        -- 本季随机触发新危机（20%）
+        if math.random() < 0.20 then
+            local EventsData = require("data.events_data")
+            local crisisPool = EventsData.GetVentureCrisisEvents()
+            if #crisisPool > 0 then
+                local evt = crisisPool[math.random(#crisisPool)]
+                -- 注入 venture_id，供事件 effects.custom 读取
+                local evtCopy = {}
+                for k, v in pairs(evt) do evtCopy[k] = v end
+                evtCopy._ctx = { venture_id = powerId }
+                -- 存入待处理队列（turn_engine 会提交给事件系统）
+                state.ventures._pending_crisis = state.ventures._pending_crisis or {}
+                table.insert(state.ventures._pending_crisis, evtCopy)
+            end
+        end
+
+        -- 计算渗透值（乘以危机效率修正 × A3策略时机窗口）
+        local stratBonus, stratHint = Venture.GetStrategyBonus(state, record)
+        if stratHint then
+            -- 首次触发窗口时提示玩家（用 _last_strat_hint 去重）
+            if record._last_strat_hint ~= stratHint then
+                GameState.AddLog(state, "💡 " .. stratHint)
+                record._last_strat_hint = stratHint
+            end
+        else
+            record._last_strat_hint = nil
+        end
+        local penetration = math.floor(Venture.CalcPenetration(state, record) * crisisEffMod * stratBonus)
 
         -- 削减壁垒
         country.market_barrier = math.max(0,
@@ -1252,6 +1301,44 @@ function Venture.GetAvailableEstablishments(state)
     -- 按收入排序（低→高）
     table.sort(result, function(a, b) return a.income_minor < b.income_minor end)
     return result
+end
+
+-- ============================================================================
+-- A3: 策略时机窗口奖励
+-- ============================================================================
+
+--- 计算当前策略的时机窗口加成倍率
+--- - 倾销 + 壁垒<50% → ×1.25 渗透速度
+--- - 技术出口 + 目标国处于战争状态 → 合作度加成×2.0
+---@param state table
+---@param record table  活跃渗透记录
+---@return number  渗透速度倍率（默认 1.0）
+---@return string|nil  窗口提示文本（nil=无窗口）
+function Venture.GetStrategyBonus(state, record)
+    local stratId = record.strategy_id or "normal"
+    local powerId = record.power_id
+    local country = state.europe[powerId]
+    if not country then return 1.0, nil end
+
+    -- 窗口一：倾销 + 壁垒降至50%以下 → 渗透速度 ×1.25
+    if stratId == "dumping" then
+        local maxBarrier = country.max_market_barrier or 1
+        local curBarrier = country.market_barrier or maxBarrier
+        if curBarrier < maxBarrier * 0.5 then
+            return 1.25, string.format("壁垒已降至50%%以下，倾销效率+25%%（还有 %d 可渗透）", curBarrier)
+        end
+    end
+
+    -- 窗口二：技术出口 + 目标大国处于战争状态 → 合作度加成×2.0（返回给 CalcPenetration 使用）
+    if stratId == "tech_export" then
+        for _, conflict in pairs(state.active_conflicts or {}) do
+            if conflict.faction_a == powerId or conflict.faction_b == powerId then
+                return 2.0, string.format("%s正处于战争状态，技术出口合作度加成翻倍", country.label or powerId)
+            end
+        end
+    end
+
+    return 1.0, nil
 end
 
 return Venture

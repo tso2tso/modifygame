@@ -421,6 +421,36 @@ function GrandPowers._CheckBranchTriggers(state, year, quarter)
     end
 end
 
+--- 公开接口：执行单次征服（修改主权 + war_fatigue + covert_bonus），供 turn_engine C3 调用
+---@param state table
+---@param attackerId string  攻击方大国 ID
+---@param targetId   string  被征服国家 ID
+---@param report     table   { conquest_msgs, ... }，若 nil 则不写报告
+function GrandPowers.ApplyConquest(state, attackerId, targetId, report)
+    local target = state.europe and state.europe[targetId]
+    if not target then return end
+
+    EuropeData.ChangeSovereignty(state.europe, targetId, attackerId)
+
+    local attackerPower = state.powers[attackerId]
+    if attackerPower then
+        local fatInc = (target.tier == "major") and 8 or 3
+        local covertBonus = (state.modifiers or {})["covert_military_bonus_" .. attackerId] or 0
+        if covertBonus > 0 then
+            fatInc = math.floor(fatInc * (1 - covertBonus))
+        end
+        attackerPower.war_fatigue = clamp100(attackerPower.war_fatigue + fatInc)
+    end
+
+    if report then
+        local attackerLabel = (attackerPower and attackerPower.label) or attackerId
+        table.insert(report.conquest_msgs,
+            string.format("%s 征服了 %s", attackerLabel, target.label))
+    end
+    GameState.AddLog(state, string.format("大国动态：%s 征服了 %s",
+        (attackerPower and attackerPower.label) or attackerId, target.label))
+end
+
 --- 处理征服事件（含分支标记影响）
 function GrandPowers._ProcessConquests(state, year, quarter, report)
     local events = PowersData.GetConquestEvents(year, quarter)
@@ -541,22 +571,8 @@ function GrandPowers._ProcessConquests(state, year, quarter, report)
         if not target then goto continue end
 
         if ev.action == "conquer" then
-            -- 征服：目标主权转为攻击方
-            local attackerId = ev.attacker
-            EuropeData.ChangeSovereignty(state.europe, ev.target, attackerId)
-
-            -- 攻击方 war_fatigue 增加
-            local attackerPower = state.powers[attackerId]
-            if attackerPower then
-                local fatInc = (target.tier == "major") and 8 or 3
-                attackerPower.war_fatigue = clamp100(attackerPower.war_fatigue + fatInc)
-            end
-
-            local attackerLabel = attackerPower and attackerPower.label or attackerId
-            table.insert(report.conquest_msgs,
-                string.format("%s 征服了 %s", attackerLabel, target.label))
-
-            GameState.AddLog(state, string.format("大国动态：%s 征服了 %s", attackerLabel, target.label))
+            -- 征服：复用公开接口（主权变更 + war_fatigue + covert_bonus）
+            GrandPowers.ApplyConquest(state, ev.attacker, ev.target, report)
 
         elseif ev.action == "liberate" then
             -- 解放：恢复原主权
