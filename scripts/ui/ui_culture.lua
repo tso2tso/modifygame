@@ -88,7 +88,9 @@ local function SectionDivider(text, color)
         flexDirection = "row",
         alignItems    = "center",
         gap           = 6,
-        paddingTop    = 4,
+        marginTop     = 8,
+        marginBottom  = 4,
+        flexShrink    = 0,
         children = {
             UI.Divider { flexGrow = 1, color = C.divider },
             UI.Label {
@@ -113,6 +115,12 @@ local function EmptyHint(text)
         marginTop = 12,
         marginBottom = 12,
     }
+end
+
+--- 清理错误原因字符串（去掉科技ID括号，如「（d5b_cinema）」）
+local function CleanReason(r)
+    if not r then return "" end
+    return r:gsub("（[%w_]+）", ""):gsub("%([%w_]+%)", ""):gsub("%s+$", "")
 end
 
 --- 操作按钮
@@ -232,7 +240,7 @@ local function _BuildRoot(state)
                                  or string.format("%d/季",  delta)
     local deltaColor = delta >= 0 and C.accent_green or C.accent_red
 
-    -- ── 概览卡（MetricCell 网格，与远征概览卡对齐）──
+    -- ── 概览卡 ──
     local summaryCard = UI.Panel {
         width           = "100%",
         backgroundColor = C.paper_dark,
@@ -249,25 +257,25 @@ local function _BuildRoot(state)
                 fontColor  = C.text_primary,
                 fontWeight = "bold",
             },
-            -- 第一行：CI / 积分 / 作品 / CP
+            -- 第一行：文化影响力 / 影响/季 / 积分 / 胜利条件
             UI.Panel {
                 width = "100%", flexDirection = "row", gap = 4,
                 children = {
-                    MetricCell("CI", ci, C.accent_gold),
-                    MetricCell("CI变化", deltaStr, deltaColor),
+                    MetricCell("文化影响力", ci, C.accent_gold),
+                    MetricCell("影响力/季", deltaStr, deltaColor),
                     MetricCell("积分", score, C.text_primary),
                     MetricCell("胜利条件",
                         string.format("%d/5", metCount),
                         metCount >= 5 and C.accent_green or C.accent_amber),
                 },
             },
-            -- 第二行：作品 / 使团 / CP地区
+            -- 第二行：文化作品 / 使团 / 渗透地区 / 文化行动
             UI.Panel {
                 width = "100%", flexDirection = "row", gap = 4,
                 children = {
                     MetricCell("文化作品", worksCount, C.accent_blue),
                     MetricCell("海外使团", missionsCount, C.accent_blue),
-                    MetricCell("影响地区", cpCount, C.accent_green),
+                    MetricCell("渗透地区", cpCount, C.accent_green),
                     MetricCell("文化行动",
                         state.culture_action_this_turn and "已用" or "可用",
                         state.culture_action_this_turn and C.text_muted or C.accent_green),
@@ -276,16 +284,13 @@ local function _BuildRoot(state)
         },
     }
 
-    -- ── 导航条目（账簿风格）──
-    local function NavEntry(label, subtitle, accentCol, viewId, rightText, rightColor)
+    -- ── 导航行（无独立背景，由 GroupCard 统一提供）──
+    local function NavRow(label, subtitle, accentCol, viewId, rightText, rightColor)
         local ac = accentCol or C.accent_blue
         return UI.Button {
             width           = "100%",
             padding         = 0,
-            backgroundColor = C.paper_dark,
-            borderRadius    = S.radius_card,
-            borderWidth     = 1,
-            borderColor     = C.border_soft,
+            backgroundColor = { 0, 0, 0, 0 },
             onClick = function()
                 currentView_ = viewId
                 if onStateChanged_ then onStateChanged_("nav") end
@@ -295,47 +300,63 @@ local function _BuildRoot(state)
                     width         = "100%",
                     flexDirection = "row",
                     alignItems    = "center",
-                    padding       = S.card_padding,
+                    paddingHorizontal = S.card_padding,
+                    paddingVertical   = 12,
                     gap           = 10,
                     children = {
                         UI.Panel {
-                            width           = 3,
-                            height          = 34,
+                            width = 3, height = 34,
                             backgroundColor = { ac[1], ac[2], ac[3], 200 },
-                            borderRadius    = 2,
+                            borderRadius = 2, flexShrink = 0,
                         },
                         UI.Panel {
-                            flexGrow      = 1,
-                            flexDirection = "column",
-                            gap           = 3,
+                            flexGrow = 1, flexShrink = 1,
+                            flexDirection = "column", gap = 3,
                             children = {
                                 UI.Label {
-                                    text       = label,
-                                    fontSize   = F.body_minor,
-                                    fontColor  = C.text_primary,
-                                    fontWeight = "bold",
+                                    text = label, fontSize = F.body_minor,
+                                    fontColor = C.text_primary, fontWeight = "bold",
                                 },
                                 UI.Label {
-                                    text     = subtitle,
-                                    fontSize = F.label,
-                                    fontColor = C.text_secondary,
+                                    text = subtitle, fontSize = F.label,
+                                    fontColor = C.text_secondary, flexWrap = "wrap",
                                 },
                             },
                         },
                         UI.Label {
-                            text      = rightText or "",
-                            fontSize  = F.label,
+                            text = rightText or "", fontSize = F.label,
                             fontColor = rightColor or C.text_muted,
-                            fontWeight = "bold",
+                            fontWeight = "bold", flexShrink = 0,
                         },
                         UI.Label {
-                            text     = ">",
-                            fontSize = 14,
-                            fontColor = C.text_muted,
+                            text = ">", fontSize = 14,
+                            fontColor = C.text_muted, flexShrink = 0,
                         },
                     },
                 },
             },
+        }
+    end
+
+    -- ── 分组卡片：多行导航共用一个卡片背景，行间用分割线隔开 ──
+    local function GroupCard(rows)
+        local children = {}
+        for i, row in ipairs(rows) do
+            table.insert(children, row)
+            if i < #rows then
+                table.insert(children, UI.Divider { color = C.divider, width = "100%" })
+            end
+        end
+        return UI.Panel {
+            width           = "100%",
+            backgroundColor = C.paper_dark,
+            borderRadius    = S.radius_card,
+            borderWidth     = 1,
+            borderColor     = C.border_soft,
+            overflow        = "hidden",
+            flexDirection   = "column",
+            flexShrink      = 0,
+            children        = children,
         }
     end
 
@@ -347,30 +368,36 @@ local function _BuildRoot(state)
         children = {
             summaryCard,
             SectionDivider("当前局势", C.accent_blue),
-            NavEntry("现有文化作品",
-                string.format("已创作 %d 件（剧团 / 电影 / 史诗）", worksCount),
-                C.accent_blue, "works",
-                tostring(worksCount) .. " 件", C.text_label),
-            NavEntry("地区文化影响（CP）",
-                string.format("已影响 %d 个地区", cpCount),
-                C.accent_green, "cp",
-                tostring(cpCount) .. " 地区", C.accent_green),
+            GroupCard({
+                NavRow("现有文化作品",
+                    string.format("已创作 %d 件（剧团 / 电影 / 史诗）", worksCount),
+                    C.accent_blue, "works",
+                    tostring(worksCount) .. " 件", C.text_label),
+                NavRow("地区文化渗透",
+                    string.format("已渗透 %d 个地区", cpCount),
+                    C.accent_green, "cp",
+                    tostring(cpCount) .. " 地区", C.accent_green),
+            }),
             SectionDivider("文化行动", C.accent_gold),
-            NavEntry("文化创作",
-                "创作剧团、电影、史诗、举办赛事与世博",
-                C.accent_gold, "create",
-                state.culture_action_this_turn and "已行动" or "可行动",
-                state.culture_action_this_turn and C.text_muted or C.accent_green),
-            NavEntry("海外文化使团",
-                string.format("进行中 %d 支  —  派遣使团提升海外 CP", missionsCount),
-                C.accent_blue, "missions",
-                string.format("%d 支", missionsCount), C.text_label),
+            GroupCard({
+                NavRow("文化创作",
+                    "创作剧团、电影、史诗、举办赛事与世博",
+                    C.accent_gold, "create",
+                    state.culture_action_this_turn and "已行动" or "可行动",
+                    state.culture_action_this_turn and C.text_muted or C.accent_green),
+                NavRow("海外文化使团",
+                    string.format("进行中 %d 支  —  派遣使团提升海外文化渗透值", missionsCount),
+                    C.accent_blue, "missions",
+                    string.format("%d 支", missionsCount), C.text_label),
+            }),
             SectionDivider("胜利目标", C.accent_amber),
-            NavEntry("胜利进度",
-                string.format("达成条件 %d / 5", metCount),
-                C.accent_amber, "victory",
-                metCount >= 5 and "已达成" or string.format("%d/5", metCount),
-                metCount >= 5 and C.accent_green or C.accent_gold),
+            GroupCard({
+                NavRow("胜利进度",
+                    string.format("达成条件 %d / 5", metCount),
+                    C.accent_amber, "victory",
+                    metCount >= 5 and "已达成" or string.format("%d/5", metCount),
+                    metCount >= 5 and C.accent_green or C.accent_gold),
+            }),
         },
     }
 end
@@ -454,13 +481,13 @@ local function _BuildVictoryPage(state)
         }),
         CondCard("方式甲  地区文化认同", C.border_soft, {
             CondRow(prog.way_a_met,
-                string.format("%d / %d 个地区达到文化认同（CP >= 70）",
+                string.format("%d / %d 个地区达到文化认同（渗透值 >= 70）",
                     wayANow, wayAMax)),
             ProgBar(wayANow, wayAMax, C.accent_green),
         }),
         CondCard("方式乙  文化同化", C.border_soft, {
             CondRow(prog.way_b_met,
-                string.format("%d / %d 个地区文化同化（CP >= 90）且 CI >= 150",
+                string.format("%d / %d 个地区文化同化（渗透值 >= 90）且影响力 >= 150",
                     wayBNow, wayBMax)),
             ProgBar(wayBNow, wayBMax, C.accent_amber),
         }),
@@ -483,49 +510,58 @@ local EPIC_THEMES = { national = "民族史诗", religious = "宗教史诗", his
 local function _FilmButtons(state, work, idx)
     if not (work.type == "film" and work.ready and not work.released) then return nil end
     local targets = Culture.GetFilmTargets(state)
-    local children = {
-        Btn("国内公映", C.accent_green, function()
-            local ok, msg = Culture.ReleaseFilm(state, idx, "domestic")
-            if onStateChanged_ then onStateChanged_(ok and msg or ("发行失败：" .. (msg or ""))) end
-        end),
+
+    -- 顶部行：国内公映
+    local topRow = UI.Panel {
+        width = "100%", flexDirection = "row", gap = 6,
+        children = {
+            Btn("国内公映", C.accent_green, function()
+                local ok, msg = Culture.ReleaseFilm(state, idx, "domestic")
+                if onStateChanged_ then onStateChanged_(ok and msg or ("发行失败：" .. (msg or ""))) end
+            end),
+        },
     }
 
-    if #targets > 0 then
-        table.insert(children, UI.Label {
-            text = "国际发行目标",
-            fontSize = F.label,
-            fontColor = C.text_secondary,
-            width = "100%",
-        })
-        for i = 1, math.min(6, #targets) do
-            local target = targets[i]
-            local tid = target.id
-            table.insert(children, Btn(GetRegionLabel(tid), C.accent_blue, function()
-                local ok, msg = Culture.ReleaseFilm(state, idx, "international", tid)
-                if onStateChanged_ then onStateChanged_(ok and msg or ("发行失败：" .. (msg or ""))) end
-            end))
-        end
+    if #targets == 0 then
+        return UI.Panel { width="100%", flexDirection="column", gap=6, marginTop=6,
+            children = { topRow } }
+    end
 
-        table.insert(children, UI.Label {
-            text = "节庆展映目标",
-            fontSize = F.label,
-            fontColor = C.text_secondary,
-            width = "100%",
-        })
-        for i = 1, math.min(6, #targets) do
-            local target = targets[i]
-            local tid = target.id
-            table.insert(children, Btn(GetRegionLabel(tid), C.accent_amber, function()
-                local ok, msg = Culture.ReleaseFilm(state, idx, "festival", tid)
-                if onStateChanged_ then onStateChanged_(ok and msg or ("发行失败：" .. (msg or ""))) end
-            end))
-        end
+    -- 国际目标（全量）
+    local intlBtns = {}
+    for _, target in ipairs(targets) do
+        local tid = target.id
+        table.insert(intlBtns, Btn(GetRegionLabel(tid), C.accent_blue, function()
+            local ok, msg = Culture.ReleaseFilm(state, idx, "international", tid)
+            if onStateChanged_ then onStateChanged_(ok and msg or ("发行失败：" .. (msg or ""))) end
+        end))
+    end
+
+    -- 节庆目标（全量）
+    local festBtns = {}
+    for _, target in ipairs(targets) do
+        local tid = target.id
+        table.insert(festBtns, Btn(GetRegionLabel(tid), C.accent_amber, function()
+            local ok, msg = Culture.ReleaseFilm(state, idx, "festival", tid)
+            if onStateChanged_ then onStateChanged_(ok and msg or ("发行失败：" .. (msg or ""))) end
+        end))
     end
 
     return UI.Panel {
-        width = "100%", flexDirection = "row", flexWrap = "wrap",
-        gap = 6, marginTop = 8,
-        children = children,
+        width = "100%", flexDirection = "column", gap = 6, marginTop = 6,
+        children = {
+            topRow,
+            UI.Panel { flexDirection="row", alignItems="center", gap=6, children = {
+                UI.Label { text="国际", fontSize=F.label, fontColor=C.text_muted, width=28 },
+                UI.Panel { flexDirection="row", flexWrap="wrap", gap=6, flexGrow=1,
+                    children=intlBtns },
+            }},
+            UI.Panel { flexDirection="row", alignItems="center", gap=6, children = {
+                UI.Label { text="节庆", fontSize=F.label, fontColor=C.text_muted, width=28 },
+                UI.Panel { flexDirection="row", flexWrap="wrap", gap=6, flexGrow=1,
+                    children=festBtns },
+            }},
+        },
     }
 end
 
@@ -567,7 +603,7 @@ local function _BuildWorksPage(state)
                     UI.Panel { flexGrow=1, gap=2, children={
                         UI.Label { text=GetRegionLabel(w.location or "?"),
                             fontSize=F.body_minor, fontColor=C.text_primary, fontWeight="bold" },
-                        UI.Label { text=string.format("每季 +%d CP", cpPerSeason),
+                        UI.Label { text=string.format("每季 +%d 渗透值", cpPerSeason),
                             fontSize=F.label, fontColor=C.accent_green },
                     }},
                     UI.Label { text=string.format("第 %d 支", n),
@@ -598,20 +634,47 @@ local function _BuildWorksPage(state)
                 statusColor = C.accent_amber
             end
             local filmBtns = _FilmButtons(state, w, item.i)
-            table.insert(rows, UI.Panel {
-                width = "100%", padding = S.card_padding,
-                backgroundColor = w.ready and not w.released and C.success_bg or C.bg_surface,
-                borderRadius = S.radius_card, borderWidth = 1,
-                borderColor = w.ready and not w.released and C.accent_green or C.border_soft,
-                children = {
-                    UI.Panel { flexGrow=1, gap=2, children={
+            local isReady    = w.ready and not w.released
+            local isReleased = w.released
+            -- 左竖条颜色：可发行=绿，已发行=灰，制作中=橙
+            local barColor = isReady and C.accent_green
+                          or isReleased and C.text_muted
+                          or C.accent_amber
+
+            -- 已发行的电影用紧凑行布局；待发行/制作中用展开卡片布局
+            if isReleased then
+                table.insert(rows, UI.Panel {
+                    width = "100%",
+                    flexDirection = "row", alignItems = "center",
+                    paddingHorizontal = S.card_padding, paddingVertical = 8,
+                    backgroundColor = C.bg_surface,
+                    borderRadius = S.radius_card, borderWidth = 1, borderColor = C.border_soft,
+                    gap = 10,
+                    children = {
+                        UI.Panel { width=3, height=28, backgroundColor=barColor, borderRadius=2, flexShrink=0 },
                         UI.Label { text=themeLabel.."题材",
-                            fontSize=F.body_minor, fontColor=C.text_primary, fontWeight="bold" },
+                            fontSize=F.body_minor, fontColor=C.text_secondary, flexGrow=1 },
                         UI.Label { text=statusText, fontSize=F.label, fontColor=statusColor },
-                    }},
-                    filmBtns or UI.Panel{},
-                },
-            })
+                    },
+                })
+            else
+                table.insert(rows, UI.Panel {
+                    width = "100%", padding = S.card_padding,
+                    backgroundColor = C.bg_surface,
+                    borderRadius = S.radius_card, borderWidth = 1,
+                    borderColor = isReady and { C.accent_green[1], C.accent_green[2], C.accent_green[3], 180 } or C.border_soft,
+                    flexDirection = "column", gap = 4,
+                    children = {
+                        UI.Panel { flexDirection="row", alignItems="center", gap=10, children = {
+                            UI.Panel { width=3, height=28, backgroundColor=barColor, borderRadius=2, flexShrink=0 },
+                            UI.Label { text=themeLabel.."题材",
+                                fontSize=F.body_minor, fontColor=C.text_primary, fontWeight="bold", flexGrow=1 },
+                            UI.Label { text=statusText, fontSize=F.label, fontColor=statusColor },
+                        }},
+                        filmBtns or UI.Panel{},
+                    },
+                })
+            end
         end
     end
 
@@ -634,7 +697,7 @@ local function _BuildWorksPage(state)
                         UI.Label { text=EPIC_THEMES[w.theme] or (w.theme or "?"),
                             fontSize=F.body_minor, fontColor=C.text_primary, fontWeight="bold" },
                         UI.Label {
-                            text=string.format("+%d CI/季  控制区 +%d CP/季",
+                            text=string.format("+%d 影响力/季  控制区 +%d 渗透值/季",
                                 BC.ci_epic_bonus or 2, BC.epic_own_cp or 2),
                             fontSize=F.label, fontColor=C.accent_amber },
                     }},
@@ -658,7 +721,7 @@ local function _BuildCPPage(state)
     table.sort(items, function(a,b) return a.cp > b.cp end)
 
     if #items == 0 then
-        return SubPage("地区文化影响（CP）", C.accent_green, {
+        return SubPage("地区文化渗透", C.accent_green, {
             EmptyHint("尚无文化积累——创作作品或派遣使团后开始积累"),
         })
     end
@@ -713,7 +776,7 @@ local function _BuildCPPage(state)
         end
     end
 
-    return SubPage("地区文化影响  " .. #items .. " 地区", C.accent_green, rows)
+    return SubPage("地区文化渗透  " .. #items .. " 地区", C.accent_green, rows)
 end
 
 -- ============================================================================
@@ -776,20 +839,22 @@ local function _BuildCreatePage(state)
     table.insert(rows, ActionCard(
         string.format("歌舞剧团  %d / %d", troupeCount, troupeMax),
         "剧", C.accent_blue,
-        string.format("驻扎地区每季 +5/3/1 CP（叠加递减）  成本 %d 克朗 + %d AP",
+        string.format("驻扎地区每季 +5/3/1 渗透值（叠加递减）  成本 %d 克朗 + %d AP",
             BC.troupe_cost or 200, BC.troupe_create_ap or 1),
         UI.Panel {
-            flexDirection="row", flexWrap="wrap", gap=6,
+            flexDirection="column", gap=6,
             children = {
-                Btn("驻扎首都", C.accent_blue, function()
-                    local ok, msg = Culture.CreateTroupe(state, "capital_city")
-                    if onStateChanged_ then onStateChanged_(ok and msg or "创建失败："..(msg or "")) end
-                end, not canTroupe or alreadyDone),
-                Btn("驻扎工业区", C.accent_blue, function()
-                    local ok, msg = Culture.CreateTroupe(state, "industrial_town")
-                    if onStateChanged_ then onStateChanged_(ok and msg or "创建失败："..(msg or "")) end
-                end, not canTroupe or alreadyDone),
-                not canTroupe and ErrHint(troupeReason) or UI.Panel{},
+                UI.Panel { flexDirection="row", flexWrap="wrap", gap=6, children = {
+                    Btn("驻扎首都", C.accent_blue, function()
+                        local ok, msg = Culture.CreateTroupe(state, "capital_city")
+                        if onStateChanged_ then onStateChanged_(ok and msg or "创建失败："..(msg or "")) end
+                    end, not canTroupe or alreadyDone),
+                    Btn("驻扎工业区", C.accent_blue, function()
+                        local ok, msg = Culture.CreateTroupe(state, "industrial_town")
+                        if onStateChanged_ then onStateChanged_(ok and msg or "创建失败："..(msg or "")) end
+                    end, not canTroupe or alreadyDone),
+                }},
+                not canTroupe and ErrHint(CleanReason(troupeReason)) or UI.Panel{},
             },
         }
     ))
@@ -803,6 +868,7 @@ local function _BuildCreatePage(state)
     end
     if filmCount < filmMax then
         local filmBtns = {}
+        local filmErrs = {}
         for themeKey, themeLabel in pairs(FILM_THEMES) do
             if not doneThemes[themeKey] then
                 local canFilm, filmReason = Culture.CanCreateFilm(state, themeKey)
@@ -811,17 +877,23 @@ local function _BuildCreatePage(state)
                     local ok, msg = Culture.CreateFilm(state, tk)
                     if onStateChanged_ then onStateChanged_(ok and msg or "拍摄失败："..(msg or "")) end
                 end, not canFilm or alreadyDone))
-                if not canFilm then table.insert(filmBtns, ErrHint(filmReason)) end
+                if not canFilm and filmReason then
+                    table.insert(filmErrs, ErrHint(CleanReason(filmReason)))
+                end
             end
+        end
+        local filmWidget = nil
+        if #filmBtns > 0 then
+            local children = { UI.Panel { flexDirection="row", flexWrap="wrap", gap=6, children=filmBtns } }
+            for _, e in ipairs(filmErrs) do table.insert(children, e) end
+            filmWidget = UI.Panel { flexDirection="column", gap=4, children=children }
         end
         table.insert(rows, ActionCard(
             string.format("电影制作  %d / %d", filmCount, filmMax),
             "影", C.accent_green,
             string.format("制作周期 %d 季，支持多种发行方式  成本 %d 克朗  需电影工业科技",
                 BC.film_prod_turns or 2, BC.film_cost or 400),
-            #filmBtns > 0 and UI.Panel {
-                flexDirection="row", flexWrap="wrap", gap=6, children=filmBtns,
-            } or nil
+            filmWidget
         ))
     end
 
@@ -834,6 +906,7 @@ local function _BuildCreatePage(state)
     end
     if epicCount < epicMax then
         local epicBtns = {}
+        local epicErrs = {}
         for themeKey, themeLabel in pairs(EPIC_THEMES) do
             if not doneEpics[themeKey] then
                 local canEpic, epicReason = Culture.CanCreateEpic(state, themeKey)
@@ -842,18 +915,24 @@ local function _BuildCreatePage(state)
                     local ok, msg = Culture.CreateEpic(state, tk)
                     if onStateChanged_ then onStateChanged_(ok and msg or "出版失败："..(msg or "")) end
                 end, not canEpic or alreadyDone))
-                if not canEpic then table.insert(epicBtns, ErrHint(epicReason)) end
+                if not canEpic and epicReason then
+                    table.insert(epicErrs, ErrHint(CleanReason(epicReason)))
+                end
             end
+        end
+        local epicWidget = nil
+        if #epicBtns > 0 then
+            local children = { UI.Panel { flexDirection="row", flexWrap="wrap", gap=6, children=epicBtns } }
+            for _, e in ipairs(epicErrs) do table.insert(children, e) end
+            epicWidget = UI.Panel { flexDirection="column", gap=4, children=children }
         end
         table.insert(rows, ActionCard(
             string.format("民族史诗  %d / %d", epicCount, epicMax),
             "史", C.accent_amber,
-            string.format("永久效果：己方 +%d CP/季，+%d CI/季  成本 %d 克朗 + %d RP",
+            string.format("永久效果：己方 +%d 渗透值/季，+%d 影响力/季  成本 %d 克朗 + %d RP",
                 BC.epic_own_cp or 2, BC.ci_epic_bonus or 2,
                 BC.epic_cost or 300, BC.epic_rp_cost or 10),
-            #epicBtns > 0 and UI.Panel {
-                flexDirection="row", flexWrap="wrap", gap=6, children=epicBtns,
-            } or nil
+            epicWidget
         ))
     end
 
@@ -891,16 +970,18 @@ local function _BuildCreatePage(state)
             end,
             not canSports or alreadyDone))
     end
-    if not canSports then table.insert(sportsChildren, ErrHint(sportsReason)) end
     table.insert(rows, ActionCard(
         cooldown > 0 and string.format("体育赛事  冷却 %d 季", cooldown) or "体育赛事",
         "赛", C.accent_green,
-        string.format("举办地 +%d CP，邻近 +%d CP  冷却 %d 季  成本 %d 克朗",
+        string.format("举办地 +%d 渗透值，邻近 +%d 渗透值  冷却 %d 季  成本 %d 克朗",
             BC.sports_host_cp or 20, BC.sports_neighbor_cp or 8,
             BC.sports_cooldown or 4, BC.sports_cost or 250),
         UI.Panel {
-            flexDirection="row", flexWrap="wrap", gap=6,
-            children = sportsChildren,
+            flexDirection="column", gap=4,
+            children = {
+                UI.Panel { flexDirection="row", flexWrap="wrap", gap=6, children=sportsChildren },
+                not canSports and ErrHint(CleanReason(sportsReason)) or UI.Panel{},
+            },
         }
     ))
 
@@ -924,17 +1005,19 @@ local function _BuildCreatePage(state)
             or  "世界博览会"
         table.insert(rows, ActionCard(
             exTitle, "博", C.accent_gold,
-            string.format("全局 CP +%d~%d，每局仅一次  需满配顾问 + 文化霸权 + %d 部史诗  成本 %d 克朗 + %d AP",
+            string.format("全局渗透值 +%d~%d，每局仅一次  需满配顾问 + 文化霸权 + %d 部史诗  成本 %d 克朗 + %d AP",
                 BC.exhibition_base_cp or 15, BC.exhibition_max_cp or 40,
                 BC.exhibition_min_epics or 2, BC.exhibition_cost or 800, BC.exhibition_ap or 2),
             exProg == 0 and UI.Panel {
-                flexDirection="column", gap=3,
+                flexDirection="column", gap=4,
                 children = {
-                    Btn("启动筹备", C.accent_gold, function()
-                        local ok, msg = Culture.StartExhibition(state)
-                        if onStateChanged_ then onStateChanged_(ok and msg or "启动失败："..(msg or "")) end
-                    end, not canEx or alreadyDone),
-                    not canEx and ErrHint(exReason) or UI.Panel{},
+                    UI.Panel { flexDirection="row", flexWrap="wrap", gap=6, children = {
+                        Btn("启动筹备", C.accent_gold, function()
+                            local ok, msg = Culture.StartExhibition(state)
+                            if onStateChanged_ then onStateChanged_(ok and msg or "启动失败："..(msg or "")) end
+                        end, not canEx or alreadyDone),
+                    }},
+                    not canEx and ErrHint(CleanReason(exReason)) or UI.Panel{},
                 },
             } or nil
         ))
@@ -967,9 +1050,9 @@ local function _BuildMissionsPage(state)
                     MetricCell("使团数量",
                         string.format("%d/%d", #missions, maxCount),
                         #missions >= maxCount and C.accent_amber or C.text_primary),
-                    MetricCell("CI 储量", ci,
+                    MetricCell("影响力储量", ci,
                         ci >= (BC.mission_ci_min or 60) and C.accent_green or C.accent_red),
-                    MetricCell("每季 CP",
+                    MetricCell("每季渗透值",
                         string.format("+%d", (BC.mission_base_cp or 12) * math.max(1, #missions)),
                         C.accent_blue),
                 },
@@ -1006,7 +1089,7 @@ local function _BuildMissionsPage(state)
                 flexDirection="column", gap=6,
                 children = {
                     UI.Label {
-                        text=string.format("选择目标地区（消耗 %d CI + 1 AP）",
+                        text=string.format("选择目标地区（消耗 %d 影响力 + 1 AP）",
                             BC.mission_ci_launch or 80),
                         fontSize=F.label, fontColor=C.text_secondary,
                     },
@@ -1048,9 +1131,9 @@ local function _BuildMissionsPage(state)
                 UI.Panel {
                     width="100%", flexDirection="row", gap=4, marginTop=6,
                     children = {
-                        MetricCell("当前 CP", cp, cpClr),
-                        MetricCell("等级", Culture.GetCPLevelName(cp), cpClr),
-                        MetricCell("每季+CP", BC.mission_base_cp or 12, C.accent_blue),
+                        MetricCell("当前渗透值", cp, cpClr),
+                        MetricCell("渗透等级", Culture.GetCPLevelName(cp), cpClr),
+                        MetricCell("每季+渗透", BC.mission_base_cp or 12, C.accent_blue),
                     },
                 },
             }
@@ -1098,7 +1181,7 @@ local function _BuildMissionsPage(state)
         end
     else
         table.insert(rows, EmptyHint(
-            string.format("暂无进行中的使团（需 CI >= %d 且顾问达良好级）",
+            string.format("暂无进行中的使团（需影响力 >= %d 且顾问达良好级）",
                 math.max(BC.mission_ci_min or 60, BC.mission_ci_launch or 80))))
     end
 
