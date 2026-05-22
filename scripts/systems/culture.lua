@@ -1038,19 +1038,23 @@ function Culture.ResolveMissionEvent(state, targetRegionId, optionIdx)
     local opt = ev.options and ev.options[optionIdx]
     if not opt then return false, "无效选项" end
 
-    if opt.cost_intel and (state.intelligence or 0) < opt.cost_intel then
+    if opt.cost_intel and (state.intel or 0) < opt.cost_intel then
         return false, string.format("情报不足（需要 %d）", opt.cost_intel)
     end
     if opt.cost_ci and (state.culture.ci or 0) < opt.cost_ci then
-        return false, string.format("CI 不足（需要 %d）", opt.cost_ci)
+        return false, string.format("影响力不足（需要 %d）", opt.cost_ci)
     end
     if opt.cost_cash and (state.cash or 0) < opt.cost_cash then
         return false, string.format("克朗不足（需要 %d）", opt.cost_cash)
     end
 
-    state.intelligence = (state.intelligence or 0) - (opt.cost_intel or 0)
+    if (opt.cost_intel or 0) > 0 then
+        state.intel = math.max(0, (state.intel or 0) - opt.cost_intel)
+    end
     state.culture.ci = math.max(0, (state.culture.ci or 0) - (opt.cost_ci or 0))
-    state.cash = (state.cash or 0) - (opt.cost_cash or 0)
+    if (opt.cost_cash or 0) > 0 then
+        state.cash = math.max(0, (state.cash or 0) - opt.cost_cash)
+    end
 
     local cpDelta = (opt.cp_bonus or 0) + (opt.cp_penalty or 0)
     if cpDelta ~= 0 then
