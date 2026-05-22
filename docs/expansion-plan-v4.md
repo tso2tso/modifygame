@@ -41,13 +41,26 @@
 | **叛逃情报** | 远征持续 ≥ 6 季 | 利用（花 50 情报）：成功率本次结算 +8% | 忽视 |
 | **后方骚乱** | 己方有 2+ 条活跃远征时 | 花 150 克朗维稳 | 拒绝：守卫士气 -5（持续 2 季）|
 
+#### 事件接轨方式（与现有事件系统的接口）
+
+A1 事件走现有 `data/events_data.lua` + `EventBus` 路径，无需新文件：
+
+1. **事件类型标识**：在 `events_data.lua` 中新增 8 条事件，均设 `type = "expedition_event"` 和 `expedition_id` 参数字段，以便处理回调时精确找到对应远征记录。
+2. **推入队列**：`TickActiveExpeditions` 检测到触发后调用 `EventBus.Emit("push_event", { event_id = eid, expedition_id = rec.id })`，走现有事件卡系统弹出。
+3. **处理回调**：玩家选项 A/B 的 `on_choose` 回调通过 `eventData:GetString("expedition_id")` 取回远征 id，再用 `state.expeditions.active[id]` 修改对应 record。
+4. **"谈判使者"触发条件精确定义**：条件函数检查 `rec.target_hp / rec.target_hp_max`，满足 `0.30 ≤ ratio ≤ 0.50` 时才可触发（不在此区间则从候选事件池中排除）。
+
 #### 数据结构扩展
 
 远征 record 新增字段：
 ```lua
--- expedition record 新增
+-- expedition record 新增（基于现有 active_expeditions[id] 结构追加）
 event_cooldown = 0,        -- 距下次可触发事件的剩余季数（每次触发后置为 3）
 pending_event  = nil,      -- 当前待处理事件 id（非 nil 时不再抽取新事件）
+-- 已有字段确认（供回调使用）：
+-- id / attacker / target_faction / target_hex / army_ids / phase / siege_turns
+-- 注：expedition record 不含 "target_hp" 字段，需从 region.garrison 折算：
+--   target_hp = region.garrison；target_hp_max = region.garrison_init（占领前记录）
 ```
 
 #### 涉及文件
@@ -85,13 +98,50 @@ pending_event  = nil,      -- 当前待处理事件 id（非 nil 时不再抽取
 
 这让占领地变成需要短期投入换取长期回报的资源，而不是即得的被动收入。
 
+#### 实现细节补全
+
+**`stability_control` 初始化时机**：在 `expedition.lua` 的 `CompleteExpedition`（参见第 298 行附近的 `outcome == "victory"` 分支）执行完区域控制权转移后，立即写入：
+```lua
+-- CompleteExpedition 中，occupation 子状态初始化
+region.stability_control = 40       -- 初始值 40（不稳定，需要 2–3 季才到 50）
+region.development_policy = "tax"   -- 默认直接征税
+region.policy_lock_turn   = 0       -- 策略锁定结束的季数（0 = 未锁定）
+```
+
+**策略锁定判断**：玩家切换策略时，写入 `region.policy_lock_turn = state.turn + 4`。每次结算前检查：
+```lua
+-- SettleTurn 中的策略切换守卫
+if region.policy_lock_turn > state.turn then
+    -- 仍在锁定期，不允许切换
+end
+```
+
+**`income_only`（仅割收入）验证公式**：A2 的"直接征税"策略对应现有 `expedition.lua` 第 48 行的 `income_only` 分支，现有实现：`harvest_gold = floor(prosperity × 1.5)`。A2 扩展后，直接征税的季度收入改为：
+```lua
+-- territory.prosperity 对应 A2 中的 stability_control（两者都描述地区状态）
+local base = (region.is_small and 80 or 150)   -- 小国80，大国150克朗/季
+local stab_ratio = math.min(1.0, (region.stability_control or 40) / 50)
+local income = math.floor(base * stab_ratio)   -- stability_control < 50 时按比例缩减
+```
+
+**A1 后方骚乱事件的稳定度惩罚落点**：后方骚乱（A1 事件表最后一条）选择"拒绝"时，其 `on_choose_b` 回调中修改：
+```lua
+-- 找到所有己方占领地（region.controller == player_faction）
+for _, region in ipairs(state.regions) do
+    if region.controller == state.player_faction and region.stability_control then
+        region.stability_control = math.max(0, region.stability_control - 20)
+    end
+end
+-- 同时：guardian morale -5 持续 2 季，通过 state.modifiers 写入时限 modifier
+```
+
 #### 涉及文件
 
 | 文件 | 改动 |
 |------|------|
-| `systems/expedition.lua` | `OccupySelf` 初始化 `development_policy / stability_control`；`SettleTurn` 中加入稳定度计算和收入修正 |
-| `ui/ui_expedition.lua` | 占领地详情新增策略选择 UI |
-| `data/balance.lua` | 新增 `Balance.EXPEDITION.occupation_stability_*` 系列常量 |
+| `systems/expedition.lua` | `CompleteExpedition` 的 `outcome == "victory"` 分支后追加 `stability_control` 和 `development_policy` 初始化；`SettleTurn` 中加入稳定度计算（+8/季）和收入修正（stab_ratio）；策略锁定守卫 |
+| `ui/ui_expedition.lua` | 占领地详情新增策略选择 UI（含锁定倒计时提示）|
+| `data/balance.lua` | 新增 `Balance.EXPEDITION.occupation_stability_init = 40`、`stability_recovery = 8`、`stability_income_threshold = 50` 等常量 |
 
 ---
 
@@ -117,12 +167,49 @@ pending_event  = nil,      -- 当前待处理事件 id（非 nil 时不再抽取
 - 在市场壁垒降至 50% 以下时切换为"倾销"：渗透速度临时 +25%（只在此窗口有效）
 - 在大国处于战争状态时切换为"技术出口"：合作度加成翻倍
 
+#### 与现有 venture 状态字段的对应关系
+
+危机事件和策略时机直接读写 `venture.lua` 的 `VentureSystem.Init` 已有字段（第 356–387 行），无需新增字段：
+
+| A3 设计概念 | 对应现有字段 | 读写方式 |
+|------------|-----------|---------|
+| 渗透被阻断 | `venture.blocked = true` | `VentureSystem.Sabotage` 在 hp→0 时设置；危机 C（内部腐败）将此临时置 true + 加计时器 |
+| 渗透进度降低 | `venture.infiltrated` / `venture.infiltrate_turn` | 危机 A（竞争者崛起）将本季渗透进度 ×0.8（乘以效率修正，不改字段） |
+| 投资额上升 | `venture.barrier`（市场壁垒） | 危机 B（关税壁垒）调用 `venture.barrier = venture.barrier + 15`（临时，2 季后恢复）|
+| 渗透冷却 | `venture.infiltrate_turn`（最后渗透季） | 危机 C（腐败调查）：`venture.infiltrate_turn = state.turn + 2`（强制冷却 2 季）|
+| 渗透效率 | （新增临时字段）`venture.efficiency_mod = 0.8` | 危机 A 未处理时，`TickActiveVentures` 本季渗透增量 × `efficiency_mod`（默认 1.0）|
+
+**策略时机窗口触发判断**：
+
+```lua
+-- ChangeStrategy 中加入窗口检查（venture.lua 新增逻辑）
+function VentureSystem.GetStrategyBonus(venture, strategy, state)
+    -- 窗口一：市场壁垒降至50%以下 → 倾销加速
+    local barrier = VentureSystem.CalcMarketBarrier(venture, state)
+    if strategy == "dumping" and barrier < (state.balance.VENTURE.MARKET_BARRIER_BASE * 0.5) then
+        return 1.25  -- 渗透速度临时 +25%（仅在此窗口持续，barrier 回升后失效）
+    end
+    -- 窗口二：目标大国处于战争状态 → 技术出口加成翻倍
+    if strategy == "tech_export" then
+        for _, conflict in pairs(state.active_conflicts) do
+            if conflict.faction_a == venture.target_country
+            or conflict.faction_b == venture.target_country then
+                return 2.0  -- 合作度加成翻倍
+            end
+        end
+    end
+    return 1.0  -- 无窗口加成
+end
+```
+
+`state.active_conflicts` 是 `game_state.lua` 第 28 行的已有字段（keyed by "factionA_factionB"），直接读取即可。
+
 #### 涉及文件
 
 | 文件 | 改动 |
 |------|------|
-| `systems/venture.lua` | `TickActiveVentures` 中加入危机抽检逻辑；`ChangeStrategy` 中加入时机窗口判断 |
-| `data/events_data.lua` | 新增 3 条商业远征危机事件 |
+| `systems/venture.lua` | `TickActiveVentures` 中加入危机抽检逻辑（读 `venture.infiltrated`/`venture.barrier`）；新增 `GetStrategyBonus` 函数（读 `state.active_conflicts`）；`ChangeStrategy` 调用 `GetStrategyBonus` |
+| `data/events_data.lua` | 新增 3 条商业远征危机事件（`type = "venture_crisis_event"`，携带 `venture_id` 参数）|
 
 ---
 
@@ -146,12 +233,41 @@ pending_event  = nil,      -- 当前待处理事件 id（非 nil 时不再抽取
 | 外交官 | 魅力 | 每点魅力提供侵略度衰减 +0.1/季（叠加到默认 -0.5）|
 | 矿场监管 | 管理 | 每点管理提供矿山产量 +3%（上限 +30%）|
 
+#### 属性系统实现细节
+
+**属性取值范围**：基于 `config.lua`（第 33–42 行），成员属性取值范围为 **0–100**（`MIN_ATTRIBUTE = 0`，`MAX_ATTRIBUTE = 100`），初始基础值：`competence = 50`，`charisma = 50`，`loyalty = 100`。属性表中未定义"谋略/野心/魅力/管理"这些具体属性——**实现时应使用现有通用字段 `competence`（能力）和 `charisma`（魅力）映射到对应岗位效果**，或在成员数据中直接扩展新字段（建议取值同样 0–100）。
+
+**属性读取方式**：使用 `family.lua` 第 24–31 行的 `FamilySystem.GetMemberAttr(member, attr)` 函数。该函数支持 `base + bonus` 结构：
+```lua
+-- FamilySystem.GetMemberAttr 内部逻辑（family.lua 第 25–31 行）
+local base = member[attr] or 0          -- 如 member.charisma = 65
+local bonus = member[attr .. "_bonus"] or 0  -- 如 member.charisma_bonus = 10（装备/事件临时加成）
+return base + bonus  -- 返回 75
+```
+
+**岗位读取方式**：`FamilySystem.GetMemberAtPosition(family, position)` 遍历 `family.members`，找 `member.position == positionId`。结合上文，完整调用示例：
+```lua
+-- turn_engine.lua 结算阶段（Phase B / C 前），写入临时 modifier
+local family = state.family
+-- 军事统帅（position = "military_commander"）
+local commander = FamilySystem.GetMemberAtPosition(family, "military_commander")
+if commander then
+    local strategy = FamilySystem.GetMemberAttr(commander, "competence")  -- 0–100
+    -- 每点 competence 提供 +2% 伤害，上限 +20%（即 10 点封顶）
+    local dmg_bonus = math.min(20, math.floor(strategy / 10) * 2)
+    state.modifiers["commander_dmg_bonus"] = dmg_bonus
+end
+```
+
+**加成写入位置**：所有岗位加成写入 `state.modifiers`（键值对，value 为数值），在 Phase 结算消耗时读取，**不持久化到 game_state 的固定字段**——这样成员退出岗位后加成自动失效（下季结算时不再写入）。
+
 #### 涉及文件
 
 | 文件 | 改动 |
 |------|------|
-| `data/titles_data.lua` 或 `systems/turn_engine.lua` | 在结算阶段读取在岗成员属性，写入临时 modifier |
-| `game_state.lua` | 新增 `GetMemberAtPosition(state, posId)` 辅助函数 |
+| `systems/turn_engine.lua` | Phase B/C 前新增"岗位加成结算"步骤：遍历 5 个岗位，调用 `GetMemberAtPosition` + `GetMemberAttr`，写入 `state.modifiers` 对应键 |
+| `data/titles_data.lua` | 无需改动（岗位解锁逻辑不变，加成独立计算）|
+| `game_state.lua` | `GetMemberAtPosition` 已在 `family.lua` 提供，无需重复新增 |
 
 ---
 
@@ -189,13 +305,56 @@ pending_event  = nil,      -- 当前待处理事件 id（非 nil 时不再抽取
 
 在远征面板新增"战略态势"小节，当检测到可以发动钳形攻势时高亮提示目标组合。
 
+#### 钳形检测实现细节
+
+**相邻关系数据来源**：`expedition.lua` 第 145–154 行已有相邻检测逻辑，通过 `state.map[region.id .. "_" .. dir]`（四方向：north/south/east/west）获取邻格。C1 的钳形检测复用同一 map 结构：
+
+```lua
+-- LaunchExpedition 后执行的钳形检测（expedition.lua 新增辅助函数）
+local function check_pincer(state, new_exp_id)
+    local new_exp = state.expeditions.active[new_exp_id]
+    for id, exp in pairs(state.expeditions.active) do
+        if id ~= new_exp_id and exp.attacker == new_exp.attacker then
+            -- 判断两个目标国家的首都 hex 是否相邻
+            local a_hex = new_exp.target_hex
+            local b_hex = exp.target_hex
+            for _, dir in ipairs({"north", "south", "east", "west"}) do
+                local neighbor = state.map[a_hex .. "_" .. dir]
+                if neighbor and neighbor.hex_id == b_hex then
+                    -- 找到！互相设置 pincer_partner
+                    new_exp.pincer_partner = id
+                    exp.pincer_partner = new_exp_id
+                    return
+                end
+            end
+        end
+    end
+end
+```
+
+**发动时机差距容忍**：两条远征的 `turns_in_phase` 差值 ≤ 1 季即视为"同时发动"（当季发动 + 上季发动均可组成钳形）。
+
+**失败惩罚触发时机**：在 `CompleteExpedition`（第 298 行）处理完本次远征结局后，**立即检查** `expedition.pincer_partner`：
+```lua
+-- CompleteExpedition 末尾追加（outcome == "fail" 或 "defeat" 分支）
+if expedition.pincer_partner then
+    local partner = state.expeditions.active[expedition.pincer_partner]
+    if partner then
+        -- 伙伴本季伤害减少 20%（写入临时 modifier，持续 1 季）
+        partner.pincer_failed_penalty = 0.80  -- CalcTurnDamage 读取此字段
+        expedition.pincer_partner = nil       -- 清除关联
+        partner.pincer_partner = nil
+    end
+end
+```
+
 #### 涉及文件
 
 | 文件 | 改动 |
 |------|------|
-| `systems/expedition.lua` | `LaunchExpedition` 后检测钳形条件；`CalcTurnDamage` 读取 `pincer_bonus` 修正；`CompleteExpedition` 中检测联动失败惩罚 |
-| `game_state.lua` | `expeditions.active[id]` 新增 `pincer_partner = countryId` 字段 |
-| `data/balance.lua` | 新增 `Balance.EXPEDITION.pincer_*` 系列常量 |
+| `systems/expedition.lua` | `LaunchExpedition` 后调用 `check_pincer` 检测相邻；`CalcTurnDamage` 读取 `pincer_bonus`（-15% 防御）和 `pincer_failed_penalty`（-20% 伤害）修正；`CompleteExpedition` 中 fail/defeat 分支追加伙伴惩罚 |
+| `game_state.lua` | `expeditions.active[id]` 新增 `pincer_partner = nil`（远征记录初始化时默认 nil）|
+| `data/balance.lua` | 新增 `Balance.EXPEDITION.pincer_defense_reduce = 0.15`、`pincer_success_bonus = 0.05`、`pincer_fail_penalty = 0.20`、`pincer_forward_bonus = 0.20` |
 | `ui/ui_expedition.lua` | 新增战略态势提示 UI |
 
 ---
@@ -253,14 +412,53 @@ pending_event  = nil,      -- 当前待处理事件 id（非 nil 时不再抽取
 - 军事路线完成后，该国外交渗透速度 +50%（战败国更容易接受外交）
 - 外交路线进行中发动军事远征：外交进度归零，影响力清空
 
+#### 实现细节补全
+
+**外交影响力字段**：复用 `resource_manager.lua` 已有的 `state.diplomatic_influence` 字段（`game_state.lua` 第 12 行，初始值 0）。C2 的"外交影响力池"是**每条外交远征独立维护的进度变量**，与全局 `diplomatic_influence` 资源不同：
+- `state.diplomatic_influence`：全局资源，每季通过 `resource_manager.influence_income` 积累（+5/盟友），用于**发起外交远征的消耗**（设定为一次性消耗 20 影响力发起）
+- `diplomacy_rec.influence_progress`：每条外交远征独立的进度（0 → `target.stability × 15`），每季由渗透公式推进
+
+**协议运行期间每季结算逻辑**：协议签订后，在 `TickDiplomacy` 中对 `diplomacy_active` 遍历，执行以下结算（以"保护协议"为例）：
+```lua
+-- 协议每季结算（写入 state.gold 和 state.diplomatic_influence）
+for id, rec in pairs(state.expeditions.diplomacy_active) do
+    if rec.status == "active_treaty" then
+        if rec.treaty_type == "trade_concession" then
+            -- 贸易特许：修正该国所有贸易路线利润，写入 modifier
+            state.modifiers["trade_bonus_" .. rec.target] = 0.20
+        elseif rec.treaty_type == "protection" then
+            -- 保护协议：直接加克朗
+            state.gold = state.gold + 50
+        elseif rec.treaty_type == "vassal" then
+            -- 臣服关系：加克朗，5% 反叛检查
+            state.gold = state.gold + 60
+            if math.random() < 0.05 then
+                EventBus.Emit("push_event", { event_id = "vassal_revolt", diplomacy_id = id })
+            end
+        end
+    end
+end
+```
+
+**关系层级设计**：C2 的外交关系状态通过 `rec.treaty_type` 字符串标识，存储在 `diplomacy_active[id]` 记录中，**不修改**现有 `state.relations[factionA][factionB]`（-100 到 +100 的数值）——后者继续用于 AI 态度判断，前者是独立的协议状态机：
+
+| `treaty_type` 值 | 含义 | 每季结算 |
+|----------------|-----|---------|
+| `nil`（无协议）| 外交渗透中（`influence_progress` 积累中）| 推进渗透进度 |
+| `"trade_concession"` | 贸易特许协议有效 | 写入 +20% 贸易 modifier |
+| `"protection"` | 保护协议有效 | +50 克朗/季 |
+| `"military_alliance"` | 军事同盟有效 | 守备 +1 等效编队 modifier |
+| `"vassal"` | 臣服关系有效 | +60 克朗/季，5% 反叛检查 |
+| `"broken"` | 协议破裂（反叛/取消）| 下季清除记录 |
+
 #### 涉及文件
 
 | 文件 | 改动 |
 |------|------|
-| `systems/expedition.lua` | 新增 `Expedition.LaunchDiplomacy` / `TickDiplomacy` / `ResolveDiplomacy` 函数族 |
-| `game_state.lua` | `expeditions` 表新增 `diplomacy_active = {}` 子表 |
+| `systems/expedition.lua` | 新增 `Expedition.LaunchDiplomacy`（消耗 `state.diplomatic_influence`）/ `TickDiplomacy`（渗透进度 + 协议结算）/ `ResolveDiplomacy`（谈判窗口触发）函数族 |
+| `game_state.lua` | `expeditions` 表新增 `diplomacy_active = {}` 子表；`diplomatic_influence` 字段已存在，无需新增 |
 | `ui/ui_expedition.lua` | 在远征面板新增"外交路线"标签页 |
-| `data/balance.lua` | 新增 `Balance.EXPEDITION.diplomacy_*` 系列常量 |
+| `data/balance.lua` | 新增 `Balance.EXPEDITION.diplomacy_*` 系列常量（`launch_cost = 20`、`influence_pool_mult = 15` 等）|
 
 ---
 
@@ -306,14 +504,112 @@ pending_event  = nil,      -- 当前待处理事件 id（非 nil 时不再抽取
 - 玩家主动将占领地的小国"送给"某大国 → 该大国对玩家好感 +10，成为潜在庇护者
 - 若玩家合作度极高（≥ 50）：该大国不对玩家发动制裁，侵略度制裁阈值临时 +2
 
+#### 实现细节补全
+
+##### 关系字段确认：大国间"积怨"的判断依据
+
+> 文档原文写"目标双方关系值 ≤ -20（有积怨）"。查阅代码后确认：游戏**不存在大国间关系矩阵**，仅有 `power.attitude_to_player`（-100~+100）记录玩家与大国的单向关系。
+
+**大国间积怨改用以下代理指标判断**（两条件均满足才可煽动）：
+
+| 条件 | 代理字段 | 判断逻辑 |
+|------|---------|---------|
+| A 方对 B 方有领土野心 | `state.powers[powA].war_goals` | `war_goals` 中包含属于 B 方主权(`sovereign == powB`)的地区 ID |
+| 双方目前不处于历史剧本事件期 | `state._branch_war_accelerated` / `_branch_war_delayed` | 两个分支标记均为 false，即当前脚本未强制接管战争进程 |
+
+```lua
+-- player_actions_gp.lua — InciteWar 的 condition 检查
+function CanInciteWar(state, powA, powB)
+    local pA = state.powers[powA]
+    local pB = state.powers[powB]
+    if not pA or not pA.active or not pB or not pB.active then
+        return false, "大国不活跃"
+    end
+    -- 检查 A 是否对 B 有领土野心（war_goals 中存在 B 主权的地区）
+    local hasGoals = false
+    for _, goalId in ipairs(pA.war_goals or {}) do
+        local country = state.europe and state.europe[goalId]
+        if country and country.sovereign == powB then
+            hasGoals = true
+            break
+        end
+    end
+    if not hasGoals then return false, "双方无领土积怨" end
+    -- 检查未被剧本锁定
+    if state._branch_war_accelerated or (state._branch_war_delayed or 0) > 0 then
+        return false, "当前历史进程已被锁定，无法煽动"
+    end
+    return true
+end
+```
+
+##### 冲突生成逻辑：如何将"煽动"结果写入游戏状态
+
+游戏的大国战争进程由 `grand_powers.lua` 按 `PowersData.GetConquestTimeline` 的**时间线事件**驱动，没有运行时动态冲突表。`state.fronts` 目前仅是初始化为 `{}` 的占位字段（Phase 2 功能），当前未被任何逻辑读取。
+
+因此**煽动战争**的实现方式不是写入 `state.fronts`，而是**注入一条提前征服事件**：
+
+```lua
+-- systems/player_actions_gp.lua — InciteWar.execute
+function ExecuteInciteWar(state, powA, powB, targetCountryId)
+    -- targetCountryId：powA war_goals 中属于 powB 主权的某个地区
+    -- 1. 标记"加速进攻"：2 季后触发一次 conquer 事件
+    state._incited_wars = state._incited_wars or {}
+    table.insert(state._incited_wars, {
+        attacker     = powA,
+        target       = targetCountryId,
+        trigger_turn = state.turn + 2,       -- 2 季后生效
+        instigator   = "player",             -- 溯源标记（用于被发现惩罚）
+    })
+    -- 2. 双方好感各 -40（被发现时）由 Turn_engine Phase 结算时概率触发
+    -- 3. 侵略计数器不增加（属于大国间战争，非玩家直接行动）
+end
+```
+
+**`turn_engine.lua` 中消费 `_incited_wars`**（在 `GrandPowers.Tick` 之后、Phase 结算前插入）：
+
+```lua
+-- turn_engine.lua — Phase 1（大国 Tick 后）新增片段
+if state._incited_wars then
+    local remaining = {}
+    for _, inc in ipairs(state._incited_wars) do
+        if state.turn >= inc.trigger_turn then
+            -- 直接插入一条征服事件（复用 grand_powers 的征服处理路径）
+            GrandPowers._ApplyConquest(state, {
+                action   = "conquer",
+                attacker = inc.attacker,
+                target   = inc.target,
+                year     = state.year,
+            })
+            -- 30% 概率被发现 → 双方好感 -40
+            if math.random() < 0.30 then
+                local pA = state.powers[inc.attacker]
+                local pB = state.powers[state.europe[inc.target] and
+                                         state.europe[inc.target].sovereign or ""]
+                if pA then pA.attitude_to_player = math.max(-100, pA.attitude_to_player - 40) end
+                if pB then pB.attitude_to_player = math.max(-100, pB.attitude_to_player - 40) end
+                GameState.AddLog(state, "煽动战争阴谋败露，双方大国对玩家好感大幅下降")
+            end
+        else
+            table.insert(remaining, inc)
+        end
+    end
+    state._incited_wars = remaining
+end
+```
+
+**暗中支援的战力加成写入位置**：`CovertSupport` 执行时写入 `state.modifiers["covert_military_bonus_" .. powerId]`，`grand_powers.lua` 的 `_ProcessConquestTimeline` 在读取 `attackerPower.military` 时叠加此修正器（需在该函数中增加一行 `math.min(100, military * (1 + mod))`）。
+
 #### 涉及文件
 
 | 文件 | 改动 |
 |------|------|
 | `systems/expedition.lua` | 新增 `Expedition.CovertSupport` / `Expedition.InciteWar` 函数 |
-| `systems/turn_engine.lua` | 大国战争结算时考虑玩家秘密支援影响 |
+| `systems/player_actions_gp.lua` | 实现 `CanInciteWar` 条件检查（基于 `war_goals` 代理指标）；`ExecuteInciteWar` 写入 `state._incited_wars` 列表 |
+| `systems/turn_engine.lua` | Phase 1 大国 Tick 后新增消费 `_incited_wars` 的片段；大国战争结算时叠加 `covert_military_bonus` 修正器 |
+| `systems/grand_powers.lua` | 暴露 `GrandPowers._ApplyConquest` 内部函数供 turn_engine 复用；`_ProcessConquestTimeline` 读取 `covert_military_bonus` 修正器 |
 | `ui/ui_expedition.lua` | 在远征面板新增"大国博弈"操作区 |
-| `data/balance.lua` | 新增 `Balance.EXPEDITION.covert_*` / `incite_*` 系列常量 |
+| `data/balance.lua` | 新增 `Balance.GP.covert_support_ap = 1`、`incite_war_ap = 3`、`incite_war_intel_cost = 200`、`incite_success_rate = 0.60`、`incite_detected_chance = 0.30` |
 
 ---
 
@@ -498,13 +794,128 @@ state.victory.culture = (state.victory.culture or 0) + cultureGain
 
 ---
 
+#### 实现细节补全
+
+##### 剧团数量上限
+
+文档描述了同一地区的叠加衰减（第 2 个 +3 CP、第 3 个 +1 CP），但未明确上限硬封顶。
+
+| 限制类型 | 值 | 依据 |
+|---------|---|------|
+| 单地区上限 | **最多 3 个**（第 3 个 +1 CP，再多无收益）| 叠加衰减表自然封顶 |
+| 全局总上限 | **最多 8 个**（约覆盖 2–3 个完整国家）| 防止后期全地图无脑堆剧团；单局经济总成本 ≥ 1600 克朗 |
+
+实现方式：
+
+```lua
+-- 创作剧团时的前置检查（在 CreateTroupe 中）
+local function CanCreateTroupe(state)
+    local total = 0
+    for _, work in ipairs(state.culture.works) do
+        if work.type == "theater_troupe" then total = total + 1 end
+    end
+    if total >= Balance.CULTURE.troupe_global_max then   -- 8
+        return false, "剧团总数已达上限（" .. Balance.CULTURE.troupe_global_max .. "）"
+    end
+    return true
+end
+
+-- 查询某地区已有剧团数（用于叠加衰减系数计算）
+local function GetTroupeCount(state, regionId)
+    local count = 0
+    for _, work in ipairs(state.culture.works) do
+        if work.type == "theater_troupe" and work.location == regionId then
+            count = count + 1
+        end
+    end
+    return count
+end
+
+-- CP 叠加衰减系数表（第 n 个剧团的系数）
+local TROUPE_CP_DECAY = { 5, 3, 1 }  -- index 1/2/3 对应第1/2/3个
+local function GetTroupeCP(state, regionId)
+    local n = GetTroupeCount(state, regionId)
+    return TROUPE_CP_DECAY[math.min(n, 3)] or 0
+end
+```
+
+##### 作品存储上限（`state.culture.works` 列表）
+
+各类作品的存储上限汇总：
+
+| 作品类型 | 存储方式 | 上限 | 说明 |
+|---------|---------|------|------|
+| 歌舞剧团（theater_troupe）| 每个实体一条记录（含 `location` 字段）| **全局 8 个**（见上节）| 迁移不增减条数 |
+| 电影（film）| 每部一条记录（含 `theme` 字段）| **最多 3 部**（三大主题：历史/民族/工业，主题不重复）| 主题唯一性由 `work.theme` 判断 |
+| 民族史诗（national_epic）| 每部一条记录（含 `theme` 字段）| **最多 3 部**（三大主题：民族/宗教/历史，主题不重复）| 主题唯一性同上 |
+| 体育赛事（sports_event）| 仅记录冷却状态，不持久存储作品 | **无限次**（受 4 季冷却约束）| 用 `culture.sports_cooldown` 单独记录 |
+| 世界博览会（grand_exhibition）| 全局 flag，不存入 works 列表 | **每局 1 次**（用 `culture.exhibition_done = true` 标记）| — |
+
+`state.culture.works` 理论最大记录数：**8 + 3 + 3 = 14 条**。
+
+##### AI 的 culture_score 算法
+
+胜利条件第 4 条"己方 `culture_score` 领先**最强 AI** >= 500 分"需要 AI 同样有 `culture_score` 积累。AI 使用**简化无需 CI/作品系统的被动公式**：
+
+```lua
+-- turn_engine.lua Phase 结算末尾（和 AI victory 积分同位置）
+-- 遍历所有活跃 AI 派系
+for _, faction in ipairs(state.factions or {}) do
+    if not faction.is_player and not faction.defeated then
+        faction.culture_score = faction.culture_score or 0
+
+        -- AI culture_score 每季增量：按战力和经济基础被动积累
+        -- 战力(0-100) / 25 → 0-4 pt/季；经济力(0-100) / 50 → 0-2 pt/季
+        local power   = faction.power   or 0
+        local economy = faction.economy or 0
+        local aiGain  = math.floor(power / 25) + math.floor(economy / 50)
+
+        -- 封顶：AI culture_score 最高不超过 power × 8
+        -- （全强派系约 800 分，确保玩家努力即可超越）
+        local cap = math.floor(power * 8)
+        faction.culture_score = math.min(cap, faction.culture_score + aiGain)
+    end
+end
+```
+
+**设计意图**：
+
+| 场景 | AI 每季增量 | 全程（120 季）上限 |
+|------|-----------|----------------|
+| 弱派系（power=20, economy=20）| +0 pt | 160 pt |
+| 中等派系（power=50, economy=50）| +3 pt | 400 pt |
+| 强派系（power=80, economy=70）| +4 pt | 640 pt |
+
+玩家只要有 2 个认同地区 + 持续使团，每季可获 10–20 pt，120 季能达 1200–2400 pt。即使面对最强 AI（上限 640 pt），领先 500 pt 的目标是可实现但需持续投入的。
+
+**读取最强 AI culture_score**（在 CheckVictory 中）：
+
+```lua
+local function GetStrongestAICultureScore(state)
+    local max = 0
+    for _, faction in ipairs(state.factions or {}) do
+        if not faction.is_player and not faction.defeated then
+            max = math.max(max, faction.culture_score or 0)
+        end
+    end
+    return max
+end
+
+-- CheckVictory 片段
+local playerScore  = state.culture and state.culture.score or 0
+local strongestAI  = GetStrongestAICultureScore(state)
+local cultureWin   = (playerScore - strongestAI) >= Balance.CULTURE.victory_score_lead  -- 500
+```
+
+---
+
 #### 涉及文件
 
 | 文件 | 改动内容 |
 |------|---------|
-| `game_state.lua` | `CreateNew` 中新增 `culture = { ci = 0, works = {}, region_cp = {}, score = 0 }` 子状态；新增 `GetRegionCP` / `AddRegionCP` 辅助函数；`CheckVictory` 中加入文化胜利判断 |
+| `game_state.lua` | `CreateNew` 中新增 `culture = { ci = 0, works = {}, region_cp = {}, sports_cooldown = 0, exhibition_done = false, score = 0, missions = {} }` 子状态；AI 派系初始化时新增 `culture_score = 0`；`CheckVictory` 中加入文化胜利判断（含 `GetStrongestAICultureScore`）|
 | `systems/turn_engine.lua` | Phase 结算新增 CI 产出计算（读取 D线科技、region.culture、文化顾问 bonus、修正器）；CP 自然衰减；culture_score 累积 |
-| `data/balance.lua` | 新增 `Balance.CULTURE` 系列常量（CI衰减率、CP等级阈值、各作品成本等）|
+| `data/balance.lua` | 新增 `Balance.CULTURE` 系列常量（CI衰减率、CP等级阈值、各作品成本；`troupe_global_max = 8`、`victory_score_lead = 500`）|
 | `data/events_data.lua` | `culture` 修正器的两条事件（第714/1685行）调整为有效触发（增加 CI 而非写入无用修正器）|
 | `ui/ui_world.lua` 或新增 `ui/ui_culture.lua` | 文化作品管理面板（当前 CI 值、作品列表、创作/部署操作）|
 | `ui/ui_map_widget.lua` | 文化图层 `locked = false`，渲染逻辑接入 `region_cp` 数据 |
