@@ -1396,6 +1396,7 @@ Balance.CULTURE = {
     att_identity         = 15,
     -- 剧团
     troupe_cost          = 200,     -- 创作成本（克朗）
+    troupe_create_ap     = 1,       -- 创作消耗 AP
     troupe_move_ap       = 1,       -- 迁移消耗 AP
     troupe_global_max    = 8,       -- 全局总上限
     troupe_cp            = {5, 3, 1},  -- 第 1/2/3 个剧团 CP/季

@@ -7,6 +7,7 @@
 local Widget = require("urhox-libs/UI/Core/Widget")
 local Config = require("config")
 local MapTilesData = require("data.map_tiles_data")
+local Balance = require("data.balance")
 
 local C = Config.COLORS
 local PI = math.pi
@@ -191,6 +192,7 @@ function MapWidget:Init(props)
     -- 大国博弈
     self.europeState_ = nil
     self.frontLineData_ = nil
+    self.cultureState_ = nil
 
     -- 拖拽状态
     self.pressing_      = false
@@ -228,6 +230,7 @@ function MapWidget:GetSelected() return self.selectedNodeId_ end
 function MapWidget:SetEra(eraId) self.eraId_ = eraId or 1 end
 function MapWidget:SetEuropeState(europeData) self.europeState_ = europeData end
 function MapWidget:SetFrontLineData(data) self.frontLineData_ = data end
+function MapWidget:SetCultureState(cultureData) self.cultureState_ = cultureData end
 
 --- 根据游戏状态动态解锁地图图层
 function MapWidget:UpdateUnlocks(state)
@@ -241,6 +244,8 @@ function MapWidget:UpdateUnlocks(state)
                 shouldUnlock = state.military and state.military.guards >= 10
             elseif layer.id == "intel" then
                 shouldUnlock = state.flags and state.flags.intel_unlocked
+            elseif layer.id == "culture" then
+                shouldUnlock = state.culture ~= nil
             end
             if shouldUnlock then
                 layer.locked = false
@@ -460,6 +465,9 @@ function MapWidget:Render(nvg)
     if self.activeLayers_.intel then
         self:_DrawIntelLayer(nvg, mx, my, mw, mh)
     end
+    if self.activeLayers_.culture then
+        self:_DrawCultureLayer(nvg, mx, my, mw, mh)
+    end
 
     -- ⑤ Hex 网格线 + 国家边界
     self:_DrawHexGrid(nvg, mx, my, mw, mh, theme)
@@ -596,6 +604,53 @@ function MapWidget:_DrawIntelLayer(nvg, mx, my, mw, mh)
     for _, tile in ipairs(self.mapTiles_) do
         if tile.controller == "foreign_capital" or tile.controller == "local_clan" or tile.controller == "contested" then
             self:_DrawTileOverlay(nvg, tile, { 149, 165, 166, tile.controller == "contested" and 45 or 65 }, mx, my, mw, mh)
+        end
+    end
+end
+
+function MapWidget:_GetTileCultureCP(tile)
+    local culture = self.cultureState_
+    local cpMap = culture and culture.region_cp
+    if not cpMap or not tile then return 0 end
+
+    -- 国内地块按 region_id 记录，欧洲地块按 country_id 记录；保留 tile.id 作为兼容键。
+    local keys = { tile.region_id, tile.country_id, tile.id }
+    local best = 0
+    for _, key in ipairs(keys) do
+        if key and cpMap[key] then
+            best = math.max(best, cpMap[key] or 0)
+        end
+    end
+    return best
+end
+
+function MapWidget:_DrawCultureLayer(nvg, mx, my, mw, mh)
+    local BC = Balance.CULTURE or {}
+    for _, tile in ipairs(self.mapTiles_) do
+        local cp = self:_GetTileCultureCP(tile)
+        if cp > 0 then
+            local r, g, b = 243, 156, 18
+            if cp >= (BC.cp_assimilation or 90) then
+                r, g, b = 255, 190, 45
+            elseif cp >= (BC.cp_identity or 70) then
+                r, g, b = 80, 190, 95
+            elseif cp >= (BC.cp_admire or 50) then
+                r, g, b = 90, 145, 220
+            end
+            local alpha = math.floor(28 + math.min(100, cp) * 0.9)
+            self:_DrawTileOverlay(nvg, tile, { r, g, b, alpha }, mx, my, mw, mh)
+
+            if self.zoom_ >= 2.4 then
+                local cx, cy = MapTilesData.GetHexCenter(tile.q, tile.r)
+                local sx, sy = self:_W2S(cx, cy, mx, my, mw, mh)
+                nvgFontFace(nvg, "sans")
+                nvgFontSize(nvg, math.max(8, math.min(12, 6 + self.zoom_ * 0.9)))
+                nvgTextAlign(nvg, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)
+                nvgFillColor(nvg, nvgRGBA(20, 18, 12, 180))
+                nvgText(nvg, sx + 1, sy + 13, tostring(math.floor(cp)))
+                nvgFillColor(nvg, nvgRGBA(r, g, b, 230))
+                nvgText(nvg, sx, sy + 12, tostring(math.floor(cp)))
+            end
         end
     end
 end

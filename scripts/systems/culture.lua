@@ -16,6 +16,23 @@ local BC = Balance.CULTURE  -- 快捷引用
 
 local function clamp(v, lo, hi) return math.max(lo, math.min(hi, v)) end
 
+local function AvailableAP(state)
+    if type(state.ap) == "table" then
+        return (state.ap.current or 0) + (state.ap.temp or 0)
+    end
+    return state.ap or 0
+end
+
+local function SpendAP(state, cost)
+    if cost <= 0 then return true end
+    if type(state.ap) == "table" and GameState.SpendAP then
+        return GameState.SpendAP(state, cost)
+    end
+    if (state.ap or 0) < cost then return false end
+    state.ap = state.ap - cost
+    return true
+end
+
 --- 确保 culture 子状态存在（存档兼容）
 ---@param state table
 local function EnsureCulture(state)
@@ -92,6 +109,108 @@ end
 ---@return boolean
 local function HasTech(state, techId)
     return state.tech and state.tech.researched and state.tech.researched[techId] == true
+end
+
+local HOME_ADJACENT_COUNTRIES = { "austria_hungary", "serbia", "montenegro" }
+
+local function GetEpicNeighborTargets(state)
+    local targets = {}
+    for _, countryId in ipairs(HOME_ADJACENT_COUNTRIES) do
+        targets[countryId] = true
+    end
+    for _, occ in ipairs((state.expeditions and state.expeditions.occupied_countries) or {}) do
+        local country = state.europe and state.europe[occ.country_id]
+        for _, adj in ipairs((country and country.adjacency) or {}) do
+            targets[adj] = true
+        end
+    end
+    for _, occ in ipairs((state.expeditions and state.expeditions.occupied_countries) or {}) do
+        targets[occ.country_id] = nil
+    end
+    return targets
+end
+
+local function AddAttitude(state, targetId, amount)
+    if amount == 0 then return end
+    for _, faction in ipairs(state.ai_factions or {}) do
+        if not targetId or faction.id == targetId then
+            faction.attitude = clamp((faction.attitude or 0) + amount, -100, 100)
+        end
+    end
+    local power = targetId and state.powers and state.powers[targetId] or nil
+    if power then
+        power.attitude_to_player = clamp((power.attitude_to_player or 0) + amount, -100, 100)
+    end
+    local country = targetId and state.europe and state.europe[targetId] or nil
+    if country then
+        country.attitude_to_player = clamp((country.attitude_to_player or 0) + amount, -100, 100)
+    end
+end
+
+local function GetCountryLabel(state, countryId)
+    local country = state.europe and state.europe[countryId]
+    if country and country.label then return country.label end
+    for _, faction in ipairs(state.ai_factions or {}) do
+        if faction.id == countryId then return faction.name or countryId end
+    end
+    local power = state.powers and state.powers[countryId]
+    if power then return power.label or countryId end
+    return countryId
+end
+
+function Culture.GetFilmTargets(state)
+    local targets = {}
+    for id, country in pairs(state.europe or {}) do
+        table.insert(targets, {
+            id = id,
+            label = country.label or id,
+            cp = Culture.GetRegionCP(state, id),
+        })
+    end
+    table.sort(targets, function(a, b)
+        if a.cp == b.cp then return a.label < b.label end
+        return a.cp < b.cp
+    end)
+    return targets
+end
+
+function Culture.GetSportsInviteCandidates(state)
+    local seen, candidates = {}, {}
+    for _, faction in ipairs(state.ai_factions or {}) do
+        if faction.id then
+            seen[faction.id] = true
+            table.insert(candidates, {
+                id = faction.id,
+                label = faction.name or faction.id,
+                attitude = faction.attitude or 0,
+            })
+        end
+    end
+    for id, power in pairs(state.powers or {}) do
+        if not seen[id] and power.active then
+            seen[id] = true
+            table.insert(candidates, {
+                id = id,
+                label = power.label or id,
+                attitude = power.attitude_to_player or 0,
+            })
+        end
+    end
+    for id, country in pairs(state.europe or {}) do
+        if not seen[id] then
+            seen[id] = true
+            table.insert(candidates, {
+                id = id,
+                label = country.label or id,
+                attitude = country.attitude_to_player or 0,
+            })
+        end
+    end
+    table.sort(candidates, function(a, b)
+        if a.attitude == b.attitude then return a.label < b.label end
+        return a.attitude > b.attitude
+    end)
+    return candidates
 end
 
 --- 统计某类型作品数量
@@ -253,10 +372,12 @@ function Culture.Tick(state)
                 Culture.AddRegionCP(state, r.id, epicCount * (BC_.epic_own_cp or 2))
             end
         end
-        -- 欧洲邻近地区（此处简化：对所有欧洲地区 +1，真正邻接判断可后续扩展）
+        -- 邻近未占领地区 +epic_neighbor_cp：本土邻国 + 已占领国家的邻国
         if state.europe then
-            for regionId, _ in pairs(state.europe) do
-                Culture.AddRegionCP(state, regionId, epicCount * (BC_.epic_neighbor_cp or 1))
+            for countryId, _ in pairs(GetEpicNeighborTargets(state)) do
+                if state.europe[countryId] then
+                    Culture.AddRegionCP(state, countryId, epicCount * (BC_.epic_neighbor_cp or 1))
+                end
             end
         end
     end
@@ -303,8 +424,9 @@ function Culture.Tick(state)
             Culture.AddRegionCP(state, mission.target, missionCP)
 
             -- 使团事件（20% 概率）
-            if math.random() < (BC_.mission_event_chance or 0.20) and
-               not mission.event_this_turn then
+            if not mission.pending_event
+               and math.random() < (BC_.mission_event_chance or 0.20)
+               and not mission.event_this_turn then
                 mission.pending_event = Culture.RollMissionEvent(state, mission)
                 mission.event_this_turn = true
             else
@@ -315,6 +437,11 @@ function Culture.Tick(state)
             if mission.turns_elapsed >= (BC_.mission_max_turns or 6) then
                 table.insert(log, string.format("文化使团【%s】完成（共 %d 季）",
                     mission.target, mission.turns_elapsed))
+                if (mission.att_bonus_on_complete or 0) > 0 then
+                    AddAttitude(state, mission.target, mission.att_bonus_on_complete)
+                    table.insert(log, string.format("文化使团官方访问提升 %s 好感 +%d",
+                        GetCountryLabel(state, mission.target), mission.att_bonus_on_complete))
+                end
                 -- 不加入 remainMissions → 自然结束
             else
                 table.insert(remainMissions, mission)
@@ -415,6 +542,9 @@ function Culture.CanCreateTroupe(state)
     if (state.cash or 0) < (BC.troupe_cost or 200) then
         return false, string.format("克朗不足（需要 %d）", BC.troupe_cost or 200)
     end
+    if AvailableAP(state) < (BC.troupe_create_ap or 1) then
+        return false, string.format("AP 不足（需要 %d）", BC.troupe_create_ap or 1)
+    end
     if Culture.CountWorks(state, "theater_troupe") >= (BC.troupe_global_max or 8) then
         return false, string.format("剧团总数已达上限（%d）", BC.troupe_global_max or 8)
     end
@@ -429,6 +559,7 @@ function Culture.CreateTroupe(state, regionId)
     local ok, reason = Culture.CanCreateTroupe(state)
     if not ok then return false, reason end
     state.cash = state.cash - (BC.troupe_cost or 200)
+    SpendAP(state, BC.troupe_create_ap or 1)
     table.insert(state.culture.works, {
         type = "theater_troupe",
         location = regionId,
@@ -449,10 +580,10 @@ function Culture.MoveTroupe(state, workIdx, targetRegionId)
     if not work or work.type ~= "theater_troupe" then
         return false, "无效的剧团"
     end
-    if (state.ap or 0) < (BC.troupe_move_ap or 1) then
+    if AvailableAP(state) < (BC.troupe_move_ap or 1) then
         return false, "AP 不足"
     end
-    state.ap = state.ap - (BC.troupe_move_ap or 1)
+    SpendAP(state, BC.troupe_move_ap or 1)
     work.location = targetRegionId
     return true, string.format("剧团迁移至 %s", targetRegionId)
 end
@@ -523,10 +654,10 @@ function Culture.ReleaseFilm(state, workIdx, mode, targetFactionId)
     if work.released then
         return false, "该电影已经发行"
     end
-    work.released = true
-    work.release_mode = mode
 
     if mode == "domestic" then
+        work.released = true
+        work.release_mode = mode
         -- 己方控制区每地区 +3 CP
         for _, r in ipairs(state.regions or {}) do
             if (r.control or 0) > 50 then
@@ -535,24 +666,25 @@ function Culture.ReleaseFilm(state, workIdx, mode, targetFactionId)
         end
         return true, "国内公映：己方地区 CP +" .. (BC.film_domestic_cp or 3)
     elseif mode == "international" then
-        -- 目标国家所有地区 +8 CP
-        if state.europe then
-            for regionId, reg in pairs(state.europe) do
-                if reg.country == (targetFactionId or "") then
-                    Culture.AddRegionCP(state, regionId, BC.film_intl_cp or 8)
-                end
-            end
+        if not targetFactionId or not (state.europe and state.europe[targetFactionId]) then
+            return false, "请选择有效发行国家"
         end
-        return true, "国际发行：目标国地区 CP +" .. (BC.film_intl_cp or 8)
+        work.released = true
+        work.release_mode = mode
+        work.release_target = targetFactionId
+        Culture.AddRegionCP(state, targetFactionId, BC.film_intl_cp or 8)
+        return true, string.format("国际发行：%s CP +%d",
+            GetCountryLabel(state, targetFactionId), BC.film_intl_cp or 8)
     elseif mode == "festival" then
-        -- 目标 AI 好感 +15
-        for _, faction in ipairs(state.ai_factions or {}) do
-            if faction.id == targetFactionId then
-                faction.attitude = clamp((faction.attitude or 0) + (BC.film_festival_att or 15), -100, 100)
-                return true, string.format("节庆展映：%s 好感 +%d", faction.name, BC.film_festival_att or 15)
-            end
+        if not targetFactionId then
+            return false, "请选择节庆目标"
         end
-        return false, "未找到目标 AI 派系"
+        work.released = true
+        work.release_mode = mode
+        work.release_target = targetFactionId
+        AddAttitude(state, targetFactionId, BC.film_festival_att or 15)
+        return true, string.format("节庆展映：%s 好感 +%d",
+            GetCountryLabel(state, targetFactionId), BC.film_festival_att or 15)
     end
     return false, "无效发行模式"
 end
@@ -662,22 +794,21 @@ function Culture.HoldSportsEvent(state, hostRegionId, invitedFactionIds)
     end
 
     local results = { accepted = {}, rejected = {} }
+    local candidates = {}
+    for _, cand in ipairs(Culture.GetSportsInviteCandidates(state)) do
+        candidates[cand.id] = cand
+    end
 
     -- 邀请 AI 参赛
     for _, factionId in ipairs(invitedFactionIds or {}) do
-        for _, faction in ipairs(state.ai_factions or {}) do
-            if faction.id == factionId then
-                if (faction.attitude or 0) >= 10 then
-                    -- 接受邀请
-                    faction.attitude = clamp((faction.attitude or 0) + (BC.sports_invite_att or 10), -100, 100)
-                    table.insert(results.accepted, faction.name)
-                else
-                    -- 30% 公开拒绝
-                    if math.random() < (BC.sports_reject_chance or 0.30) then
-                        faction.attitude = clamp((faction.attitude or 0) + (BC.sports_reject_att or -5), -100, 100)
-                        table.insert(results.rejected, faction.name)
-                    end
-                end
+        local cand = candidates[factionId]
+        if cand then
+            if (cand.attitude or 0) >= 10 then
+                AddAttitude(state, factionId, BC.sports_invite_att or 10)
+                table.insert(results.accepted, cand.label)
+            elseif math.random() < (BC.sports_reject_chance or 0.30) then
+                AddAttitude(state, factionId, BC.sports_reject_att or -5)
+                table.insert(results.rejected, cand.label)
             end
         end
     end
@@ -720,8 +851,7 @@ function Culture.CanStartExhibition(state)
     if (state.cash or 0) < (BC.exhibition_cost or 800) then
         return false, string.format("克朗不足（需要 %d）", BC.exhibition_cost or 800)
     end
-    local ap = state.ap or 0
-    if ap < (BC.exhibition_ap or 2) then
+    if AvailableAP(state) < (BC.exhibition_ap or 2) then
         return false, string.format("AP 不足（需要 %d）", BC.exhibition_ap or 2)
     end
     return true
@@ -734,7 +864,7 @@ function Culture.StartExhibition(state)
     local ok, reason = Culture.CanStartExhibition(state)
     if not ok then return false, reason end
     state.cash = state.cash - (BC.exhibition_cost or 800)
-    state.ap   = (state.ap or 0) - (BC.exhibition_ap or 2)
+    SpendAP(state, BC.exhibition_ap or 2)
     state.culture.exhibition_progress = 1
     state.culture_action_this_turn = true
     return true, string.format("世界博览会开始筹备（需 %d 季）", BC.exhibition_turns or 3)
@@ -784,9 +914,10 @@ function Culture.CanLaunchMission(state, targetRegionId)
     if state.culture_action_this_turn then
         return false, "本季已执行过文化行动"
     end
-    if (state.culture.ci or 0) < (BC.mission_ci_min or 60) then
+    local ciNeed = math.max(BC.mission_ci_min or 60, BC.mission_ci_launch or 80)
+    if (state.culture.ci or 0) < ciNeed then
         return false, string.format("CI 储量不足（需要 %d，当前 %d）",
-            BC.mission_ci_min or 60, state.culture.ci or 0)
+            ciNeed, state.culture.ci or 0)
     end
     if #(state.culture.missions or {}) >= (BC.mission_max_count or 2) then
         return false, string.format("已达最大并发使团数（%d）", BC.mission_max_count or 2)
@@ -801,7 +932,7 @@ function Culture.CanLaunchMission(state, targetRegionId)
             return false, "该地区已有进行中的文化使团"
         end
     end
-    if (state.ap or 0) < (BC.mission_ap or 1) then
+    if AvailableAP(state) < (BC.mission_ap or 1) then
         return false, "AP 不足"
     end
     return true
@@ -815,7 +946,7 @@ function Culture.LaunchMission(state, targetRegionId)
     local ok, reason = Culture.CanLaunchMission(state, targetRegionId)
     if not ok then return false, reason end
     state.culture.ci = (state.culture.ci or 0) - (BC.mission_ci_launch or 80)
-    state.ap = (state.ap or 0) - (BC.mission_ap or 1)
+    SpendAP(state, BC.mission_ap or 1)
     table.insert(state.culture.missions, {
         target = targetRegionId,
         turns_elapsed = 0,
@@ -833,11 +964,11 @@ end
 ---@return boolean ok, string|nil msg
 function Culture.WithdrawMission(state, targetRegionId)
     EnsureCulture(state)
-    if (state.ap or 0) < 1 then return false, "AP 不足" end
+    if AvailableAP(state) < 1 then return false, "AP 不足" end
     for i, m in ipairs(state.culture.missions) do
         if m.target == targetRegionId then
             table.remove(state.culture.missions, i)
-            state.ap = state.ap - 1
+            SpendAP(state, 1)
             return true, string.format("文化使团已从 %s 撤回", targetRegionId)
         end
     end
@@ -888,6 +1019,56 @@ function Culture.RollMissionEvent(state, mission)
     local ev = events[idx]
     ev.mission_target = mission.target
     return ev
+end
+
+function Culture.ResolveMissionEvent(state, targetRegionId, optionIdx)
+    EnsureCulture(state)
+    optionIdx = optionIdx or 1
+    local mission = nil
+    for _, m in ipairs(state.culture.missions or {}) do
+        if m.target == targetRegionId then
+            mission = m
+            break
+        end
+    end
+    if not mission or not mission.pending_event then
+        return false, "没有待处理的使团事件"
+    end
+    local ev = mission.pending_event
+    local opt = ev.options and ev.options[optionIdx]
+    if not opt then return false, "无效选项" end
+
+    if opt.cost_intel and (state.intelligence or 0) < opt.cost_intel then
+        return false, string.format("情报不足（需要 %d）", opt.cost_intel)
+    end
+    if opt.cost_ci and (state.culture.ci or 0) < opt.cost_ci then
+        return false, string.format("CI 不足（需要 %d）", opt.cost_ci)
+    end
+    if opt.cost_cash and (state.cash or 0) < opt.cost_cash then
+        return false, string.format("克朗不足（需要 %d）", opt.cost_cash)
+    end
+
+    state.intelligence = (state.intelligence or 0) - (opt.cost_intel or 0)
+    state.culture.ci = math.max(0, (state.culture.ci or 0) - (opt.cost_ci or 0))
+    state.cash = (state.cash or 0) - (opt.cost_cash or 0)
+
+    local cpDelta = (opt.cp_bonus or 0) + (opt.cp_penalty or 0)
+    if cpDelta ~= 0 then
+        Culture.AddRegionCP(state, targetRegionId, cpDelta)
+    end
+    if opt.ci_penalty then
+        state.culture.ci = math.max(0, (state.culture.ci or 0) + opt.ci_penalty)
+    end
+    if opt.turn_penalty then
+        mission.turns_elapsed = math.max(0, (mission.turns_elapsed or 0) - opt.turn_penalty)
+    end
+    if opt.att_bonus then
+        mission.att_bonus_on_complete = (mission.att_bonus_on_complete or 0) + opt.att_bonus
+    end
+
+    mission.pending_event = nil
+    mission.event_this_turn = false
+    return true, string.format("%s：%s", ev.desc or "使团事件", opt.text or "已处理")
 end
 
 -- ============================================================================

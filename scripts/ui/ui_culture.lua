@@ -243,6 +243,12 @@ local function _BuildRoot(state)
         flexDirection   = "column",
         gap             = 6,
         children = {
+            UI.Label {
+                text       = "文化胜利概览",
+                fontSize   = F.card_title or F.body_minor,
+                fontColor  = C.text_primary,
+                fontWeight = "bold",
+            },
             -- 第一行：CI / 积分 / 作品 / CP
             UI.Panel {
                 width = "100%", flexDirection = "row", gap = 4,
@@ -340,11 +346,7 @@ local function _BuildRoot(state)
         paddingTop    = S.card_gap,
         children = {
             summaryCard,
-            NavEntry("胜利进度",
-                string.format("达成条件 %d / 5", metCount),
-                C.accent_amber, "victory",
-                metCount >= 5 and "已达成" or string.format("%d/5", metCount),
-                metCount >= 5 and C.accent_green or C.accent_gold),
+            SectionDivider("当前局势", C.accent_blue),
             NavEntry("现有文化作品",
                 string.format("已创作 %d 件（剧团 / 电影 / 史诗）", worksCount),
                 C.accent_blue, "works",
@@ -353,6 +355,7 @@ local function _BuildRoot(state)
                 string.format("已影响 %d 个地区", cpCount),
                 C.accent_green, "cp",
                 tostring(cpCount) .. " 地区", C.accent_green),
+            SectionDivider("文化行动", C.accent_gold),
             NavEntry("文化创作",
                 "创作剧团、电影、史诗、举办赛事与世博",
                 C.accent_gold, "create",
@@ -362,6 +365,12 @@ local function _BuildRoot(state)
                 string.format("进行中 %d 支  —  派遣使团提升海外 CP", missionsCount),
                 C.accent_blue, "missions",
                 string.format("%d 支", missionsCount), C.text_label),
+            SectionDivider("胜利目标", C.accent_amber),
+            NavEntry("胜利进度",
+                string.format("达成条件 %d / 5", metCount),
+                C.accent_amber, "victory",
+                metCount >= 5 and "已达成" or string.format("%d/5", metCount),
+                metCount >= 5 and C.accent_green or C.accent_gold),
         },
     }
 end
@@ -473,25 +482,50 @@ local EPIC_THEMES = { national = "民族史诗", religious = "宗教史诗", his
 
 local function _FilmButtons(state, work, idx)
     if not (work.type == "film" and work.ready and not work.released) then return nil end
+    local targets = Culture.GetFilmTargets(state)
+    local children = {
+        Btn("国内公映", C.accent_green, function()
+            local ok, msg = Culture.ReleaseFilm(state, idx, "domestic")
+            if onStateChanged_ then onStateChanged_(ok and msg or ("发行失败：" .. (msg or ""))) end
+        end),
+    }
+
+    if #targets > 0 then
+        table.insert(children, UI.Label {
+            text = "国际发行目标",
+            fontSize = F.label,
+            fontColor = C.text_secondary,
+            width = "100%",
+        })
+        for i = 1, math.min(6, #targets) do
+            local target = targets[i]
+            local tid = target.id
+            table.insert(children, Btn(GetRegionLabel(tid), C.accent_blue, function()
+                local ok, msg = Culture.ReleaseFilm(state, idx, "international", tid)
+                if onStateChanged_ then onStateChanged_(ok and msg or ("发行失败：" .. (msg or ""))) end
+            end))
+        end
+
+        table.insert(children, UI.Label {
+            text = "节庆展映目标",
+            fontSize = F.label,
+            fontColor = C.text_secondary,
+            width = "100%",
+        })
+        for i = 1, math.min(6, #targets) do
+            local target = targets[i]
+            local tid = target.id
+            table.insert(children, Btn(GetRegionLabel(tid), C.accent_amber, function()
+                local ok, msg = Culture.ReleaseFilm(state, idx, "festival", tid)
+                if onStateChanged_ then onStateChanged_(ok and msg or ("发行失败：" .. (msg or ""))) end
+            end))
+        end
+    end
+
     return UI.Panel {
         width = "100%", flexDirection = "row", flexWrap = "wrap",
         gap = 6, marginTop = 8,
-        children = {
-            Btn("国内公映", C.accent_green, function()
-                local ok, msg = Culture.ReleaseFilm(state, idx, "domestic")
-                if onStateChanged_ then onStateChanged_(ok and msg or ("发行失败：" .. (msg or ""))) end
-            end),
-            Btn("国际发行", C.accent_blue, function()
-                local tgt = state.ai_factions and state.ai_factions[1] and state.ai_factions[1].id or ""
-                local ok, msg = Culture.ReleaseFilm(state, idx, "international", tgt)
-                if onStateChanged_ then onStateChanged_(ok and msg or ("发行失败：" .. (msg or ""))) end
-            end),
-            Btn("节庆展映", C.accent_amber, function()
-                local tgt = state.ai_factions and state.ai_factions[1] and state.ai_factions[1].id or ""
-                local ok, msg = Culture.ReleaseFilm(state, idx, "festival", tgt)
-                if onStateChanged_ then onStateChanged_(ok and msg or ("发行失败：" .. (msg or ""))) end
-            end),
-        },
+        children = children,
     }
 end
 
@@ -742,7 +776,8 @@ local function _BuildCreatePage(state)
     table.insert(rows, ActionCard(
         string.format("歌舞剧团  %d / %d", troupeCount, troupeMax),
         "剧", C.accent_blue,
-        string.format("驻扎地区每季 +5/3/1 CP（叠加递减）  成本 %d 克朗", BC.troupe_cost or 200),
+        string.format("驻扎地区每季 +5/3/1 CP（叠加递减）  成本 %d 克朗 + %d AP",
+            BC.troupe_cost or 200, BC.troupe_create_ap or 1),
         UI.Panel {
             flexDirection="row", flexWrap="wrap", gap=6,
             children = {
@@ -825,6 +860,38 @@ local function _BuildCreatePage(state)
     -- 体育赛事
     local cooldown     = (state.culture or {}).sports_cooldown or 0
     local canSports, sportsReason = Culture.CanHoldSportsEvent(state, "capital_city")
+    local inviteCandidates = Culture.GetSportsInviteCandidates(state)
+    local friendlyInvites = {}
+    for _, cand in ipairs(inviteCandidates) do
+        if (cand.attitude or 0) >= 10 then
+            table.insert(friendlyInvites, cand.id)
+        end
+    end
+    local sportsChildren = {
+        Btn("在首都举办（不邀请）", C.accent_green, function()
+            local ok, msg = Culture.HoldSportsEvent(state, "capital_city", {})
+            if onStateChanged_ then onStateChanged_(ok and msg or "举办失败："..(msg or "")) end
+        end, not canSports or alreadyDone),
+    }
+    if #friendlyInvites > 0 then
+        table.insert(sportsChildren, Btn("邀请所有友好国家", C.accent_green, function()
+            local ok, msg = Culture.HoldSportsEvent(state, "capital_city", friendlyInvites)
+            if onStateChanged_ then onStateChanged_(ok and msg or "举办失败："..(msg or "")) end
+        end, not canSports or alreadyDone))
+    end
+    for i = 1, math.min(6, #inviteCandidates) do
+        local cand = inviteCandidates[i]
+        local cid = cand.id
+        table.insert(sportsChildren, Btn(
+            string.format("邀请%s(%+d)", cand.label, cand.attitude or 0),
+            (cand.attitude or 0) >= 10 and C.accent_green or C.accent_amber,
+            function()
+                local ok, msg = Culture.HoldSportsEvent(state, "capital_city", { cid })
+                if onStateChanged_ then onStateChanged_(ok and msg or "举办失败："..(msg or "")) end
+            end,
+            not canSports or alreadyDone))
+    end
+    if not canSports then table.insert(sportsChildren, ErrHint(sportsReason)) end
     table.insert(rows, ActionCard(
         cooldown > 0 and string.format("体育赛事  冷却 %d 季", cooldown) or "体育赛事",
         "赛", C.accent_green,
@@ -832,14 +899,8 @@ local function _BuildCreatePage(state)
             BC.sports_host_cp or 20, BC.sports_neighbor_cp or 8,
             BC.sports_cooldown or 4, BC.sports_cost or 250),
         UI.Panel {
-            flexDirection="column", gap=3,
-            children = {
-                Btn("在首都举办", C.accent_green, function()
-                    local ok, msg = Culture.HoldSportsEvent(state, "capital_city", {})
-                    if onStateChanged_ then onStateChanged_(ok and msg or "举办失败："..(msg or "")) end
-                end, not canSports or alreadyDone),
-                not canSports and ErrHint(sportsReason) or UI.Panel{},
-            },
+            flexDirection="row", flexWrap="wrap", gap=6,
+            children = sportsChildren,
         }
     ))
 
@@ -995,9 +1056,30 @@ local function _BuildMissionsPage(state)
             }
 
             if mission.pending_event then
-                table.insert(mItems, UI.Label {
-                    text = "! " .. (mission.pending_event.desc or ""),
-                    fontSize = F.label, fontColor = C.accent_amber, marginBottom = 4,
+                local eventRows = {
+                    UI.Label {
+                        text = "! " .. (mission.pending_event.desc or ""),
+                        fontSize = F.label, fontColor = C.accent_amber, marginBottom = 4,
+                    },
+                }
+                for optIdx, opt in ipairs(mission.pending_event.options or {}) do
+                    local idxCapture = optIdx
+                    table.insert(eventRows, Btn(opt.text or ("选项" .. optIdx), C.accent_amber, function()
+                        local ok, msg = Culture.ResolveMissionEvent(state, tid, idxCapture)
+                        if onStateChanged_ then onStateChanged_(ok and msg or "处理失败："..(msg or "")) end
+                    end))
+                end
+                table.insert(mItems, UI.Panel {
+                    width = "100%",
+                    padding = 6,
+                    backgroundColor = C.warning_bg,
+                    borderRadius = S.radius_card,
+                    borderWidth = 1,
+                    borderColor = C.accent_amber,
+                    flexDirection = "row",
+                    flexWrap = "wrap",
+                    gap = 6,
+                    children = eventRows,
                 })
             end
 
@@ -1017,7 +1099,7 @@ local function _BuildMissionsPage(state)
     else
         table.insert(rows, EmptyHint(
             string.format("暂无进行中的使团（需 CI >= %d 且顾问达良好级）",
-                BC.mission_ci_min or 60)))
+                math.max(BC.mission_ci_min or 60, BC.mission_ci_launch or 80))))
     end
 
     return SubPage(string.format("海外文化使团  %d/%d", #missions, maxCount),

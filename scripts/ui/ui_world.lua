@@ -399,6 +399,7 @@ function WorldPage._BuildMapTab(state)
     mapWidget_:UpdateUnlocks(state)
     mapWidget_:SetEuropeState(state.europe)
     mapWidget_:SetForeignOps(state.foreign_ops)
+    mapWidget_:SetCultureState(state.culture)
     WorldPage._UpdateFrontLineData(state)
 
     -- 设置时代
@@ -1849,8 +1850,17 @@ function WorldPage._CreateNodeDrawer(state, region, tile)
         local stabilityVal = cs and cs.stability or 0
         local stabColor = stabilityVal >= 60 and C.accent_green
             or (stabilityVal >= 30 and C.accent_amber or C.accent_red)
+        local cultureCP = Culture.GetRegionCP(state, countryId)
+        local cpLevel = Culture.GetCPLevelName(cultureCP)
+        local cpColor = cultureCP >= (Balance.CULTURE.cp_assimilation or 90) and C.accent_amber
+            or (cultureCP >= (Balance.CULTURE.cp_identity or 70) and C.accent_green
+            or (cultureCP >= (Balance.CULTURE.cp_admire or 50) and C.accent_blue
+            or (cultureCP >= (Balance.CULTURE.cp_curious or 30) and C.accent_gold
+            or C.text_muted)))
         table.insert(foreignAttrChildren, WorldPage._InfoRow("国力", tierText, C.accent_gold))
         table.insert(foreignAttrChildren, WorldPage._InfoRow("稳定度", tostring(stabilityVal), stabColor))
+        table.insert(foreignAttrChildren, WorldPage._InfoRow("文化影响（CP）",
+            string.format("%d  (%s)", cultureCP, cpLevel), cpColor))
 
         -- 贸易路线状态
         if TradeRoutesData and TradeRoutesData.ROUTES then
@@ -1977,6 +1987,89 @@ function WorldPage._CreateNodeDrawer(state, region, tile)
             table.insert(foreignChildren, ventureSection)
         end
 
+        -- 5.6) 文化影响区
+        do
+            local missionActive = false
+            for _, m in ipairs((state.culture and state.culture.missions) or {}) do
+                if m.target == countryId then
+                    missionActive = true
+                    break
+                end
+            end
+            local canMission, missionReason = Culture.CanLaunchMission(state, countryId)
+            local cultureChildren = {
+                UI.Divider { color = C.divider },
+                UI.Panel {
+                    width = "100%",
+                    flexDirection = "row",
+                    justifyContent = "space-between",
+                    alignItems = "center",
+                    children = {
+                        UI.Label {
+                            text = "文化影响",
+                            fontSize = F.body_minor,
+                            fontWeight = "bold",
+                            fontColor = C.accent_gold,
+                        },
+                        UI.Label {
+                            text = missionActive and "使团进行中" or cpLevel,
+                            fontSize = F.label,
+                            fontColor = missionActive and C.accent_blue or cpColor,
+                        },
+                    },
+                },
+                UI.ProgressBar {
+                    value = math.min(1.0, cultureCP / 100),
+                    height = 6,
+                    trackColor = C.bg_surface,
+                    fillColor = cpColor,
+                    borderRadius = 3,
+                },
+            }
+            if missionActive then
+                table.insert(cultureChildren, UI.Label {
+                    text = "海外文化使团正在提升该地区 CP",
+                    fontSize = F.label,
+                    fontColor = C.text_secondary,
+                })
+            else
+                table.insert(cultureChildren, UI.Button {
+                    text = canMission
+                        and string.format("发起文化使团 %dCI+%dAP",
+                            Balance.CULTURE.mission_ci_launch or 80,
+                            Balance.CULTURE.mission_ap or 1)
+                        or ("文化使团不可用 - " .. (missionReason or "条件不足")),
+                    fontSize = F.label,
+                    fontColor = canMission and C.text_primary or C.text_muted,
+                    backgroundColor = canMission and { 243, 156, 18, 45 } or C.bg_surface,
+                    borderRadius = S.radius_btn,
+                    borderWidth = 1,
+                    borderColor = canMission and C.accent_gold or C.border_soft,
+                    paddingVertical = 5,
+                    width = "100%",
+                    disabled = not canMission,
+                    onClick = Config.ClickGuard(function(self)
+                        self.props.disabled = true
+                        local ok, msg = Culture.LaunchMission(state, countryId)
+                        UI.Toast.Show(msg or (ok and "文化使团已出发" or "无法发起文化使团"),
+                            { variant = ok and "success" or "warning", duration = 2.0 })
+                        if callbacksRef_ and callbacksRef_.onStateChanged then
+                            callbacksRef_.onStateChanged()
+                        end
+                        WorldPage._RefreshDrawer(state)
+                    end),
+                })
+            end
+            table.insert(foreignChildren, UI.Panel {
+                width = "100%",
+                paddingHorizontal = S.card_padding,
+                paddingBottom = 4,
+                flexDirection = "column",
+                gap = 5,
+                children = cultureChildren,
+            })
+        end
+
         -- 6) 操作按钮区
         if #actionChildren > 0 then
             table.insert(foreignChildren, UI.Panel {
@@ -2098,7 +2191,7 @@ function WorldPage._CreateNodeDrawer(state, region, tile)
                     (function()
                         -- 显示该地区的文化影响点（CP），始终显示
                         if not (state and state.culture) then return nil end
-                        local rid = tile and tile.id or region.id
+                        local rid = region.id or (tile and tile.region_id) or (tile and tile.id)
                         if not rid then return nil end
                         local cp    = Culture.GetRegionCP(state, rid)
                         local level = Culture.GetCPLevelName(cp)

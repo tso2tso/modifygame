@@ -10,6 +10,7 @@ local EuropeData = require("data.europe_data")
 local Combat = require("systems.combat")
 local TradeRoutesData = require("data.trade_routes_data")
 local EventsData = require("data.events_data")
+local Culture = require("systems.culture")
 
 local BE = Balance.EXPEDITION
 
@@ -696,6 +697,11 @@ function Expedition.LaunchExpedition(state, countryId, squadIds)
         turns_elapsed = 0,
         garrison_init = country.current_hp or country.max_hp,
     }
+
+    -- 文化路线与武力扩张互斥：开战会削弱目标地区已有 CP。
+    if state.culture then
+        Culture.ApplyWarPenalty(state, countryId)
+    end
 
     -- 侵略度
     state.expeditions.aggression_counter = (state.expeditions.aggression_counter or 0)
