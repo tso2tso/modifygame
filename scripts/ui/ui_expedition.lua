@@ -140,7 +140,7 @@ end
 --- 大国博弈操作面板：暗中支援按钮列表 + 煽动战争按钮列表
 function ExpeditionPanel._BuildGrandPowerOpsPanel(state, inciteTargets)
     local BG = Balance.GP or {}
-    local intel = state.intelligence or 0
+    local intel = state.intel or 0
     local ap = (state.ap and state.ap.current or 0) + (state.ap and state.ap.temp or 0)
     local children = {}
 
@@ -220,9 +220,7 @@ function ExpeditionPanel._BuildGrandPowerOpsPanel(state, inciteTargets)
                             local ok, msg = PlayerActionsGP.CovertSupport(state, captureId)
                             if ok then
                                 AudioManager.PlaySFX("click")
-                                if ExpeditionPanel._RefreshCallback then
-                                    ExpeditionPanel._RefreshCallback()
-                                end
+                                if onStateChanged_ then onStateChanged_() end
                             end
                             GameState.AddLog(state, "[C3] " .. (msg or ""))
                         end,
@@ -275,9 +273,7 @@ function ExpeditionPanel._BuildGrandPowerOpsPanel(state, inciteTargets)
                             local ok, msg = PlayerActionsGP.ExecuteInciteWar(state, captureA, captureB)
                             if ok then
                                 AudioManager.PlaySFX("click")
-                                if ExpeditionPanel._RefreshCallback then
-                                    ExpeditionPanel._RefreshCallback()
-                                end
+                                if onStateChanged_ then onStateChanged_() end
                             end
                             GameState.AddLog(state, "[C3] " .. (msg or ""))
                         end,
@@ -1065,6 +1061,9 @@ function ExpeditionPanel._ShowDeployDialog(state, countryId, mode)
         return soldiers, math.floor(soldiers * BE.expedition_cost_per_soldier * inflation)
     end
 
+    -- 前向声明（_BuildDialogScrollView 内部会引用 _RefreshContent）
+    local _RefreshContent
+
     -- 对话框内容构建器 → 返回单个 ScrollView widget
     local function _BuildDialogScrollView()
         -- 计算可用内容高度（屏幕60%，减去 Modal 标题栏约 50px）
@@ -1244,7 +1243,7 @@ function ExpeditionPanel._ShowDeployDialog(state, countryId, mode)
     end
 
     -- 就地刷新弹窗内容（不销毁重建）
-    function _RefreshContent()
+    _RefreshContent = function()
         if not currentModal_ then return end
         currentModal_:ClearContent()
         currentModal_:AddContent(_BuildDialogScrollView())

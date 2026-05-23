@@ -203,6 +203,7 @@ function SaveLoad._SerializeState(state)
     data.victory = {
         economic = state.victory.economic,
         military = state.victory.military,
+        culture  = state.victory.culture,   -- C5: 文化胜利累积分
         claimed = state.victory.claimed,
         claimed_year = state.victory.claimed_year,
         claimed_quarter = state.victory.claimed_quarter,
@@ -487,12 +488,19 @@ function SaveLoad._SerializeState(state)
 
     -- 远征系统（Phase 2+）
     data.expeditions = state.expeditions
+    data.diplomatic_influence = state.diplomatic_influence or 0
 
     -- 商业远征系统（Phase 3+）
     data.ventures = state.ventures
 
     -- 贸易系统（Phase 3+）
     data.trade = state.trade
+
+    -- C5: 文化系统
+    data.culture = state.culture
+
+    -- 情报资源（统一字段 state.intel）
+    data.intel = state.intel
 
     return data
 end
@@ -722,6 +730,39 @@ function SaveLoad._DeserializeState(data)
         end
         data.trade.reputation = nil  -- 清除旧字段
     end
+
+    -- 外交影响力（旧存档迁移）
+    data.diplomatic_influence = data.diplomatic_influence or 30
+
+    -- 情报资源（统一使用 state.intel，旧存档迁移）
+    data.intel = data.intel or 0
+
+    -- C5: 文化系统（旧存档迁移）
+    data.culture = data.culture or {
+        ci = 0,
+        score = 0,
+        region_cp = {},
+        cp_level_seen = {},
+        works = {},
+        sports_cooldown = 0,
+        exhibition_done = false,
+        exhibition_progress = 0,
+        missions = {},
+        mission_paused = {},
+    }
+    data.culture.ci = data.culture.ci or 0
+    data.culture.score = data.culture.score or 0
+    data.culture.region_cp = data.culture.region_cp or {}
+    data.culture.cp_level_seen = data.culture.cp_level_seen or {}
+    data.culture.works = data.culture.works or {}
+    data.culture.sports_cooldown = data.culture.sports_cooldown or 0
+    if data.culture.exhibition_done == nil then data.culture.exhibition_done = false end
+    data.culture.exhibition_progress = data.culture.exhibition_progress or 0
+    data.culture.missions = data.culture.missions or {}
+    data.culture.mission_paused = data.culture.mission_paused or {}
+
+    -- 文化胜利积分迁移
+    data.victory.culture = data.victory.culture or 0
 
     -- 旧存档兼容：根据已解锁称号重建 unlocked_features 和 modifiers
     if next(data.titles_unlocked) and not next(data.unlocked_features) then

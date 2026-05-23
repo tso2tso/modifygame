@@ -627,61 +627,52 @@ function Events.ApplyOption(state, event, optionIndex)
         end
     end
 
-    -- 5. 工资修正（永久）
-    local wageMod = GameState.GetModifierValue(state, "worker_wage")
+    -- 5. 工资修正（永久）—— 仅移除本事件产生的 modifier
+    local wageModId = event.id .. "_worker_wage"
+    local wageMod = 0
+    for _, m in ipairs(state.modifiers) do
+        if m.id == wageModId then wageMod = m.value or 0; break end
+    end
     if wageMod ~= 0 then
         state.workers.wage = state.workers.wage + wageMod
-        -- 立即移除工资修正（已应用到基础值）
-        local kept = {}
-        for _, m in ipairs(state.modifiers) do
-            if m.target ~= "worker_wage" then
-                table.insert(kept, m)
-            end
-        end
-        state.modifiers = kept
+        GameState.RemoveModifier(state, wageModId)
     end
 
-    -- 6. 劳工满意度修正（立即应用）
-    local moraleMod = GameState.GetModifierValue(state, "worker_morale")
+    -- 6. 劳工满意度修正（立即应用）—— 仅移除本事件产生的 modifier
+    local moraleModId = event.id .. "_worker_morale"
+    local moraleMod = 0
+    for _, m in ipairs(state.modifiers) do
+        if m.id == moraleModId then moraleMod = m.value or 0; break end
+    end
     if moraleMod ~= 0 then
         state.workers.morale = math.max(0, math.min(100,
             state.workers.morale + moraleMod))
-        local kept = {}
-        for _, m in ipairs(state.modifiers) do
-            if m.target ~= "worker_morale" then
-                table.insert(kept, m)
-            end
-        end
-        state.modifiers = kept
+        GameState.RemoveModifier(state, moraleModId)
     end
 
-    -- 6.1 战意修正（立即应用）
-    local guardMoraleMod = GameState.GetModifierValue(state, "guard_morale")
+    -- 6.1 战意修正（立即应用）—— 仅移除本事件产生的 modifier
+    local guardMoraleModId = event.id .. "_guard_morale"
+    local guardMoraleMod = 0
+    for _, m in ipairs(state.modifiers) do
+        if m.id == guardMoraleModId then guardMoraleMod = m.value or 0; break end
+    end
     if guardMoraleMod ~= 0 then
         state.military.morale = math.max(0, math.min(100,
             state.military.morale + guardMoraleMod))
-        local kept = {}
-        for _, m in ipairs(state.modifiers) do
-            if m.target ~= "guard_morale" then
-                table.insert(kept, m)
-            end
-        end
-        state.modifiers = kept
+        GameState.RemoveModifier(state, guardMoraleModId)
     end
 
-    -- 6.5 声誉修正（立即应用到 state.reputation）
-    local repMod = GameState.GetModifierValue(state, "reputation_penalty")
+    -- 6.5 声誉修正（立即应用到 state.reputation）—— 仅移除本事件产生的 modifier
+    local repModId = event.id .. "_reputation_penalty"
+    local repMod = 0
+    for _, m in ipairs(state.modifiers) do
+        if m.id == repModId then repMod = m.value or 0; break end
+    end
     if repMod ~= 0 then
         local BRep = Balance.REPUTATION
         state.reputation = math.max(BRep.min,
             math.min(BRep.max, (state.reputation or 0) + repMod))
-        local kept = {}
-        for _, m in ipairs(state.modifiers) do
-            if m.target ~= "reputation_penalty" then
-                table.insert(kept, m)
-            end
-        end
-        state.modifiers = kept
+        GameState.RemoveModifier(state, repModId)
     end
 
     -- 7. 事件专属 ongoing_modifiers（如战争经济）

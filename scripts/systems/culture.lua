@@ -45,6 +45,27 @@ local function EnsureCulture(state)
             missions = {}, mission_paused = {},
         }
     end
+    -- 迁移：给旧存档中缺少 troupe_id 的剧团补 id
+    if state.culture.works then
+        local usedIds = {}
+        for _, w in ipairs(state.culture.works) do
+            if w.type == "theater_troupe" and w.troupe_id then
+                usedIds[w.troupe_id] = true
+            end
+        end
+        for _, w in ipairs(state.culture.works) do
+            if w.type == "theater_troupe" and not w.troupe_id then
+                for i = 1, 8 do
+                    local tid = "t" .. i
+                    if not usedIds[tid] then
+                        w.troupe_id = tid
+                        usedIds[tid] = true
+                        break
+                    end
+                end
+            end
+        end
+    end
 end
 
 --- 获取地区 CP（缺省 0）
@@ -158,18 +179,74 @@ local function GetCountryLabel(state, countryId)
     return countryId
 end
 
+--- 获取电影发行目标列表（带好感分级）
+--- 返回每个目标的 id/label/attitude/tier/cp，按好感降序
+---@param state table
+---@return table[]
 function Culture.GetFilmTargets(state)
+    local tiers = BC.film_tier or {}
     local targets = {}
-    for id, country in pairs(state.europe or {}) do
-        table.insert(targets, {
-            id = id,
-            label = country.label or id,
-            cp = Culture.GetRegionCP(state, id),
-        })
+    local seen = {}
+
+    -- 己方地区（本国，无条件 domestic）
+    for _, r in ipairs(state.regions or {}) do
+        if not seen[r.id] then
+            seen[r.id] = true
+            table.insert(targets, {
+                id       = r.id,
+                label    = r.name or r.id,
+                attitude = 100,
+                tier     = "domestic",
+                cp       = Culture.GetRegionCP(state, r.id),
+                domestic = true,
+            })
+        end
     end
+
+    -- 外国地区（按好感确定 tier）
+    local function getAttitude(id)
+        -- 先查 ai_factions
+        for _, f in ipairs(state.ai_factions or {}) do
+            if f.id == id then return f.attitude or 0 end
+        end
+        -- 再查 powers
+        local p = state.powers and state.powers[id]
+        if p then return p.attitude_to_player or 0 end
+        -- 再查 europe
+        local c = state.europe and state.europe[id]
+        if c then return c.attitude_to_player or 0 end
+        return 0
+    end
+
+    local function classifyTier(att)
+        if (tiers.intl     and att >= (tiers.intl.att_min     or 70)) then return "intl"     end
+        if (tiers.festival and att >= (tiers.festival.att_min or 50)) then return "festival"  end
+        if (tiers.friendly and att >= (tiers.friendly.att_min or 20)) then return "friendly"  end
+        return nil  -- 好感太低，不可发行
+    end
+
+    for id, country in pairs(state.europe or {}) do
+        if not seen[id] then
+            seen[id] = true
+            local att  = getAttitude(id)
+            local tier = classifyTier(att)
+            -- 好感不足则仍加入列表但标记 locked，让 UI 展示门槛提示
+            table.insert(targets, {
+                id       = id,
+                label    = country.label or id,
+                attitude = att,
+                tier     = tier,    -- nil = 好感不足，无法发行
+                cp       = Culture.GetRegionCP(state, id),
+                domestic = false,
+            })
+        end
+    end
+
     table.sort(targets, function(a, b)
-        if a.cp == b.cp then return a.label < b.label end
-        return a.cp < b.cp
+        -- 己方地区优先，其次按好感降序
+        if a.domestic ~= b.domestic then return a.domestic and not b.domestic end
+        if a.attitude == b.attitude  then return a.label < b.label end
+        return a.attitude > b.attitude
     end)
     return targets
 end
@@ -226,6 +303,22 @@ function Culture.CountWorks(state, workType)
     return n
 end
 
+--- 统计电影制作槽占用数（制作中 + 待发行；上映中和归档不占槽）
+---@param state table
+---@return number
+function Culture.CountActiveFilmSlots(state)
+    EnsureCulture(state)
+    local n = 0
+    for _, w in ipairs(state.culture.works) do
+        if w.type == "film" and not w.archived then
+            -- 上映中（screenings 非空）不占槽
+            local isScreening = w.screenings and #w.screenings > 0
+            if not isScreening then n = n + 1 end
+        end
+    end
+    return n
+end
+
 --- 统计某地区剧团数量
 ---@param state table
 ---@param regionId string
@@ -274,7 +367,7 @@ function Culture.CalcCIGain(state)
     local advisorBonus = GetCultureAdvisorBonus(state)
 
     -- 1. D 线科技每项 +1 CI
-    local dTechs = {"d4a_nationalism","d5_radio","d5b_cinema","d6a_university",
+    local dTechs = {"d4a_nationalism","d5_radio","d5b_cinema",
                     "d7_wartime_media","d8_cultural_hegemony","d9_propaganda_art",
                     "d10_cultural_bureau","d11_cultural_renaissance"}
     for _, techId in ipairs(dTechs) do
@@ -350,7 +443,7 @@ function Culture.Tick(state)
     -- 按 location 分组，叠加衰减
     local troupeByRegion = {}
     for _, w in ipairs(cult.works) do
-        if w.type == "theater_troupe" then
+        if w.type == "theater_troupe" and w.location then  -- 未派遣的剧团不产生 CP
             troupeByRegion[w.location] = (troupeByRegion[w.location] or 0) + 1
         end
     end
@@ -463,13 +556,59 @@ function Culture.Tick(state)
         end
     end
 
-    -- ── 8. 电影生产推进 ───────────────────────────────────────────
+    -- ── 8. 电影：生产推进 + 上映结算 ────────────────────────────────
+    local tiers_     = BC_.film_tier or {}
+    local themeBonus_ = BC_.film_theme_bonus or {}
     for _, w in ipairs(cult.works) do
-        if w.type == "film" and not w.ready then
-            w.prod_progress = (w.prod_progress or 0) + 1
-            if w.prod_progress >= (BC_.film_prod_turns or 2) then
-                w.ready = true
-                table.insert(log, string.format("电影【%s】制作完成，可选择发行方式", w.theme or "新作"))
+        if w.type == "film" and not w.archived then
+            -- 8a. 制作推进
+            if not w.ready and (not w.screenings or #w.screenings == 0) then
+                w.prod_progress = (w.prod_progress or 0) + 1
+                local prodTurns = w.prod_turns or 2
+                if w.prod_progress >= prodTurns then
+                    w.ready = true
+                    table.insert(log, string.format("电影【%s题材】制作完成，可选择上映地区", w.theme or "新作"))
+                end
+            end
+
+            -- 8b. 上映结算
+            if w.screenings and #w.screenings > 0 then
+                local bonus = themeBonus_[w.theme or ""] or {}
+                local remainingScreenings = {}
+                for _, sc in ipairs(w.screenings) do
+                    -- CP 增加
+                    if (sc.cp_per_turn or 0) > 0 then
+                        Culture.AddRegionCP(state, sc.region_id, sc.cp_per_turn)
+                    end
+                    -- 票房收入（通胀调整）
+                    local income = sc.income_per_turn or 0
+                    if income > 0 then
+                        local inflFactor = state.inflation_factor or 1.0
+                        local adjustedIncome = math.floor(income * inflFactor)
+                        state.cash = (state.cash or 0) + adjustedIncome
+                        w.total_income = (w.total_income or 0) + adjustedIncome
+                    end
+                    -- 好感加成（节庆/主题）
+                    if (sc.att_per_turn or 0) > 0 then
+                        AddAttitude(state, sc.region_id, sc.att_per_turn)
+                    end
+                    -- 倒计时
+                    sc.turns_remaining = (sc.turns_remaining or 1) - 1
+                    if sc.turns_remaining > 0 then
+                        table.insert(remainingScreenings, sc)
+                    else
+                        local tierLabel = ({domestic="国内",friendly="友好发行",festival="节庆展映",intl="国际市场"})[sc.tier or ""] or ""
+                        table.insert(log, string.format("电影【%s题材】在 %s[%s] 下映，累计票房 %d 克朗",
+                            w.theme or "?", sc.region_id, tierLabel, w.total_income or 0))
+                    end
+                end
+                w.screenings = remainingScreenings
+                -- 所有上映结束 → 归档
+                if #w.screenings == 0 then
+                    w.archived = true
+                    table.insert(log, string.format("电影【%s题材】全部下映，累计票房 %d 克朗",
+                        w.theme or "?", w.total_income or 0))
+                end
             end
         end
     end
@@ -539,8 +678,9 @@ function Culture.CanCreateTroupe(state)
     if state.culture_action_this_turn then
         return false, "本季已执行过文化行动"
     end
-    if (state.cash or 0) < (BC.troupe_cost or 200) then
-        return false, string.format("克朗不足（需要 %d）", BC.troupe_cost or 200)
+    local troupeCost = math.floor((BC.troupe_cost or 200) * GameState.GetInflationFactor(state))
+    if (state.cash or 0) < troupeCost then
+        return false, string.format("克朗不足（需要 %d）", troupeCost)
     end
     if AvailableAP(state) < (BC.troupe_create_ap or 1) then
         return false, string.format("AP 不足（需要 %d）", BC.troupe_create_ap or 1)
@@ -551,22 +691,37 @@ function Culture.CanCreateTroupe(state)
     return true
 end
 
---- 创建歌舞剧团
+--- 创建歌舞剧团（培养，不绑定地点，自动分配 troupe_id）
 ---@param state table
----@param regionId string 驻扎地区
 ---@return boolean ok, string|nil msg
-function Culture.CreateTroupe(state, regionId)
+function Culture.CreateTroupe(state)
     local ok, reason = Culture.CanCreateTroupe(state)
     if not ok then return false, reason end
-    state.cash = state.cash - (BC.troupe_cost or 200)
+    -- 找下一个可用 troupe_id（t1-t8）
+    local usedIds = {}
+    for _, w in ipairs(state.culture.works) do
+        if w.type == "theater_troupe" and w.troupe_id then
+            usedIds[w.troupe_id] = true
+        end
+    end
+    local nextId = "t1"
+    for i = 1, 8 do
+        local tid = "t" .. i
+        if not usedIds[tid] then
+            nextId = tid
+            break
+        end
+    end
+    state.cash = state.cash - math.floor((BC.troupe_cost or 200) * GameState.GetInflationFactor(state))
     SpendAP(state, BC.troupe_create_ap or 1)
     table.insert(state.culture.works, {
-        type = "theater_troupe",
-        location = regionId,
+        type         = "theater_troupe",
+        troupe_id    = nextId,
+        location     = nil,   -- 未驻扎，需后续派遣
         created_turn = state.turn or 0,
     })
     state.culture_action_this_turn = true
-    return true, string.format("歌舞剧团驻扎至 %s", regionId)
+    return true, "歌舞剧团培养完成，可前往作品页派遣至目标地区"
 end
 
 --- 迁移剧团
@@ -604,17 +759,13 @@ function Culture.CanCreateFilm(state, theme)
     if state.culture_action_this_turn then
         return false, "本季已执行过文化行动"
     end
-    if (state.cash or 0) < (BC.film_cost or 400) then
-        return false, string.format("克朗不足（需要 %d）", BC.film_cost or 400)
+    local cost = math.floor((BC.film_cost or 350) * GameState.GetInflationFactor(state))
+    if (state.cash or 0) < cost then
+        return false, string.format("克朗不足（需要 %d）", cost)
     end
-    if Culture.CountWorks(state, "film") >= (BC.film_max or 3) then
-        return false, "电影主题已全部拍摄"
-    end
-    -- 检查主题唯一性
-    for _, w in ipairs(state.culture.works) do
-        if w.type == "film" and w.theme == theme then
-            return false, string.format("主题「%s」已拍摄", theme)
-        end
+    local activeMax = BC.film_active_max or 5
+    if Culture.CountActiveFilmSlots(state) >= activeMax then
+        return false, string.format("制作槽已满（%d/%d），等待现有影片上映后再开新片", activeMax, activeMax)
     end
     return true
 end
@@ -626,67 +777,100 @@ end
 function Culture.CreateFilm(state, theme)
     local ok, reason = Culture.CanCreateFilm(state, theme)
     if not ok then return false, reason end
-    state.cash = state.cash - (BC.film_cost or 400)
+    local cost = math.floor((BC.film_cost or 350) * GameState.GetInflationFactor(state))
+    state.cash = state.cash - cost
+    -- 根据主题确定制作周期
+    local turnsByTheme = (BC.film_prod_turns_by_theme or {})
+    local prodTurns = turnsByTheme[theme] or 2
     table.insert(state.culture.works, {
-        type = "film",
-        theme = theme,
-        ready = false,
+        type         = "film",
+        theme        = theme,
+        ready        = false,
+        archived     = false,
         prod_progress = 0,
+        prod_turns   = prodTurns,
+        screenings   = {},       -- 上映中的各地区计划
+        total_income = 0,        -- 累计票房收益
         created_turn = state.turn or 0,
     })
     state.culture_action_this_turn = true
-    return true, string.format("开始拍摄电影【%s主题】（需 %d 季制作）",
-        theme, BC.film_prod_turns or 2)
+    return true, string.format("开始拍摄【%s题材】影片（需 %d 季制作，花费 %d 克朗）",
+        theme, prodTurns, cost)
 end
 
---- 发行电影
+--- 发行电影（新系统：多地区同步上映）
+--- targets 是一个地区 ID 列表，每个地区按其 tier 产生对应效果
 ---@param state table
----@param workIdx number
----@param mode string "domestic"|"international"|"festival"
----@param targetFactionId string|nil 国际/节庆目标
+---@param workIdx number  works 下标
+---@param targetIds table  string[] 目标地区/国家 ID 列表
 ---@return boolean ok, string|nil msg
-function Culture.ReleaseFilm(state, workIdx, mode, targetFactionId)
+function Culture.ReleaseFilm(state, workIdx, targetIds)
     EnsureCulture(state)
     local work = state.culture.works[workIdx]
     if not work or work.type ~= "film" or not work.ready then
         return false, "电影尚未制作完成"
     end
-    if work.released then
-        return false, "该电影已经发行"
+    if work.screenings and #work.screenings > 0 then
+        return false, "该电影已在上映中"
+    end
+    if not targetIds or #targetIds == 0 then
+        return false, "请至少选择一个发行地区"
     end
 
-    if mode == "domestic" then
-        work.released = true
-        work.release_mode = mode
-        -- 己方控制区每地区 +3 CP
-        for _, r in ipairs(state.regions or {}) do
-            if (r.control or 0) > 50 then
-                Culture.AddRegionCP(state, r.id, BC.film_domestic_cp or 3)
-            end
+    -- 构建目标查找表（id→tier 信息）
+    local allTargets = Culture.GetFilmTargets(state)
+    local targetMap  = {}
+    for _, t in ipairs(allTargets) do targetMap[t.id] = t end
+
+    local screeningTurns = BC.film_screening_turns or 2
+    local tiers          = BC.film_tier or {}
+    local themeBonus     = (BC.film_theme_bonus or {})[work.theme or ""] or {}
+
+    local addedScreenings = {}
+    local msgs = {}
+
+    for _, tid in ipairs(targetIds) do
+        local t = targetMap[tid]
+        if not t then
+            -- 跳过无效 ID
+        elseif not t.tier then
+            -- 好感不足，跳过（UI 已过滤，这里是防御）
+        else
+            local tierCfg = tiers[t.tier] or {}
+            local cpPerTurn     = (tierCfg.cp     or 0) + (themeBonus.cp  or 0)
+            local incomePerTurn = (tierCfg.income or 0) + (themeBonus.income or 0)
+            local attPerTurn    = (tierCfg.att_bonus or 0) + (themeBonus.att or 0)
+            table.insert(addedScreenings, {
+                region_id       = tid,
+                tier            = t.tier,
+                turns_remaining = screeningTurns,
+                cp_per_turn     = cpPerTurn,
+                income_per_turn = incomePerTurn,
+                att_per_turn    = attPerTurn,
+            })
+            local tierLabel = ({ domestic="国内", friendly="友好发行", festival="节庆展映", intl="国际市场" })[t.tier] or t.tier
+            table.insert(msgs, string.format("%s[%s]", t.label, tierLabel))
         end
-        return true, "国内公映：己方地区 CP +" .. (BC.film_domestic_cp or 3)
-    elseif mode == "international" then
-        if not targetFactionId or not (state.europe and state.europe[targetFactionId]) then
-            return false, "请选择有效发行国家"
-        end
-        work.released = true
-        work.release_mode = mode
-        work.release_target = targetFactionId
-        Culture.AddRegionCP(state, targetFactionId, BC.film_intl_cp or 8)
-        return true, string.format("国际发行：%s CP +%d",
-            GetCountryLabel(state, targetFactionId), BC.film_intl_cp or 8)
-    elseif mode == "festival" then
-        if not targetFactionId then
-            return false, "请选择节庆目标"
-        end
-        work.released = true
-        work.release_mode = mode
-        work.release_target = targetFactionId
-        AddAttitude(state, targetFactionId, BC.film_festival_att or 15)
-        return true, string.format("节庆展映：%s 好感 +%d",
-            GetCountryLabel(state, targetFactionId), BC.film_festival_att or 15)
     end
-    return false, "无效发行模式"
+
+    if #addedScreenings == 0 then
+        return false, "所选地区均无法发行（好感不足或无效）"
+    end
+
+    work.screenings   = work.screenings or {}
+    for _, s in ipairs(addedScreenings) do
+        table.insert(work.screenings, s)
+    end
+    work.ready   = false   -- 已发行，不再显示"待发行"状态
+
+    return true, string.format("影片开始上映：%s（共 %d 季）", table.concat(msgs, "、"), screeningTurns)
+end
+
+--- 查询电影是否处于"上映中"状态
+---@param work table
+---@return boolean
+function Culture.IsFilmScreening(work)
+    return work.type == "film" and work.screenings and #work.screenings > 0
 end
 
 -- ============================================================================
@@ -708,8 +892,9 @@ function Culture.CanCreateEpic(state, theme)
     if state.culture_action_this_turn then
         return false, "本季已执行过文化行动"
     end
-    if (state.cash or 0) < (BC.epic_cost or 300) then
-        return false, string.format("克朗不足（需要 %d）", BC.epic_cost or 300)
+    local epicCost = math.floor((BC.epic_cost or 300) * GameState.GetInflationFactor(state))
+    if (state.cash or 0) < epicCost then
+        return false, string.format("克朗不足（需要 %d）", epicCost)
     end
     local rp = state.research_points or state.research or 0
     if rp < (BC.epic_rp_cost or 10) then
@@ -733,7 +918,7 @@ end
 function Culture.CreateEpic(state, theme)
     local ok, reason = Culture.CanCreateEpic(state, theme)
     if not ok then return false, reason end
-    state.cash = state.cash - (BC.epic_cost or 300)
+    state.cash = state.cash - math.floor((BC.epic_cost or 300) * GameState.GetInflationFactor(state))
     -- 消耗研发点
     if state.research_points then
         state.research_points = state.research_points - (BC.epic_rp_cost or 10)
@@ -766,8 +951,9 @@ function Culture.CanHoldSportsEvent(state, hostRegionId)
     if (state.culture.sports_cooldown or 0) > 0 then
         return false, string.format("体育赛事冷却中（剩余 %d 季）", state.culture.sports_cooldown)
     end
-    if (state.cash or 0) < (BC.sports_cost or 250) then
-        return false, string.format("克朗不足（需要 %d）", BC.sports_cost or 250)
+    local sportsCost = math.floor((BC.sports_cost or 250) * GameState.GetInflationFactor(state))
+    if (state.cash or 0) < sportsCost then
+        return false, string.format("克朗不足（需要 %d）", sportsCost)
     end
     return true
 end
@@ -781,7 +967,7 @@ function Culture.HoldSportsEvent(state, hostRegionId, invitedFactionIds)
     local ok, reason = Culture.CanHoldSportsEvent(state, hostRegionId)
     if not ok then return false, reason, {} end
 
-    state.cash = state.cash - (BC.sports_cost or 250)
+    state.cash = state.cash - math.floor((BC.sports_cost or 250) * GameState.GetInflationFactor(state))
     state.culture.sports_cooldown = BC.sports_cooldown or 4
 
     -- 举办地 +20 CP，邻近地区 +8 CP
@@ -848,8 +1034,9 @@ function Culture.CanStartExhibition(state)
     if Culture.CountWorks(state, "national_epic") < (BC.exhibition_min_epics or 2) then
         return false, string.format("需要至少 %d 部民族史诗已出版", BC.exhibition_min_epics or 2)
     end
-    if (state.cash or 0) < (BC.exhibition_cost or 800) then
-        return false, string.format("克朗不足（需要 %d）", BC.exhibition_cost or 800)
+    local exhibitionCost = math.floor((BC.exhibition_cost or 800) * GameState.GetInflationFactor(state))
+    if (state.cash or 0) < exhibitionCost then
+        return false, string.format("克朗不足（需要 %d）", exhibitionCost)
     end
     if AvailableAP(state) < (BC.exhibition_ap or 2) then
         return false, string.format("AP 不足（需要 %d）", BC.exhibition_ap or 2)
@@ -863,7 +1050,7 @@ end
 function Culture.StartExhibition(state)
     local ok, reason = Culture.CanStartExhibition(state)
     if not ok then return false, reason end
-    state.cash = state.cash - (BC.exhibition_cost or 800)
+    state.cash = state.cash - math.floor((BC.exhibition_cost or 800) * GameState.GetInflationFactor(state))
     SpendAP(state, BC.exhibition_ap or 2)
     state.culture.exhibition_progress = 1
     state.culture_action_this_turn = true
@@ -878,10 +1065,10 @@ function Culture.TriggerExhibition(state, log)
     local tech = state.tech and state.tech.researched or {}
     for _, _ in pairs(tech) do techCount = techCount + 1 end
     local rep = (state.reputation or 0) / 100
-    local cpBonus = math.floor((BC.exhibition_base_cp or 15)
-        + techCount * 0.5
-        + rep * (BC.exhibition_max_cp or 40 - (BC.exhibition_base_cp or 15)))
-    cpBonus = clamp(cpBonus, BC.exhibition_base_cp or 15, BC.exhibition_max_cp or 40)
+    local baseCP = BC.exhibition_base_cp or 15
+    local maxCP  = BC.exhibition_max_cp or 40
+    local cpBonus = math.floor(baseCP + techCount * 0.5 + rep * (maxCP - baseCP))
+    cpBonus = clamp(cpBonus, baseCP, maxCP)
 
     -- 所有已追踪地区 +cpBonus CP
     local allRegions = {}
@@ -1131,9 +1318,11 @@ function Culture.GetVictoryProgress(state)
                and (cult.ci or 0) >= (BC_.victory_ci_assimilation or 150),
         year_met  = (state.year or 0) >= (BC_.victory_year or 1938),
         score_met = ((cult.score or 0) - strongestAI) >= (BC_.victory_score_lead or 500),
-        works_troupe = Culture.CountWorks(state, "theater_troupe"),
-        works_film   = Culture.CountWorks(state, "film"),
-        works_epic   = Culture.CountWorks(state, "national_epic"),
+        works_troupe      = Culture.CountWorks(state, "theater_troupe"),
+        works_film_active = Culture.CountActiveFilmSlots(state),
+        works_film_max    = BC_.film_active_max or 5,
+        works_film        = Culture.CountWorks(state, "film"),
+        works_epic        = Culture.CountWorks(state, "national_epic"),
         missions_active = #(cult.missions or {}),
         sports_cooldown = cult.sports_cooldown or 0,
         exhibition_done = cult.exhibition_done or false,

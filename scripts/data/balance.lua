@@ -1400,13 +1400,34 @@ Balance.CULTURE = {
     troupe_move_ap       = 1,       -- 迁移消耗 AP
     troupe_global_max    = 8,       -- 全局总上限
     troupe_cp            = {5, 3, 1},  -- 第 1/2/3 个剧团 CP/季
-    -- 电影
-    film_cost            = 400,     -- 创作成本
-    film_prod_turns      = 2,       -- 生产期（季）
-    film_max             = 3,       -- 最多 3 部（三主题：historical/national/industrial）
-    film_domestic_cp     = 3,       -- 国内公映：己方控制区每地区 +3 CP
-    film_intl_cp         = 8,       -- 国际发行：目标国地区 +8 CP
-    film_festival_att    = 15,      -- 节庆展映：目标 AI 好感 +15
+    -- 电影（新系统：多地区上映 + 持续效果 + 票房收益）
+    film_active_max          = 5,       -- 制作槽上限（制作中+待发行）
+    film_cost                = 350,     -- 基础制作成本（克朗）
+    film_prod_turns_by_theme = {        -- 各主题制作周期（季）
+        historical = 3,
+        national   = 2,
+        industrial = 2,
+        propaganda = 2,
+        comedy     = 2,
+        adventure  = 3,
+    },
+    film_screening_turns     = 2,       -- 上映持续季数
+    -- 各发行等级：每季 CP 增量、票房收入、解锁好感门槛
+    film_tier = {
+        domestic  = { cp = 4, income = 30,  att_min = nil, att_bonus = 0  },  -- 本国地区无条件
+        friendly  = { cp = 5, income = 50,  att_min = 20,  att_bonus = 0  },  -- 好感≥20
+        festival  = { cp = 3, income = 20,  att_min = 50,  att_bonus = 5  },  -- 好感≥50，额外好感+5/季
+        intl      = { cp = 8, income = 80,  att_min = 70,  att_bonus = 0  },  -- 好感≥70，国际市场
+    },
+    -- 主题加成（叠加在基础效果上）
+    film_theme_bonus = {
+        historical = { cp = 1,  income = 0,  att = 0  },
+        national   = { cp = 0,  income = 0,  att = 3  },
+        industrial = { cp = 0,  income = 20, att = 0  },
+        propaganda = { cp = 2,  income = 0,  att = 0  },
+        comedy     = { cp = 0,  income = 30, att = 2  },
+        adventure  = { cp = 0,  income = 10, att = 1  },
+    },
     -- 民族史诗
     epic_cost            = 300,     -- 创作成本（克朗）
     epic_rp_cost         = 10,      -- 研发点消耗

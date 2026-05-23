@@ -1661,12 +1661,12 @@ function TurnEngine.EndTurn(state)
                     local factions = state.ai_factions or {}
                     if #factions > 0 then
                         local f = factions[math.random(#factions)]
-                        f.attitude = math.min(100, (f.attitude or 0) + 3)
+                        f.attitude = math.max(-100, (f.attitude or 0) - 3)
                         table.insert(report.warnings,
                             string.format("⚡ %s 惹是生非，导致与 %s 关系恶化",
                                 member.name, f.name))
                         GameState.AddLog(state,
-                            string.format("[家族] %s 引发外交事件，%s 态度 +3",
+                            string.format("[家族] %s 引发外交事件，%s 态度 -3",
                                 member.name, f.name))
                     end
                 end

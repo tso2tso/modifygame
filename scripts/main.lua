@@ -304,6 +304,11 @@ function HandleNewGameRequested(skipTutorial)
         end
         newState.ap.max = GameState.CalcMaxAP(newState)
         newState.ap.current = newState.ap.max
+        -- 继承免广告卡状态（账号级永久解锁，不随存档重置）
+        if state_ then
+            newState.ad_free_card_active = state_.ad_free_card_active or false
+            newState.ad_free_card_charges = state_.ad_free_card_charges or 0
+        end
         GameState.AddLog(newState, "科瓦奇家族在巴科维奇矿区开始了创业之路。")
         UI.Toast.Show("新的百年传奇开始了！", { variant = "info", duration = 2 })
         return newState

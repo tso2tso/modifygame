@@ -1268,22 +1268,22 @@ end
 ---@param positionId string|nil nil 表示解除岗位
 ---@return boolean
 function GameState.AssignPosition(state, memberId, positionId)
-    -- 如果目标岗位已有人，先清除（即时下岗，进入冷却）
+    -- 先检查成员是否满足分配条件（避免驱逐后发现新成员不合格）
+    if positionId and state.family.university then
+        for _, u in ipairs(state.family.university) do
+            if u.member_id == memberId then
+                return false, "该成员正在进修中，无法分配岗位"
+            end
+        end
+    end
+
+    -- 验证通过后，再驱逐目标岗位上的现任成员
     if positionId then
         for _, m in ipairs(state.family.members) do
             if m.position == positionId then
                 m.position = nil
                 m.onboarding_remaining = 0
                 m.cooldown_turns = Balance.FAMILY.unassign_cooldown or 2
-            end
-        end
-    end
-
-    -- 检查成员是否正在进修（进修中不可分配岗位）
-    if positionId and state.family.university then
-        for _, u in ipairs(state.family.university) do
-            if u.member_id == memberId then
-                return false, "该成员正在进修中，无法分配岗位"
             end
         end
     end

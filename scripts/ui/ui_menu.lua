@@ -635,11 +635,12 @@ function MenuPage._ApplyCheat(state)
     state.battle_wins_total = 50
     state.battle_wins_unclaimed = 3
 
-    -- 13. 弱化 AI
+    -- 13. 弱化 AI + 改善对玩家态度
     if state.ai_factions then
         for _, ai in ipairs(state.ai_factions) do
             ai.cash = 100
             ai.power = 10
+            ai.attitude = 70  -- 改善为友好态度（避免敌意行动）
             if ai.victory then
                 ai.victory.economic = 0
                 ai.victory.military = 0
@@ -806,17 +807,46 @@ function MenuPage._ApplyCheat(state)
     state.culture.score = 800
     state.victory = state.victory or {}
     state.victory.culture = 800
-    -- 创建三类作品（剧团×3、电影×3、史诗×3）
+    -- 创建三类作品（剧团×3、电影×5、史诗×3）
+    -- 电影使用新系统格式：screenings[], archived, prod_turns, total_income
+    local BC = Balance.CULTURE
     state.culture.works = {
-        { type = "theater_troupe", location = "sarajevo", created_turn = 1 },
-        { type = "theater_troupe", location = "mostar",   created_turn = 1 },
+        { type = "theater_troupe", location = "sarajevo",   created_turn = 1 },
+        { type = "theater_troupe", location = "mostar",     created_turn = 1 },
         { type = "theater_troupe", location = "banja_luka", created_turn = 1 },
-        { type = "film", theme = "historical", ready = true, released = false,
-          prod_progress = 2, created_turn = 1 },
-        { type = "film", theme = "national",   ready = true, released = false,
-          prod_progress = 2, created_turn = 1 },
-        { type = "film", theme = "industrial", ready = true, released = false,
-          prod_progress = 2, created_turn = 1 },
+        -- 3部待发行（ready=true，占据制作槽，可多地区选择上映）
+        {
+            type = "film", theme = "historical",
+            ready = true, archived = false,
+            prod_progress = 3, prod_turns = BC and BC.film_prod_turns_by_theme and BC.film_prod_turns_by_theme.historical or 3,
+            screenings = {}, total_income = 0, created_turn = 1,
+        },
+        {
+            type = "film", theme = "national",
+            ready = true, archived = false,
+            prod_progress = 2, prod_turns = BC and BC.film_prod_turns_by_theme and BC.film_prod_turns_by_theme.national or 2,
+            screenings = {}, total_income = 0, created_turn = 1,
+        },
+        {
+            type = "film", theme = "propaganda",
+            ready = true, archived = false,
+            prod_progress = 2, prod_turns = BC and BC.film_prod_turns_by_theme and BC.film_prod_turns_by_theme.propaganda or 2,
+            screenings = {}, total_income = 0, created_turn = 1,
+        },
+        -- 1部制作中（展示制作进度 UI）
+        {
+            type = "film", theme = "comedy",
+            ready = false, archived = false,
+            prod_progress = 1, prod_turns = BC and BC.film_prod_turns_by_theme and BC.film_prod_turns_by_theme.comedy or 2,
+            screenings = {}, total_income = 0, created_turn = 1,
+        },
+        -- 1部已归档（展示归档 UI 和累计票房）
+        {
+            type = "film", theme = "adventure",
+            ready = false, archived = true,
+            prod_progress = 3, prod_turns = 3,
+            screenings = {}, total_income = 480, created_turn = 1,
+        },
         { type = "national_epic", theme = "national",   created_turn = 1 },
         { type = "national_epic", theme = "religious",  created_turn = 1 },
         { type = "national_epic", theme = "historical", created_turn = 1 },
@@ -844,11 +874,12 @@ function MenuPage._ApplyCheat(state)
     -- 26. C3 大国博弈初始化（确保 state.powers 存在并设置有利参数）
     local GrandPowers = require("systems.grand_powers")
     GrandPowers.Init(state)  -- 幂等：已初始化则直接返回
-    -- 降低所有大国军事/经济威胁，提升合作分
+    -- 降低所有大国军事/经济威胁，提升合作分，改善对玩家态度
     for _, power in pairs(state.powers or {}) do
         power.war_fatigue = math.max(power.war_fatigue or 0, 60)  -- 高疲惫 → 扩张意愿低
         power.military    = math.min(power.military or 0, 40)
         power.economy     = math.min(power.economy  or 0, 50)
+        power.attitude_to_player = 70  -- 友好态度（允许条约、避免制裁）
     end
     state.collaboration_score = math.max(state.collaboration_score or 0, 60)
     -- 清除待处理的战争事件
@@ -870,10 +901,39 @@ function MenuPage._ApplyCheat(state)
         end
     end
 
+    -- 28. 股票市场：提升价格 + 赠送各股持仓 + 清空空头亏损
+    for _, stock in ipairs(state.stocks or {}) do
+        -- 价格提升 50%（模拟牛市）
+        stock.prev_price = stock.price
+        stock.price      = math.floor(stock.price * 1.5)
+        stock.fair_value = stock.price
+        stock.change_pct = 50
+        -- 更新历史记录（避免 K 线图报错）
+        if type(stock.history) == "table" then
+            table.insert(stock.history, stock.price)
+        end
+    end
+    -- 赠送持仓（每只股票 200 股，成本价设为当前价的 60%，保证浮盈）
+    state.portfolio = state.portfolio or { holdings = {}, short_positions = {} }
+    state.portfolio.short_positions = {}  -- 清除空头（避免保证金追缴）
+    for _, stock in ipairs(state.stocks or {}) do
+        local existing = state.portfolio.holdings[stock.id]
+        if not existing then
+            state.portfolio.holdings[stock.id] = {
+                shares   = 200,
+                avg_cost = math.floor(stock.price * 0.6),
+            }
+        else
+            -- 已有持仓：追加到 200 股并拉低成本
+            existing.shares   = math.max(existing.shares, 200)
+            existing.avg_cost = math.min(existing.avg_cost, math.floor(stock.price * 0.6))
+        end
+    end
+
     -- 24. 存档
     SaveLoad.Save(state, SaveLoad.SLOT_AUTO)
 
-    print("[CHEAT] 所有属性已拉满！（含称号+功能解锁+远征HP+贸易订单+装备库存+文化系统+大国博弈+占领政策）")
+    print("[CHEAT] 所有属性已拉满！（含称号+功能解锁+远征HP+贸易订单+装备库存+文化系统+大国博弈+占领政策+股票持仓+AI/大国好感）")
 end
 
 --- 处理统计标题点击（连续 6 次触发作弊）
@@ -1051,6 +1111,11 @@ function MenuPage._OnNewGame()
         newState.tutorial_done = true
         newState.ap.max = GameState.CalcMaxAP(newState)
         newState.ap.current = newState.ap.max
+        -- 继承免广告卡状态（账号级永久解锁，不随存档重置）
+        if stateRef_ then
+            newState.ad_free_card_active = stateRef_.ad_free_card_active or false
+            newState.ad_free_card_charges = stateRef_.ad_free_card_charges or 0
+        end
         GameState.AddLog(newState, "科瓦奇家族在巴科维奇矿区开始了创业之路。")
         UI.Toast.Show("新的百年传奇开始了！", { variant = "info", duration = 2 })
         onNewGame_(newState)

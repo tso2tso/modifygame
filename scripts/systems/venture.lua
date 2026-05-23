@@ -410,7 +410,8 @@ function Venture.LaunchVenture(state, powerId, strategyId, investmentLevel)
 
     -- AP检查
     local apCost = BV.venture_ap_cost
-    if state.ap.current < apCost then
+    local totalAP = (state.ap.current or 0) + (state.ap.temp or 0)
+    if totalAP < apCost then
         return false, string.format("行动点不足（需要 %d AP）", apCost)
     end
 
@@ -430,7 +431,7 @@ function Venture.LaunchVenture(state, powerId, strategyId, investmentLevel)
     EnsureBarrierInit(state)
 
     -- 消耗资源
-    state.ap.current = state.ap.current - apCost
+    GameState.SpendAP(state, apCost)
     state.cash = state.cash - cashCost
 
     -- 声誉代价
@@ -493,11 +494,11 @@ function Venture.ChangeStrategy(state, powerId, newStrategyId)
     end
 
     local apCost = BV.reinforce_ap_cost
-    if state.ap.current < apCost then
+    if (state.ap.current or 0) + (state.ap.temp or 0) < apCost then
         return false, string.format("行动点不足（需要 %d AP）", apCost)
     end
 
-    state.ap.current = state.ap.current - apCost
+    GameState.SpendAP(state, apCost)
 
     local oldStrat = BV.strategies[record.strategy_id] or {}
     local newStrat = BV.strategies[newStrategyId] or {}
@@ -542,11 +543,11 @@ function Venture.ChangeInvestment(state, powerId, newLevel)
     end
 
     local apCost = BV.reinforce_ap_cost
-    if state.ap.current < apCost then
+    if (state.ap.current or 0) + (state.ap.temp or 0) < apCost then
         return false, string.format("行动点不足（需要 %d AP）", apCost)
     end
 
-    state.ap.current = state.ap.current - apCost
+    GameState.SpendAP(state, apCost)
     record.investment_level = newLevel
 
     local levelDef = BV.investment_levels[newLevel]
@@ -568,11 +569,11 @@ function Venture.WithdrawVenture(state, powerId)
     if not record then return false, "没有对该国的活跃渗透" end
 
     local apCost = BV.withdraw_ap_cost
-    if state.ap.current < apCost then
+    if (state.ap.current or 0) + (state.ap.temp or 0) < apCost then
         return false, string.format("行动点不足（需要 %d AP）", apCost)
     end
 
-    state.ap.current = state.ap.current - apCost
+    GameState.SpendAP(state, apCost)
 
     -- 移除活跃渗透
     state.ventures.active[powerId] = nil
@@ -911,11 +912,7 @@ function Venture.EstablishPost(state, powerId, establishmentType)
         maintenance = math.floor(maintenance * (1 - usedStrat.maintenance_discount))
     end
 
-    -- 称号modifier：商业据点维护费折扣（叠加）
-    local maintDiscount = GameState.GetModifierValue(state, "venture_maintenance_discount")
-    if maintDiscount > 0 then
-        maintenance = math.floor(maintenance * (1 - maintDiscount))
-    end
+    -- 注意：venture_maintenance_discount 由 SettleTurn 每季动态计算，不在此处烘焙，避免双重折扣
 
     -- 添加到已建据点（记录策略ID用于SettleTurn的独特效果）
     state.ventures.commercial_posts = state.ventures.commercial_posts or {}

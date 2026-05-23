@@ -284,7 +284,8 @@ ACTIONS.shelter_refugees = {
             r.control = math.min(100, (r.control or 0) + 3)
         end
         -- S2: 人口 50→20，加4季冷却
-        state.workers.hired = state.workers.hired + 20
+        state.workers = state.workers or {}
+        state.workers.hired = (state.workers.hired or 0) + 20
         state._shelter_cooldown = 4
         power.attitude_to_player = math.max(-100, power.attitude_to_player - 5)
         state.collaboration_score = (state.collaboration_score or 0) - 5
@@ -350,20 +351,20 @@ function PlayerActionsGP.CovertSupport(state, powerId)
     if totalAP < apCost then return false, string.format("行动点不足（需 %d AP）", apCost) end
 
     -- 情报检查
-    local intelCost = math.floor((power.stability or 5) * BG.covert_support_intel_ratio)
+    local strengthBase = ((power.military or 0) + (power.economy or 0)) / 2
+    local intelCost = math.floor(strengthBase * BG.covert_support_intel_ratio)
     intelCost = math.max(1, intelCost)
-    if (state.intelligence or 0) < intelCost then
-        return false, string.format("情报不足（需 %d，当前 %d）", intelCost, state.intelligence or 0)
+    if (state.intel or 0) < intelCost then
+        return false, string.format("情报不足（需 %d，当前 %d）", intelCost, state.intel or 0)
     end
 
     -- 扣除资源
     GameState.SpendAP(state, apCost)
-    state.intelligence = (state.intelligence or 0) - intelCost
+    state.intel = (state.intel or 0) - intelCost
 
-    -- 写入修正器：本季战力 +15%
-    local modKey = "covert_military_bonus_" .. powerId
-    state.modifiers = state.modifiers or {}
-    state.modifiers[modKey] = BG.covert_military_bonus
+    -- 写入修正器：本季战力 +15%（使用正确的数组格式，ipairs 可遍历）
+    GameState.AddModifier(state, "covert_military_bonus_" .. powerId,
+        "military_strength", BG.covert_military_bonus, 1)
 
     -- 记录暗中支援状态（结算时用）
     state._covert_supports = state._covert_supports or {}
@@ -422,9 +423,13 @@ function PlayerActionsGP.SettleCovertSupport(state, powerId, won)
             power.label, BG.covert_detected_att_loss, BG.covert_detected_aggress))
     end
 
-    -- 清除修正器和记录
-    if state.modifiers then
-        state.modifiers["covert_military_bonus_" .. powerId] = nil
+    -- 清除修正器和记录（按 id 移除数组条目）
+    local modId = "covert_military_bonus_" .. powerId
+    for i = #(state.modifiers or {}), 1, -1 do
+        if state.modifiers[i].id == modId then
+            table.remove(state.modifiers, i)
+            break
+        end
     end
     state._covert_supports[powerId] = nil
 end
@@ -484,14 +489,14 @@ function PlayerActionsGP.ExecuteInciteWar(state, powA, powB)
 
     -- 情报检查
     local intelCost = BG.incite_war_intel_cost
-    if (state.intelligence or 0) < intelCost then
-        return false, string.format("情报不足（需 %d，当前 %d）", intelCost, state.intelligence or 0)
+    if (state.intel or 0) < intelCost then
+        return false, string.format("情报不足（需 %d，当前 %d）", intelCost, state.intel or 0)
     end
 
     -- 成功率检测
     if math.random() >= BG.incite_success_rate then
         -- 失败：扣除情报
-        state.intelligence = (state.intelligence or 0) - math.floor(intelCost * 0.5)
+        state.intel = (state.intel or 0) - math.floor(intelCost * 0.5)
         GameState.AddLog(state, string.format("煽动 %s 攻打 %s 失败，情报浪费",
             state.powers[powA].label, state.powers[powB].label))
         return false, "煽动失败（情报消耗减半）"
@@ -499,7 +504,7 @@ function PlayerActionsGP.ExecuteInciteWar(state, powA, powB)
 
     -- 扣除资源
     GameState.SpendAP(state, apCost)
-    state.intelligence = (state.intelligence or 0) - intelCost
+    state.intel = (state.intel or 0) - intelCost
 
     -- 找 A 方战争目标中属于 B 主权的地区
     local targetCountryId = nil

@@ -387,20 +387,21 @@ function Trade.AllocateEquipment(state, orderId, allocations)
     m.inventory = m.inventory or {}
 
     -- 验证并分配
+    -- thisCallAllocated 只跟踪本次调用成功分配的物品，用于失败时精确回滚
+    -- （避免把跨调用的历史分配记录也错误地还回库存，造成幽灵库存）
+    local thisCallAllocated = {}
     for _, alloc in ipairs(allocations) do
         -- 从库存中查找足够数量的指定装备
         local needed = alloc.qty
         local taken = 0
         local keptInventory = {}
+        local iterAllocated = {}  -- 本次迭代取出的物品
 
         for _, inv in ipairs(m.inventory) do
             if inv.equip_id == alloc.equip_id and not inv.repairing and needed > 0 then
-                -- 取出
                 needed = needed - 1
                 taken = taken + 1
-                -- 记录已分配
-                order.items_allocated = order.items_allocated or {}
-                table.insert(order.items_allocated, {
+                table.insert(iterAllocated, {
                     equip_id = inv.equip_id,
                     condition = inv.condition,
                     uid = inv.uid,
@@ -412,15 +413,24 @@ function Trade.AllocateEquipment(state, orderId, allocations)
         m.inventory = keptInventory
 
         if taken < alloc.qty then
-            -- 回滚：将已取出的还回去
-            for _, item in ipairs(order.items_allocated or {}) do
+            -- 回滚：仅归还本次调用已取出的物品，保留历史调用的分配记录
+            for _, item in ipairs(thisCallAllocated) do
                 table.insert(m.inventory, item)
             end
-            order.items_allocated = {}
+            for _, item in ipairs(iterAllocated) do
+                table.insert(m.inventory, item)
+            end
             return false, string.format(
                 "%s 库存不足（需 %d，可用 %d）",
                 (CATALOG[alloc.equip_id] and CATALOG[alloc.equip_id].name) or alloc.equip_id,
                 alloc.qty, taken)
+        end
+
+        -- 当前迭代成功，追加到本次调用已分配列表及订单总分配列表
+        order.items_allocated = order.items_allocated or {}
+        for _, item in ipairs(iterAllocated) do
+            table.insert(thisCallAllocated, item)
+            table.insert(order.items_allocated, item)
         end
     end
 

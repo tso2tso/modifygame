@@ -564,6 +564,12 @@ function BranchEvents.ApplyBranchOption(state, event, optionIndex)
     local option = event.options[optionIndex]
     if not option then return false end
 
+    -- 若选项条件不满足，直接返回反馈，不应用任何效果
+    if not option._available then
+        GameState.AddLog(state, "[分支] 条件不满足，无法执行该行动")
+        return true
+    end
+
     -- 应用 collaboration_score 效果
     if option.effects and option.effects.collaboration_score then
         state.collaboration_score = (state.collaboration_score or 0) + option.effects.collaboration_score
@@ -572,9 +578,6 @@ function BranchEvents.ApplyBranchOption(state, event, optionIndex)
     -- 执行自定义 apply 函数
     if option.apply then
         option.apply(state)
-    elseif not option._available then
-        -- 选项条件不满足，给出反馈
-        GameState.AddLog(state, "[分支] 条件不满足，无法执行该行动")
     end
 
     return true

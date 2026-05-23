@@ -93,7 +93,7 @@ function Economy.Settle(state)
                 local region = GameState.GetRegion(state, mine.region_id)
                 local copperOut = math.floor(BM.base_copper_output
                     * (1 + (mine.level - 1) * BM.level_output_bonus))
-                if copperOut > 0 and region and (region.resources.copper_reserve or 0) > 0 then
+                if copperOut > 0 and region and region.resources and (region.resources.copper_reserve or 0) > 0 then
                     copperOut = math.min(copperOut, region.resources.copper_reserve)
                     region.resources.copper_reserve = region.resources.copper_reserve - copperOut
                     state.copper = (state.copper or 0) + copperOut
@@ -548,7 +548,7 @@ function Economy._CalcMineOutput(state, mine)
     -- 等级加成
     local levelMul = 1.0 + (mine.level - 1) * BM.level_output_bonus
     -- 矿业总监岗位加成
-    local posBonus = GameState.GetPositionBonus(state, "mine_director")
+    local posBonus = GameState.GetPositionBonus(state, "mine_director") or 0
     -- 工人加成（含工人效率科技加成）
     local efficiencyMul = 1.0 + (state.worker_efficiency_bonus or 0)
     local activeMineCount = 0
@@ -611,7 +611,7 @@ function Economy.GetEstimate(state)
     local ok, r1, r2, r3 = pcall(Economy._GetEstimateImpl, state)
     state._estimate_mode = nil   -- 确保无论成功/失败都清除标记
     if not ok then
-        log:Write(LOG_WARNING, "[Economy] GetEstimate error: " .. tostring(r1))
+        print("[Economy] GetEstimate error: " .. tostring(r1))
         return 0, 0, {}
     end
     return r1, r2, r3

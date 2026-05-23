@@ -79,9 +79,10 @@ local activeSubTab_ = "map"
 ---@type string|nil
 local selectedNodeId_ = nil
 
---- 设置 UI 根节点（报告页 Modal 需要挂载到 UI 树）
+--- 设置 UI 根节点（报告页 + 文化面板 Modal 需要挂载到 UI 树）
 function WorldPage.SetRoot(root)
     ReportPanel.SetRoot(root)
+    CulturePanel.SetRoot(root)
 end
 
 --- 标记势力预计算数据为脏（在 onStateChanged / 页面重建时调用）
@@ -155,8 +156,6 @@ function WorldPage._BuildContent(state)
         width = "100%",
         flexDirection = "column",
         gap = 0,
-        flexGrow = 1,
-        flexShrink = 1,
         overflow = "hidden",
     }
 
@@ -2306,9 +2305,6 @@ function WorldPage._DoPoliticalInfiltration(state, region)
             end
         end
     end
-
-    -- 渗透同时标记本季有文化行动
-    state.culture_action_this_turn = true
 
     -- 日志
     GameState.AddLog(state, string.format(
